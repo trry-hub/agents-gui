@@ -27,6 +27,11 @@ export interface OpenCodeAgentDiscovery {
   defaultModelId?: string;
 }
 
+export interface OpenCodeModelSelection {
+  providerID: string;
+  modelID: string;
+}
+
 export function parseOpenCodeConfigAgents(config: unknown): OpenCodeAgentDiscovery {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     return { modes: [] };
@@ -169,6 +174,63 @@ export function parseOpenCodeModelsOutput(output: string): CliModelOption[] {
   return options;
 }
 
+export function parseOpenCodeProviderModels(payload: unknown): CliModelOption[] {
+  if (Array.isArray(payload)) {
+    return parseOpenCodeModelArray(payload);
+  }
+
+  const record = objectRecord(payload);
+  const providers = Array.isArray(record.providers)
+    ? record.providers
+    : Array.isArray(record.all)
+      ? record.all
+      : [];
+  const options: CliModelOption[] = [];
+  const seen = new Set<string>();
+
+  for (const providerValue of providers) {
+    const provider = objectRecord(providerValue);
+    const providerId = pickString(provider.id);
+    if (!providerId) {
+      continue;
+    }
+
+    const providerName = pickString(provider.name);
+    const models = objectRecord(provider.models);
+    for (const [modelKey, modelValue] of Object.entries(models)) {
+      const model = objectRecord(modelValue);
+      const modelId = pickString(model.id) ?? modelKey;
+      const fullId = `${providerId}/${modelId}`;
+      if (seen.has(fullId)) {
+        continue;
+      }
+
+      seen.add(fullId);
+      options.push(createOpenCodeModelOption(
+        fullId,
+        pickString(model.name) ?? undefined,
+        providerName
+      ));
+    }
+  }
+
+  return options;
+}
+
+export function parseOpenCodeModelId(modelId: string | undefined): OpenCodeModelSelection | undefined {
+  if (!modelId || modelId === 'default' || modelId === 'custom') {
+    return undefined;
+  }
+
+  const [providerID, ...modelParts] = modelId.split('/');
+  const modelName = modelParts.join('/');
+  if (!providerID || !modelName) {
+    return undefined;
+  }
+
+  return { providerID, modelID: modelName };
+}
+
 export function parseOpenCodeAgentListLine(line: string): CliAgentMode | undefined {
   const cleaned = line.replace(ANSI_PATTERN, '').trim();
   const match = /^(.+?)\s+\((primary|subagent)\)$/.exec(cleaned);
@@ -208,16 +270,48 @@ function isInternalOpenCodeAgent(id: string): boolean {
   return normalized === 'title' || normalized === 'summary' || normalized === 'compaction';
 }
 
-function createOpenCodeModelOption(id: string): CliModelOption {
+function parseOpenCodeModelArray(models: unknown[]): CliModelOption[] {
+  const options: CliModelOption[] = [];
+  const seen = new Set<string>();
+  for (const value of models) {
+    const model = objectRecord(value);
+    const providerId = pickString(model.providerID);
+    const modelId = pickString(model.id);
+    if (!providerId || !modelId) {
+      continue;
+    }
+
+    const fullId = `${providerId}/${modelId}`;
+    if (seen.has(fullId)) {
+      continue;
+    }
+
+    seen.add(fullId);
+    options.push(createOpenCodeModelOption(fullId, pickString(model.name) ?? undefined));
+  }
+  return options;
+}
+
+function createOpenCodeModelOption(
+  id: string,
+  label?: string,
+  providerName?: string
+): CliModelOption {
   const [provider, ...modelParts] = id.split('/');
   const modelName = modelParts.join('/') || id;
   return {
     id,
-    label: id,
+    label: label ?? id,
     summaryLabel: modelName,
-    description: `OpenCode model from ${provider || 'configured provider'}; passed as --model ${id}.`,
+    description: `OpenCode model from ${providerName || provider || 'configured provider'}; passed as --model ${id}.`,
     args: ['--model', id],
   };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function pickString(value: unknown): string | undefined {

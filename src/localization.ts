@@ -21,8 +21,8 @@ type RuntimeMessageKey =
 
 const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>> = {
   en: {
-    'statusBar.text': '$(sparkle) AI Assistant',
-    'statusBar.tooltip': 'Open AI Assistant',
+    'statusBar.text': '$(sparkle) Agents Hub',
+    'statusBar.tooltip': 'Open Agents Hub',
     'notification.stoppedAll': 'All AI CLI processes stopped.',
     'notification.installCommandCopied': 'Installation command copied to clipboard.',
     'notification.messageCopied': 'Message copied to clipboard.',
@@ -40,8 +40,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'providerExtension.openFailed': 'Failed to open {extension}.',
   },
   'zh-CN': {
-    'statusBar.text': '$(sparkle) AI 助手',
-    'statusBar.tooltip': '打开 AI 助手',
+    'statusBar.text': '$(sparkle) Agents Hub',
+    'statusBar.tooltip': '打开 Agents Hub',
     'notification.stoppedAll': '已停止所有 AI CLI 进程。',
     'notification.installCommandCopied': '安装命令已复制到剪贴板。',
     'notification.messageCopied': '消息已复制到剪贴板。',

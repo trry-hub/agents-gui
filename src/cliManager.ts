@@ -6,6 +6,14 @@ import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type {
+  AssistantLspServerStatus,
+  AssistantMcpServerStatus,
+  AssistantOpenCodeNativeCommand,
+  AssistantOpenCodeNativeCommandResult,
+  AssistantOpenCodeProject,
+  AssistantOpenCodeStatus,
+} from './assistantTypes';
 import { CliAgentMode, CliModelOption, CliProfile, getCliProfile } from './cliProfiles';
 import {
   buildCliLookupPath,
@@ -17,7 +25,9 @@ import {
   OpenCodeAgentDiscovery,
   parseOpenCodeDebugConfigOutput,
   parseOpenCodeAgentListLine,
+  parseOpenCodeModelId,
   parseOpenCodeModelsOutput,
+  parseOpenCodeProviderModels,
 } from './opencodeAgents';
 
 export interface Session {
@@ -27,6 +37,7 @@ export interface Session {
   optionKey?: string;
   profile: CliProfile;
   process: ChildProcess;
+  openCodeSessionId?: string;
   onOutput: vscode.EventEmitter<string>;
   onStderr: vscode.EventEmitter<string>;
   onError: vscode.EventEmitter<string>;
@@ -47,9 +58,19 @@ interface ResolvedBackgroundServer {
   port: number;
 }
 
+interface StartPromptOptions {
+  attachBackgroundServer?: boolean;
+}
+
+const OPEN_CODE_PROMPT_POLL_INTERVAL_MS = 800;
+const OPEN_CODE_PROMPT_TIMEOUT_MS = 120_000;
+const OPEN_CODE_REQUEST_TIMEOUT_MS = 30_000;
+const OPEN_CODE_SERVER_READY_TIMEOUT_MS = 20_000;
+
 interface OpenCodeEventStream {
   close(): void;
   hasOutput(): boolean;
+  sessionId(): string | undefined;
 }
 
 export class CliManager {
@@ -369,61 +390,87 @@ export class CliManager {
   private getOpenCodeModelOptions(command: string): Promise<CliModelOption[]> {
     const cwd = this.getWorkspaceRoot();
     return new Promise<CliModelOption[]>((resolve) => {
-      const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-      const env = {
-        ...process.env,
-        PATH: mergePathEntries([
-          commandDir,
-          buildCliLookupPath(process.env.PATH, process.env.HOME),
-        ]),
-        OPENCODE_DB: path.join(
-          os.tmpdir(),
-          `agents-hub-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
-        ),
-        OMO_DISABLE_POSTHOG: '1',
-        OMO_SEND_ANONYMOUS_TELEMETRY: '0',
-      };
-      const proc = spawn(command, ['models'], {
-        cwd,
-        env,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      let output = '';
-      let settled = false;
+      const runCliFallback = () => {
+        const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
+        const env = {
+          ...process.env,
+          PATH: mergePathEntries([
+            commandDir,
+            buildCliLookupPath(process.env.PATH, process.env.HOME),
+          ]),
+          OPENCODE_DB: path.join(
+            os.tmpdir(),
+            `agents-hub-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
+          ),
+          OMO_DISABLE_POSTHOG: '1',
+          OMO_SEND_ANONYMOUS_TELEMETRY: '0',
+        };
+        const proc = spawn(command, ['models'], {
+          cwd,
+          env,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        let output = '';
+        let settled = false;
 
-      const finish = () => {
-        if (settled) {
-          return;
-        }
+        const finish = () => {
+          if (settled) {
+            return;
+          }
 
-        settled = true;
-        clearTimeout(timeout);
-        resolve(parseOpenCodeModelsOutput(output));
-      };
+          settled = true;
+          clearTimeout(timeout);
+          resolve(parseOpenCodeModelsOutput(output));
+        };
 
-      const timeout = setTimeout(() => {
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // Process may already be gone.
-        }
-        finish();
-      }, 5000);
-
-      proc.stdout?.on('data', (data: Buffer) => {
-        output += data.toString();
-        if (output.length > 1_000_000) {
+        const timeout = setTimeout(() => {
           try {
             proc.kill('SIGTERM');
           } catch {
             // Process may already be gone.
           }
           finish();
-        }
-      });
-      proc.on('close', finish);
-      proc.on('error', () => finish());
+        }, 5000);
+
+        proc.stdout?.on('data', (data: Buffer) => {
+          output += data.toString();
+          if (output.length > 1_000_000) {
+            try {
+              proc.kill('SIGTERM');
+            } catch {
+              // Process may already be gone.
+            }
+            finish();
+          }
+        });
+        proc.on('close', finish);
+        proc.on('error', () => finish());
+      };
+
+      void this.getOpenCodeModelOptionsFromServer(cwd)
+        .then((serverOptions) => {
+          if (serverOptions.length > 0) {
+            resolve(serverOptions);
+            return;
+          }
+
+          runCliFallback();
+        })
+        .catch(() => runCliFallback());
     });
+  }
+
+  private async getOpenCodeModelOptionsFromServer(cwd: string): Promise<CliModelOption[]> {
+    const serverUrl = await this.getOpenCodeServerUrl();
+    if (!serverUrl) {
+      return [];
+    }
+
+    const payload = await this.fetchJson(
+      this.openCodeApiUrl(serverUrl, '/config/providers', cwd),
+      2400
+    );
+    return parseOpenCodeProviderModels(payload);
   }
 
   private getCommandVersion(profile: CliProfile): Promise<string | undefined> {
@@ -480,7 +527,8 @@ export class CliManager {
     agentArgs: string[] = [],
     agentModeId?: string,
     optionKey?: string,
-    envOverrides: Record<string, string> = {}
+    envOverrides: Record<string, string> = {},
+    options: StartPromptOptions = {}
   ): Promise<Session | null> {
     const profile = getCliProfile(cliId);
     if (!profile) { return null; }
@@ -500,7 +548,9 @@ export class CliManager {
       ...this.expandProfileEnv(profile.env, cwd),
       ...envOverrides,
     };
-    const backgroundAttachArgs = await this.getBackgroundAttachArgs(profile, command, cwd, env);
+    const backgroundAttachArgs = options.attachBackgroundServer === false
+      ? []
+      : await this.getBackgroundAttachArgs(profile, command, cwd, env);
     const args =
       profile.inputMode === 'argument' && initialInput
         ? [...profile.promptArgs, ...backgroundAttachArgs, ...agentArgs, initialInput]
@@ -509,7 +559,9 @@ export class CliManager {
     const onStderr = new vscode.EventEmitter<string>();
     const onError = new vscode.EventEmitter<string>();
     const onEnd = new vscode.EventEmitter<number>();
-    const eventStreamUrl = this.getOpenCodeEventStreamUrl(profile, backgroundAttachArgs);
+    const eventStreamUrl = options.attachBackgroundServer === false
+      ? undefined
+      : this.getOpenCodeEventStreamUrl(profile, backgroundAttachArgs);
     const eventStream = eventStreamUrl
       ? this.openOpenCodeEventStream(eventStreamUrl, onOutput)
       : undefined;
@@ -535,6 +587,8 @@ export class CliManager {
     };
 
     proc.stdout?.on('data', (data: Buffer) => {
+      session.openCodeSessionId = this.extractOpenCodeSessionIdFromJsonText(data.toString()) ??
+        session.openCodeSessionId;
       if (eventStream?.hasOutput()) {
         return;
       }
@@ -612,6 +666,213 @@ export class CliManager {
 
   getActiveSessionIds(): string[] {
     return Array.from(this.sessions.keys());
+  }
+
+  async runOpenCodePromptViaServer(
+    prompt: string,
+    token: vscode.CancellationToken,
+    directory = this.getWorkspaceRoot(),
+    modelId?: string
+  ): Promise<string> {
+    const serverUrl = await this.getOpenCodeServerUrl();
+    if (!serverUrl) {
+      throw new Error('OpenCode server is not available.');
+    }
+    await this.waitForOpenCodeServerReady(serverUrl, directory);
+
+    const session = this.objectRecord(
+      await this.requestJson(
+        this.openCodeApiUrl(serverUrl, '/session', directory),
+        {
+          method: 'POST',
+          timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,
+          body: { title: 'Generate commit message' },
+        }
+      )
+    );
+    const sessionId = this.pickString(session.id);
+    if (!sessionId?.startsWith('ses')) {
+      throw new Error('OpenCode did not return a session.');
+    }
+
+    try {
+      const model = parseOpenCodeModelId(modelId);
+      await this.requestJson(
+        this.openCodeApiUrl(serverUrl, `/session/${encodeURIComponent(sessionId)}/prompt_async`, directory),
+        {
+          method: 'POST',
+          timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,
+          body: {
+            parts: [{ type: 'text', text: prompt }],
+            ...(model ? { model } : {}),
+          },
+        }
+      );
+
+      return await this.waitForOpenCodeServerText(serverUrl, sessionId, directory, token);
+    } catch (error) {
+      await this.abortOpenCodeServerSession(serverUrl, sessionId, directory);
+      throw error;
+    }
+  }
+
+  async getOpenCodeStatus(): Promise<AssistantOpenCodeStatus | undefined> {
+    const serverUrl = await this.getOpenCodeServerUrl();
+    if (!serverUrl) {
+      return undefined;
+    }
+
+    const [mcpPayload, lspPayload, projectPayload] = await Promise.all([
+      this.fetchJson(new URL('/mcp', serverUrl)),
+      this.fetchJson(new URL('/lsp', serverUrl)),
+      this.fetchJson(new URL('/project/current', serverUrl)),
+    ]);
+
+    return {
+      mcpServers: this.normalizeOpenCodeMcpStatus(mcpPayload),
+      lspServers: this.normalizeOpenCodeLspStatus(lspPayload),
+      project: this.normalizeOpenCodeProject(projectPayload),
+    };
+  }
+
+  async getOpenCodeMcpStatus(): Promise<AssistantMcpServerStatus[] | undefined> {
+    return (await this.getOpenCodeStatus())?.mcpServers;
+  }
+
+  async executeOpenCodeNativeCommand(
+    command: AssistantOpenCodeNativeCommand,
+    sessionId: string | undefined
+  ): Promise<AssistantOpenCodeNativeCommandResult> {
+    if (!sessionId || !sessionId.startsWith('ses')) {
+      return {
+        command,
+        ok: false,
+        message: 'No active OpenCode session is available yet.',
+      };
+    }
+
+    const serverUrl = await this.getOpenCodeServerUrl();
+    if (!serverUrl) {
+      return {
+        command,
+        ok: false,
+        message: 'OpenCode server is not available.',
+      };
+    }
+
+    if (command === 'share') {
+      const payload = await this.requestJson(
+        this.openCodeSessionUrl(serverUrl, sessionId, '/share'),
+        { method: 'POST' }
+      );
+      const payloadRecord = this.objectRecord(payload);
+      const dataRecord = this.objectRecord(payloadRecord.data);
+      const shareRecord = this.objectRecord(payloadRecord.share);
+      const dataShareRecord = this.objectRecord(dataRecord.share);
+      const url = this.pickString(
+        shareRecord.url,
+        dataShareRecord.url
+      );
+      return {
+        command,
+        ok: true,
+        ...(url ? { url, message: `OpenCode session shared: ${url}` } : { message: 'OpenCode session shared.' }),
+      };
+    }
+
+    if (command === 'unshare') {
+      await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId, '/share'), {
+        method: 'DELETE',
+      });
+      return { command, ok: true, message: 'OpenCode session unpublished.' };
+    }
+
+    if (command === 'compact') {
+      const session = this.objectRecord(
+        await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId), { method: 'GET' })
+      );
+      const model = this.objectRecord(session.model);
+      const providerID = this.pickString(model.providerID);
+      const modelID = this.pickString(model.id, model.modelID);
+      if (!providerID || !modelID) {
+        return {
+          command,
+          ok: false,
+          message: 'OpenCode did not expose a model for this session.',
+        };
+      }
+
+      await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId, '/summarize'), {
+        method: 'POST',
+        body: { providerID, modelID },
+      });
+      return { command, ok: true, message: 'OpenCode session compacted.' };
+    }
+
+    if (command === 'fork') {
+      const payload = this.objectRecord(
+        await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId, '/fork'), {
+          method: 'POST',
+          body: {},
+        })
+      );
+      const forkedSessionId = this.pickString(payload.id);
+      if (!forkedSessionId?.startsWith('ses')) {
+        return {
+          command,
+          ok: false,
+          message: 'OpenCode did not return a forked session.',
+        };
+      }
+
+      return {
+        command,
+        ok: true,
+        message: 'OpenCode session forked.',
+        newOpenCodeSessionId: forkedSessionId,
+        title: this.pickString(payload.title),
+      };
+    }
+
+    if (command === 'undo' || command === 'redo') {
+      return await this.executeOpenCodeRevertCommand(serverUrl, command, sessionId);
+    }
+
+    return {
+      command,
+      ok: false,
+      message: `Unsupported OpenCode command: ${command}`,
+    };
+  }
+
+  private async getOpenCodeServerUrl(): Promise<string | undefined> {
+    const profile = getCliProfile('opencode');
+    if (!profile?.backgroundServer) {
+      return undefined;
+    }
+
+    const cwd = this.getWorkspaceRoot();
+    const command = await this.resolveCommandPath(profile.command);
+    if (!command) {
+      return undefined;
+    }
+
+    const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
+    const env = {
+      ...process.env,
+      PATH: mergePathEntries([
+        commandDir,
+        buildCliLookupPath(process.env.PATH, process.env.HOME),
+      ]),
+      ...this.expandProfileEnv(profile.env, cwd),
+    };
+    const attachArgs = await this.getBackgroundAttachArgs(profile, command, cwd, env);
+    const serverUrl = this.getOpenCodeEventStreamUrl(profile, attachArgs);
+    if (!serverUrl) {
+      return undefined;
+    }
+
+    return serverUrl;
   }
 
   private async getBackgroundAttachArgs(
@@ -744,14 +1005,210 @@ export class CliManager {
     return attachIndex >= 0 ? attachArgs[attachIndex + 1] : undefined;
   }
 
+  private openCodeSessionUrl(serverUrl: string | URL, sessionId: string, suffix = ''): URL {
+    const encodedSessionId = encodeURIComponent(sessionId);
+    return new URL(`/session/${encodedSessionId}${suffix}`, serverUrl);
+  }
+
+  private openCodeApiUrl(
+    serverUrl: string | URL,
+    pathname: string,
+    directory?: string
+  ): URL {
+    const url = new URL(pathname, serverUrl);
+    if (directory) {
+      url.searchParams.set('directory', directory);
+    }
+    return url;
+  }
+
+  private async waitForOpenCodeServerText(
+    serverUrl: string,
+    sessionId: string,
+    directory: string,
+    token: vscode.CancellationToken
+  ): Promise<string> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < OPEN_CODE_PROMPT_TIMEOUT_MS) {
+      if (token.isCancellationRequested) {
+        throw new Error('cancelled');
+      }
+
+      const status = this.objectRecord(
+        this.objectRecord(
+          await this.fetchJson(this.openCodeApiUrl(serverUrl, '/session/status', directory))
+        )[sessionId]
+      );
+      const statusMessage = this.pickString(status.message);
+      if (statusMessage && /quota exhausted/i.test(statusMessage)) {
+        throw new Error('OpenCode provider quota exhausted. Switch model/provider or wait before retrying.');
+      }
+      if (statusMessage && this.pickString(status.type) === 'error') {
+        throw new Error(statusMessage);
+      }
+
+      const messages = await this.fetchJson(
+        this.openCodeApiUrl(serverUrl, `/session/${encodeURIComponent(sessionId)}/message`, directory)
+      );
+      const text = this.extractOpenCodeAssistantText(messages);
+      if (text !== undefined) {
+        return text;
+      }
+
+      await this.sleep(OPEN_CODE_PROMPT_POLL_INTERVAL_MS);
+    }
+
+    throw new Error('OpenCode server timed out while generating a commit message.');
+  }
+
+  private async waitForOpenCodeServerReady(
+    serverUrl: string,
+    directory: string
+  ): Promise<void> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < OPEN_CODE_SERVER_READY_TIMEOUT_MS) {
+      const status = await this.fetchJson(
+        this.openCodeApiUrl(serverUrl, '/session/status', directory),
+        1800
+      );
+      if (status && typeof status === 'object') {
+        return;
+      }
+
+      await this.sleep(OPEN_CODE_PROMPT_POLL_INTERVAL_MS);
+    }
+
+    throw new Error('OpenCode server is still starting. Retry once it is ready.');
+  }
+
+  private async abortOpenCodeServerSession(
+    serverUrl: string,
+    sessionId: string,
+    directory: string
+  ): Promise<void> {
+    try {
+      await this.requestJson(
+        this.openCodeApiUrl(serverUrl, `/session/${encodeURIComponent(sessionId)}/abort`, directory),
+        { method: 'POST', timeoutMs: 2000 }
+      );
+    } catch {
+      // Best-effort cleanup only.
+    }
+  }
+
+  private extractOpenCodeAssistantText(payload: unknown): string | undefined {
+    if (!Array.isArray(payload)) {
+      return undefined;
+    }
+
+    for (const item of payload.slice().reverse()) {
+      const record = this.objectRecord(item);
+      const info = this.objectRecord(record.info);
+      if (this.pickString(info.role) !== 'assistant') {
+        continue;
+      }
+
+      const error = this.openCodeMessageError(info);
+      if (error) {
+        throw new Error(error);
+      }
+
+      const parts = Array.isArray(record.parts) ? record.parts : [];
+      const text = parts
+        .map((part) => this.pickString(this.objectRecord(part).text) ?? '')
+        .join('');
+      if (text.trim()) {
+        return text;
+      }
+
+      const time = this.objectRecord(info.time);
+      if (typeof time.completed === 'number') {
+        return '';
+      }
+    }
+
+    return undefined;
+  }
+
+  private openCodeMessageError(info: Record<string, unknown>): string | undefined {
+    const error = this.objectRecord(info.error);
+    const data = this.objectRecord(error.data);
+    return this.pickString(data.message, error.message);
+  }
+
+  private async executeOpenCodeRevertCommand(
+    serverUrl: string | URL,
+    command: 'undo' | 'redo',
+    sessionId: string
+  ): Promise<AssistantOpenCodeNativeCommandResult> {
+    const session = this.objectRecord(
+      await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId), { method: 'GET' })
+    );
+    const messagesPayload = await this.requestJson(
+      this.openCodeSessionUrl(serverUrl, sessionId, '/message'),
+      { method: 'GET' }
+    );
+    const messages = Array.isArray(messagesPayload)
+      ? messagesPayload
+        .map((entry) => this.objectRecord(this.objectRecord(entry).info))
+        .filter((entry) => this.pickString(entry.id))
+      : [];
+    const revert = this.objectRecord(session.revert);
+    const revertMessageId = this.pickString(revert.messageID);
+
+    if (command === 'undo') {
+      const target = messages
+        .slice()
+        .reverse()
+        .find((message) => {
+          const id = this.pickString(message.id);
+          return id && (!revertMessageId || id < revertMessageId);
+        });
+      const messageID = this.pickString(target?.id);
+      if (!messageID) {
+        return { command, ok: false, message: 'No OpenCode message is available to undo.' };
+      }
+
+      await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId, '/revert'), {
+        method: 'POST',
+        body: { messageID },
+      });
+      return { command, ok: true, message: 'OpenCode session moved back one message.' };
+    }
+
+    if (!revertMessageId) {
+      return { command, ok: false, message: 'No OpenCode undo point is available to redo.' };
+    }
+
+    const target = messages.find((message) => {
+      const id = this.pickString(message.id);
+      return id && id > revertMessageId;
+    });
+    const messageID = this.pickString(target?.id);
+    if (messageID) {
+      await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId, '/revert'), {
+        method: 'POST',
+        body: { messageID },
+      });
+      return { command, ok: true, message: 'OpenCode session moved forward one message.' };
+    }
+
+    await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId, '/unrevert'), {
+      method: 'POST',
+    });
+    return { command, ok: true, message: 'OpenCode session restored to the latest message.' };
+  }
+
   private openOpenCodeEventStream(
     serverUrl: string,
     output: vscode.EventEmitter<string>
   ): OpenCodeEventStream | undefined {
     let closed = false;
     let outputSeen = false;
+    let openCodeSessionId: string | undefined;
     let request: http.ClientRequest | undefined;
     const partTypes = new Map<string, string>();
+    const partTexts = new Map<string, string>();
 
     try {
       const eventUrl = new URL('/event', serverUrl);
@@ -769,9 +1226,10 @@ export class CliManager {
             while (boundary >= 0) {
               const block = buffer.slice(0, boundary);
               buffer = buffer.slice(boundary + 2);
-              const rendered = this.renderOpenCodeSseBlock(block, partTypes);
+              openCodeSessionId = this.extractOpenCodeSessionIdFromSseBlock(block) ?? openCodeSessionId;
+              const rendered = this.renderOpenCodeSseBlock(block, partTypes, partTexts);
               if (rendered) {
-                outputSeen = true;
+                outputSeen = outputSeen || this.isRenderedOpenCodeTextOutput(rendered);
                 output.fire(rendered);
               }
               boundary = buffer.indexOf('\n\n');
@@ -797,12 +1255,221 @@ export class CliManager {
         request?.destroy();
       },
       hasOutput: () => outputSeen,
+      sessionId: () => openCodeSessionId,
+    };
+  }
+
+  private requestJson(
+    url: URL,
+    options: { method?: 'GET' | 'POST' | 'DELETE' | 'PATCH'; body?: unknown; timeoutMs?: number } = {}
+  ): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const client = url.protocol === 'https:' ? https : http;
+      const body = options.body === undefined ? undefined : JSON.stringify(options.body);
+      let settled = false;
+      const finish = (error: Error | undefined, value?: unknown) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        error ? reject(error) : resolve(value);
+      };
+
+      const request = client.request(
+        url,
+        {
+          method: options.method ?? 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
+          },
+        },
+        (response) => {
+          response.setEncoding('utf8');
+          let responseBody = '';
+          response.on('data', (chunk: string) => {
+            responseBody += chunk;
+            if (responseBody.length > 1024 * 1024) {
+              request.destroy();
+              finish(new Error('OpenCode response was too large.'));
+            }
+          });
+          response.on('end', () => {
+            if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+              finish(new Error(`OpenCode request failed with HTTP ${response.statusCode ?? 'unknown'}.`));
+              return;
+            }
+
+            if (!responseBody.trim()) {
+              finish(undefined, undefined);
+              return;
+            }
+
+            try {
+              finish(undefined, JSON.parse(responseBody));
+            } catch {
+              finish(undefined, responseBody);
+            }
+          });
+        }
+      );
+      request.setTimeout(options.timeoutMs ?? 6000, () => {
+        request.destroy();
+        finish(new Error(`OpenCode request to ${url.pathname} timed out.`));
+      });
+      request.on('error', (error) => finish(error instanceof Error ? error : new Error(String(error))));
+      if (body) {
+        request.write(body);
+      }
+      request.end();
+    });
+  }
+
+  private async fetchJson(url: URL, timeoutMs = 1600): Promise<unknown> {
+    return new Promise((resolve) => {
+      const client = url.protocol === 'https:' ? https : http;
+      let settled = false;
+      const finish = (value: unknown) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        resolve(value);
+      };
+
+      const request = client.get(
+        url,
+        { headers: { Accept: 'application/json' } },
+        (response) => {
+          response.setEncoding('utf8');
+          let body = '';
+          response.on('data', (chunk: string) => {
+            body += chunk;
+            if (body.length > 1024 * 1024) {
+              request.destroy();
+              finish(undefined);
+            }
+          });
+          response.on('end', () => {
+            if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+              finish(undefined);
+              return;
+            }
+
+            try {
+              finish(JSON.parse(body));
+            } catch {
+              finish(undefined);
+            }
+          });
+        }
+      );
+      request.setTimeout(timeoutMs, () => {
+        request.destroy();
+        finish(undefined);
+      });
+      request.on('error', () => finish(undefined));
+    });
+  }
+
+  private normalizeOpenCodeMcpStatus(payload: unknown): AssistantMcpServerStatus[] | undefined {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return undefined;
+    }
+
+    return Object.entries(payload as Record<string, unknown>)
+      .map(([name, value]) => {
+        const record = value && typeof value === 'object' && !Array.isArray(value)
+          ? value as Record<string, unknown>
+          : {};
+        const status = typeof record.status === 'string' ? record.status : 'unknown';
+        const error = typeof record.error === 'string'
+          ? record.error
+          : (typeof record.message === 'string' ? record.message : undefined);
+
+        return {
+          name,
+          status,
+          ...(error ? { error } : {}),
+        };
+      })
+      .filter((item) => item.name.trim().length > 0);
+  }
+
+  private normalizeOpenCodeLspStatus(payload: unknown): AssistantLspServerStatus[] | undefined {
+    if (!payload) {
+      return undefined;
+    }
+
+    if (Array.isArray(payload)) {
+      return payload
+        .map((value, index) => this.normalizeOpenCodeLspEntry(String(index + 1), value))
+        .filter((item): item is AssistantLspServerStatus => Boolean(item));
+    }
+
+    if (typeof payload !== 'object') {
+      return undefined;
+    }
+
+    return Object.entries(payload as Record<string, unknown>)
+      .map(([name, value]) => this.normalizeOpenCodeLspEntry(name, value))
+      .filter((item): item is AssistantLspServerStatus => Boolean(item));
+  }
+
+  private normalizeOpenCodeLspEntry(
+    fallbackName: string,
+    value: unknown
+  ): AssistantLspServerStatus | undefined {
+    if (typeof value === 'string') {
+      const name = value.trim();
+      return name ? { name } : undefined;
+    }
+
+    const record = this.objectRecord(value);
+    const name = this.pickString(
+      record.name,
+      record.id,
+      record.language,
+      record.server,
+      record.extension
+    ) ?? fallbackName;
+    const status = this.pickString(record.status, record.state);
+    const error = this.pickString(record.error, record.message);
+
+    if (!name.trim()) {
+      return undefined;
+    }
+
+    return {
+      name,
+      ...(status ? { status } : {}),
+      ...(error ? { error } : {}),
+    };
+  }
+
+  private normalizeOpenCodeProject(payload: unknown): AssistantOpenCodeProject | undefined {
+    const record = this.objectRecord(payload);
+    const id = this.pickString(record.id);
+    const worktree = this.pickString(record.worktree, record.path, record.root);
+    const vcs = this.pickString(record.vcs);
+
+    if (!id && !worktree && !vcs) {
+      return undefined;
+    }
+
+    return {
+      ...(id ? { id } : {}),
+      ...(worktree ? { worktree } : {}),
+      ...(vcs ? { vcs } : {}),
     };
   }
 
   private renderOpenCodeSseBlock(
     block: string,
-    partTypes: Map<string, string>
+    partTypes: Map<string, string>,
+    partTexts: Map<string, string>
   ): string {
     const event = this.parseOpenCodeSseBlock(block);
     if (!event) {
@@ -812,13 +1479,39 @@ export class CliManager {
     const type = typeof event.type === 'string' ? event.type : '';
     const properties = this.objectRecord(event.properties);
 
+    if (type === 'message.updated') {
+      const info = this.firstObject(properties.info, event.info, event);
+      if (info.error) {
+        return `${JSON.stringify(event)}\n`;
+      }
+
+      return '';
+    }
+
+    if (type === 'error') {
+      return `${JSON.stringify(event)}\n`;
+    }
+
+    if (type === 'session.error') {
+      return `${JSON.stringify(event)}\n`;
+    }
+
     if (type.includes('message.part.updated')) {
-      const part = this.objectRecord(properties.part);
-      const partId = typeof part.id === 'string' ? part.id : undefined;
-      const partType = typeof part.type === 'string' ? part.type : undefined;
+      const part = this.firstObject(properties.part, event.part);
+      const partId = this.pickString(part.id, properties.partID, event.partID);
+      const partType = this.pickString(part.type, properties.partType, event.partType);
       if (partId && partType) {
         partTypes.set(partId, partType);
       }
+
+      if (partType === 'reasoning') {
+        return this.renderOpenCodeUpdatedTextDelta(part, partTexts, 'reasoning');
+      }
+
+      if (partType === 'text') {
+        return this.renderOpenCodeUpdatedTextDelta(part, partTexts, 'text');
+      }
+
       return '';
     }
 
@@ -826,23 +1519,105 @@ export class CliManager {
       return '';
     }
 
-    const partId = typeof properties.partID === 'string' ? properties.partID : undefined;
-    const partType = partId ? partTypes.get(partId) : undefined;
+    const part = this.firstObject(properties.part, event.part);
+    const partId = this.pickString(properties.partID, event.partID, part.id);
+    const field = this.pickString(properties.field, event.field) ?? 'text';
+    if (field !== 'text') {
+      return '';
+    }
+
+    const partType = (partId ? partTypes.get(partId) : undefined) ??
+      this.pickString(part.type, properties.partType, event.partType);
     if (partType === 'tool') {
       return '';
     }
 
-    const eventWithPart = partType
-      ? {
-          ...event,
-          properties: {
-            ...properties,
-            part: { type: partType },
-          },
-        }
-      : event;
+    const delta = this.pickString(properties.delta, event.delta, properties.text, event.text);
+    if (!delta) {
+      return '';
+    }
+
+    const eventWithPart = {
+      ...event,
+      properties: {
+        ...properties,
+        delta,
+        ...(partType ? { part: { ...part, type: partType } } : {}),
+      },
+    };
 
     return `${JSON.stringify(eventWithPart)}\n`;
+  }
+
+  private isRenderedOpenCodeTextOutput(rendered: string): boolean {
+    for (const line of rendered.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      let event: unknown;
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        return true;
+      }
+
+      const object = this.objectRecord(event);
+      const type = typeof object.type === 'string' ? object.type : '';
+      if (type === 'message.updated' || type === 'session.error' || type === 'error') {
+        return true;
+      }
+
+      const properties = this.objectRecord(object.properties);
+      const part = this.firstObject(properties.part, object.part);
+      const partType = this.pickString(part.type, properties.partType, object.partType);
+      if (partType === 'reasoning') {
+        return true;
+      }
+      if (partType === 'tool') {
+        continue;
+      }
+
+      const delta = this.pickString(properties.delta, object.delta);
+      if (delta && delta.length > 0) {
+        return true;
+      }
+      const text = this.pickString(part.text, properties.text, object.text);
+      if (text && text.length > 0) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private renderOpenCodeUpdatedTextDelta(
+    part: Record<string, unknown>,
+    partTexts: Map<string, string>,
+    partType: 'text' | 'reasoning'
+  ): string {
+    const text = typeof part.text === 'string' ? part.text : '';
+    if (!text) {
+      return '';
+    }
+
+    const partId = typeof part.id === 'string' ? part.id : `last-${partType}`;
+    const previousText = partTexts.get(partId) ?? '';
+    partTexts.set(partId, text);
+
+    const delta = text.startsWith(previousText) ? text.slice(previousText.length) : text;
+    if (!delta) {
+      return '';
+    }
+
+    return `${JSON.stringify({
+      type: 'message.part.delta',
+      properties: {
+        part: { type: partType },
+        delta,
+      },
+    })}\n`;
   }
 
   private parseOpenCodeSseBlock(block: string): Record<string, unknown> | undefined {
@@ -876,10 +1651,78 @@ export class CliManager {
     }
   }
 
+  private extractOpenCodeSessionIdFromSseBlock(block: string): string | undefined {
+    const event = this.parseOpenCodeSseBlock(block);
+    if (!event) {
+      return undefined;
+    }
+
+    const properties = this.objectRecord(event.properties);
+    const data = this.objectRecord(event.data);
+    const info = this.objectRecord(properties.info || data.info || event.info);
+    const sessionId = this.pickString(
+      properties.sessionID,
+      data.sessionID,
+      info.sessionID,
+      event.sessionID
+    );
+    return sessionId?.startsWith('ses') ? sessionId : undefined;
+  }
+
+  private extractOpenCodeSessionIdFromJsonText(text: string): string | undefined {
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) {
+        continue;
+      }
+
+      try {
+        const event = this.objectRecord(JSON.parse(trimmed));
+        const properties = this.objectRecord(event.properties);
+        const data = this.objectRecord(event.data);
+        const info = this.objectRecord(properties.info || data.info || event.info);
+        const sessionId = this.pickString(
+          properties.sessionID,
+          data.sessionID,
+          info.sessionID,
+          event.sessionID
+        );
+        if (sessionId?.startsWith('ses')) {
+          return sessionId;
+        }
+      } catch {
+        // Ignore partial JSON chunks. The next stdout chunk may complete the event.
+      }
+    }
+
+    return undefined;
+  }
+
   private objectRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown>
       : {};
+  }
+
+  private firstObject(...values: unknown[]): Record<string, unknown> {
+    for (const value of values) {
+      const object = this.objectRecord(value);
+      if (Object.keys(object).length > 0) {
+        return object;
+      }
+    }
+
+    return {};
+  }
+
+  private pickString(...values: unknown[]): string | undefined {
+    for (const value of values) {
+      if (typeof value === 'string') {
+        return value;
+      }
+    }
+
+    return undefined;
   }
 
   private async startBackgroundServer(

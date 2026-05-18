@@ -4,15 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="__CSP__">
-  <title>AI Assistant</title>
+  <title>Agents Hub</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="__MAIN_CSS_URI__">
 </head>
 <body data-locale="__LOCALE__">
+  <svg class="brand-symbols" aria-hidden="true">
+    <symbol id="agentsHubLogo" viewBox="0 0 24 24">
+      <circle cx="6" cy="8" r="3"/>
+      <circle cx="18" cy="8" r="3"/>
+      <circle cx="12" cy="18" r="3"/>
+      <line x1="8.5" y1="9.5" x2="10.5" y2="16"/>
+      <line x1="15.5" y1="9.5" x2="13.5" y2="16"/>
+      <line x1="9" y1="8" x2="15" y2="8"/>
+    </symbol>
+  </svg>
   <div class="app-shell">
     <header class="toolbar">
       <div class="toolbar-main">
         <div class="toolbar-session">
+          <div class="brand-mark" aria-label="Agents Hub" title="Agents Hub">
+            <svg class="brand-logo" viewBox="0 0 24 24" aria-hidden="true">
+              <use href="#agentsHubLogo"></use>
+            </svg>
+          </div>
           <label class="thread-select">
             <span class="sr-only" data-i18n="history.label"></span>
             <select id="threadSelect" name="assistantThread" autocomplete="off" data-i18n-title="history.label"></select>
@@ -43,6 +58,11 @@
           <button class="api-settings-back tool-button" id="apiProviderSettingsClose" type="button" data-i18n-title="apiSettings.back" data-i18n-aria="apiSettings.back" aria-label="Back">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4"/></svg>
           </button>
+          <div class="brand-mark settings-brand-mark" aria-label="Agents Hub" title="Agents Hub">
+            <svg class="brand-logo" viewBox="0 0 24 24" aria-hidden="true">
+              <use href="#agentsHubLogo"></use>
+            </svg>
+          </div>
           <div>
             <h2 id="settingsTitle" data-i18n="settings.title"></h2>
             <p data-i18n="settings.subtitle"></p>
@@ -62,6 +82,12 @@
                 <svg viewBox="0 0 16 16"><path d="M3.2 5.2c0-1 2.1-1.9 4.8-1.9s4.8.9 4.8 1.9-2.1 1.9-4.8 1.9-4.8-.9-4.8-1.9z"/><path d="M3.2 5.2v3.1c0 1 2.1 1.9 4.8 1.9s4.8-.9 4.8-1.9V5.2"/><path d="M3.2 8.3v2.5c0 1 2.1 1.9 4.8 1.9s4.8-.9 4.8-1.9V8.3"/></svg>
               </span>
               <span class="settings-nav-label" data-i18n="settings.apiProviders"></span>
+            </button>
+            <button class="settings-nav-item" id="settingsNavCommitMessage" type="button" data-settings-section="commitMessage" data-i18n-aria="settings.commitMessage" aria-label="Commit Message">
+              <span class="settings-nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16"><path d="M3.2 3.5h9.6v7.3H6.4L3.2 13V3.5z"/><path d="M5.4 6h5.2M5.4 8.2h3.8"/></svg>
+              </span>
+              <span class="settings-nav-label" data-i18n="settings.commitMessage"></span>
             </button>
           </nav>
 
@@ -139,12 +165,46 @@
                 </form>
               </div>
             </section>
+
+            <section class="settings-section-panel" id="settingsSectionCommitMessage" data-settings-panel="commitMessage" hidden>
+              <div class="settings-section-heading">
+                <h3 data-i18n="commitSettings.title"></h3>
+                <p data-i18n="commitSettings.subtitle"></p>
+              </div>
+
+              <div class="commit-settings-grid">
+                <label class="api-field">
+                  <span data-i18n="commitSettings.provider"></span>
+                  <select id="commitMessageProviderSelect"></select>
+                </label>
+                <label class="api-field">
+                  <span data-i18n="commitSettings.language"></span>
+                  <select id="commitMessageLanguageSelect">
+                    <option value="auto" data-i18n="commitSettings.languageAuto"></option>
+                    <option value="zh-CN" data-i18n="commitSettings.languageZh"></option>
+                    <option value="en" data-i18n="commitSettings.languageEn"></option>
+                  </select>
+                </label>
+                <label class="api-field">
+                  <span data-i18n="commitSettings.maxDiffChars"></span>
+                  <input id="commitMessageMaxDiffChars" type="number" min="1000" step="1000" inputmode="numeric">
+                </label>
+              </div>
+
+              <footer class="settings-section-actions">
+                <button class="api-secondary-button" id="commitMessageReset" type="button" data-i18n="commitSettings.reset"></button>
+                <button class="api-primary-button" id="commitMessageSave" type="button" data-i18n="apiSettings.save"></button>
+              </footer>
+            </section>
           </div>
         </div>
       </div>
     </section>
 
-    <main class="messages" id="messages" aria-live="polite"></main>
+    <div class="main-content">
+      <main class="messages" id="messages" aria-live="polite"></main>
+      <aside class="sidebar" id="sidebar" role="complementary" aria-label="Info panel"></aside>
+    </div>
 
     <footer class="composer">
       <section id="taskBoard" class="task-board" aria-live="polite" data-i18n-aria="taskBoard.label" hidden></section>

@@ -37,6 +37,8 @@ const {
   parseOpenCodeConfigAgents,
   parseOpenCodeAgentListOutput,
   parseOpenCodeModelsOutput,
+  parseOpenCodeModelId,
+  parseOpenCodeProviderModels,
 } = require('../.test-dist/opencodeAgents.js');
 const {
   sanitizeApiProviderSettings,
@@ -388,6 +390,54 @@ test('opencode models output is parsed into provider-native model options', () =
   );
 });
 
+test('opencode model ids split into provider and model for server prompts', () => {
+  assert.deepEqual(parseOpenCodeModelId('opencode/big-pickle'), {
+    providerID: 'opencode',
+    modelID: 'big-pickle',
+  });
+  assert.deepEqual(parseOpenCodeModelId('mimo/mimo-v2.5-pro'), {
+    providerID: 'mimo',
+    modelID: 'mimo-v2.5-pro',
+  });
+  assert.equal(parseOpenCodeModelId('default'), undefined);
+  assert.equal(parseOpenCodeModelId('custom'), undefined);
+});
+
+test('opencode provider payload is parsed into official model options', () => {
+  const options = parseOpenCodeProviderModels({
+    default: {
+      opencode: 'big-pickle',
+      mimo: 'mimo-v2.5-pro',
+    },
+    providers: [
+      {
+        id: 'opencode',
+        name: 'OpenCode Zen',
+        models: {
+          'big-pickle': { id: 'big-pickle', name: 'Big Pickle' },
+          'qwen3.6-plus-free': { id: 'qwen3.6-plus-free', name: 'Qwen3.6 Plus Free' },
+        },
+      },
+      {
+        id: 'mimo',
+        name: 'Xiaomi MiMo',
+        models: {
+          'mimo-v2.5-pro': { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    options.map((option) => [option.id, option.label, option.summaryLabel, option.args]),
+    [
+      ['opencode/big-pickle', 'Big Pickle', 'big-pickle', ['--model', 'opencode/big-pickle']],
+      ['opencode/qwen3.6-plus-free', 'Qwen3.6 Plus Free', 'qwen3.6-plus-free', ['--model', 'opencode/qwen3.6-plus-free']],
+      ['mimo/mimo-v2.5-pro', 'MiMo V2.5 Pro', 'mimo-v2.5-pro', ['--model', 'mimo/mimo-v2.5-pro']],
+    ]
+  );
+});
+
 test('opencode server config exposes current primary and custom agents', () => {
   const discovery = parseOpenCodeConfigAgents({
     model: 'opencode/big-pickle',
@@ -457,12 +507,23 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /\['debug', 'config'\]/);
   assert.match(source, /opencode-agent-list/);
   assert.match(source, /getOpenCodeModelOptions/);
+  assert.match(source, /getOpenCodeModelOptionsFromServer/);
+  assert.match(source, /openCodeApiUrl\(serverUrl, '\/config\/providers', cwd\)/);
+  assert.match(source, /parseOpenCodeProviderModels\(payload\)/);
   assert.match(source, /\['models'\]/);
   assert.match(source, /opencode-models/);
   assert.match(source, /preferredOpenCodeDefaultModel/);
   assert.match(source, /option\.id !== 'default' && option\.id !== 'configured'/);
   assert.match(source, /private backgroundServers = new Map/);
-  assert.match(source, /const backgroundAttachArgs = await this\.getBackgroundAttachArgs/);
+  assert.match(source, /attachBackgroundServer\?: boolean/);
+  assert.match(
+    source,
+    /const backgroundAttachArgs = options\.attachBackgroundServer === false\s*\?\s*\[\]\s*:\s*await this\.getBackgroundAttachArgs/s
+  );
+  assert.match(
+    source,
+    /const eventStreamUrl = options\.attachBackgroundServer === false\s*\?\s*undefined\s*:\s*this\.getOpenCodeEventStreamUrl/s
+  );
   assert.match(
     source,
     /\[\.\.\.profile\.promptArgs,\s*\.\.\.backgroundAttachArgs,\s*\.\.\.agentArgs,\s*initialInput\]/s
@@ -474,11 +535,31 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /getOpenCodeEventStreamUrl/);
   assert.match(source, /openOpenCodeEventStream/);
   assert.match(source, /new URL\('\/event', serverUrl\)/);
+  assert.match(source, /new URL\('\/mcp', serverUrl\)/);
+  assert.match(source, /normalizeOpenCodeMcpStatus/);
+  assert.match(source, /const partTexts = new Map<string, string>\(\)/);
+  assert.match(source, /message\.part\.updated/);
   assert.match(source, /message\.part\.delta/);
   assert.match(source, /line\.startsWith\('event:'\)/);
   assert.match(source, /partTypes\.set\(partId, partType\)/);
+  assert.match(source, /renderOpenCodeUpdatedTextDelta/);
+  assert.match(source, /firstObject\(properties\.part,\s*event\.part\)/);
+  assert.match(source, /pickString\(properties\.partID,\s*event\.partID/);
+  assert.match(source, /pickString\(properties\.delta,\s*event\.delta/);
   assert.match(source, /partType === 'tool'/);
+  assert.match(source, /field !== 'text'/);
   assert.match(source, /eventStream\?\.hasOutput\(\)/);
+  assert.match(source, /type === 'error'/);
+  assert.match(source, /sessionId\(\): string \| undefined/);
+  assert.match(source, /extractOpenCodeSessionIdFromSseBlock/);
+  assert.match(source, /extractOpenCodeSessionIdFromJsonText/);
+  assert.match(source, /session\.openCodeSessionId = this\.extractOpenCodeSessionIdFromJsonText/);
+  assert.match(source, /executeOpenCodeNativeCommand/);
+  assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/share'\)/);
+  assert.match(source, /method: 'DELETE'/);
+  assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/summarize'\)/);
+  assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/revert'\)/);
+  assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/unrevert'\)/);
   assert.match(source, /backgroundServerPorts/);
   assert.match(source, /ownedProcess && await this\.waitForTcp/);
   assert.match(source, /!ownedProcess && await this\.waitForTcp/);
@@ -487,6 +568,10 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /private async waitForTcp/);
   assert.match(source, /private stopBackgroundServers/);
   assert.match(sidebarSource, /const newSession = await this\.cliManager\.startPrompt/);
+  assert.match(sidebarSource, /openCodeSessionId: session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
+  assert.match(sidebarSource, /case 'openCodeNativeCommand':/);
+  assert.match(sidebarSource, /this\.cliManager\.executeOpenCodeNativeCommand/);
+  assert.match(sidebarSource, /command: 'openCodeNativeCommandResult'/);
   assert.match(sidebarSource, /this\.cliManager\.stopAll\(\);/);
 });
 
@@ -656,7 +741,7 @@ test('context summary carries provider-specific token usage without fallback est
 
   assert.match(typesSource, /tokenUsage\?: AssistantTokenUsage/);
   assert.doesNotMatch(collectorSource, /estimateContextTokens/);
-  assert.match(sidebarSource, /tokenUsage: countContextTokens\(snapshot, profile\)/);
+  assert.match(sidebarSource, /tokenUsage: countContextTokens\(snapshot, profile, modelId\)/);
   assert.match(counterSource, /encodingForModel|getEncoding/);
   assert.match(counterSource, /countAnthropicTokens/);
   assert.match(counterSource, /precision: 'exact'/);
@@ -703,7 +788,10 @@ test('workspace debug config starts the extension host with the watch task', () 
 
   assert.ok(configuration);
   assert.equal(configuration.preLaunchTask, 'npm: watch');
-  assert.deepEqual(configuration.args, ['--extensionDevelopmentPath=${workspaceFolder}']);
+  assert.deepEqual(configuration.args, [
+    '--extensionDevelopmentPath=${workspaceFolder}',
+    '--enable-proposed-api=agents-hub.agents-hub',
+  ]);
   assert.ok(watchTask);
   assert.equal(watchTask.script, 'watch');
   assert.equal(watchTask.isBackground, true);
@@ -890,6 +978,18 @@ test('webview composer follows the selected provider identity', () => {
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
 
   assert.match(script, /document\.body\.dataset\.provider = activeId \|\| 'none';/);
+  assert.match(script, /const sidebar = document\.getElementById\('sidebar'\);/);
+  assert.match(script, /function renderOpenCodeSidebar\(\)/);
+  assert.match(script, /sidebar\.hidden = profile\?\.id !== 'opencode';/);
+  assert.match(script, /appendOpenCodeBlock\(shell, 'Context', openCodeContextMetrics\(profile\), \{ key: 'context' \}\)/);
+  assert.match(script, /appendOpenCodeBlock\(shell, 'MCP', openCodeMcpLines\(\), \{/);
+  assert.match(script, /action: \(\) => showOpenCodeStatusDialog\('mcp'\)/);
+  assert.match(script, /appendOpenCodeBlock\(shell, 'LSP', openCodeLspLines\(\), \{/);
+  assert.match(script, /LSPs auto-detected from file types/);
+  assert.match(script, /openCodeWorkspaceFooter\(\)/);
+  assert.match(script, /function openCodeMcpLines\(\)/);
+  assert.match(script, /function openCodeLspLines\(\)/);
+  assert.match(script, /function renderOpenCodeStatusDialog\(\)/);
   assert.match(script, /function splitAgentModeLabel\(/);
   assert.match(script, /profile\?\.id === 'opencode'\s*\?\s*splitAgentModeLabel\(displayMode\?\.label \|\| i18n\.t\('agentMode\.short'\)\)\.title/s);
   assert.match(script, /meta\.textContent = profile\?\.id === 'opencode'/);
@@ -897,6 +997,13 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(script, /selectedAction === 'freeform' \? 'input\.placeholderProvider' : 'input\.placeholderAction'/);
   assert.match(i18nScript, /'input\.placeholderProvider': 'Ask \{provider\}…'/);
   assert.match(i18nScript, /'input\.placeholderProvider': '向 \{provider\} 发送任务\.\.\.'/);
+  assert.match(css, /\.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.sidebar\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.sidebar\s*\{\s*[^}]*display:\s*flex;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-session-title\s*\{/);
+  assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-heading\.is-toggle\s*\{/);
+  assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-footer\s*\{/);
   assert.match(css, /body\[data-provider="codex"\] \.mode-summary/);
   assert.match(css, /body\[data-provider="opencode"\] \.prompt-shell/);
   assert.match(css, /body\[data-provider="opencode"\] \.composer\s*\{\s*[^}]*padding:\s*5px 8px;/s);
@@ -905,6 +1012,9 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible,\s*body\[data-provider="opencode"\] \.mode-menu\.is-visible/s);
   assert.match(css, /body\[data-provider="opencode"\] \.model-menu \.option-summary::before\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(html, /class="context-row"[\s\S]*class="context-menu"/);
+  assert.match(html, /<aside class="sidebar" id="sidebar"/);
+  assert.match(i18nScript, /'sidebar\.mcp': 'MCP'/);
+  assert.match(i18nScript, /'sidebar\.lsp': 'LSP'/);
   assert.match(html, /id="composerSettingsBtn"/);
   assert.match(script, /const composerSettingsBtn = document\.getElementById\('composerSettingsBtn'\)/);
   assert.match(script, /composerSettingsBtn\?\.addEventListener\('click'/);
@@ -933,6 +1043,56 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /body\[data-provider="opencode"\] \.send-button\s*\{[^}]*var\(--assistant-accent, #a855f7\)/s);
   assert.match(css, /body\[data-provider="opencode"\] \.send-button:disabled\s*\{[^}]*opacity:\s*1;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.send-button:disabled svg\s*\{[^}]*stroke-width:\s*2;/s);
+});
+
+test('opencode sidebar collapses by default at compact widths', () => {
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+
+  assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.main-content\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?border-right:\s*0;/s);
+  assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.sidebar\s*\{[\s\S]*?display:\s*none;/s);
+});
+
+test('opencode MCP sidebar retries while server status is warming up', () => {
+  const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+
+  assert.match(typesSource, /mcpStatusPending\?: boolean;/);
+  assert.match(sidebarSource, /OPENCODE_STATUS_REFRESH_DELAYS_MS/);
+  assert.match(sidebarSource, /openCodeStatusRefreshTimers = new Map/);
+  assert.match(sidebarSource, /openCodeStatusRefreshAttempts = new Map/);
+  assert.match(sidebarSource, /const mcpStatusPending = this\.shouldRetryOpenCodeStatus\(profile\?\.id, openCodeStatus\)/);
+  assert.match(sidebarSource, /mcpStatusPending,/);
+  assert.match(sidebarSource, /this\.scheduleOpenCodeStatusRefresh\(profile\?\.id, openCodeStatus, contextOptions, modelId\)/);
+  assert.match(sidebarSource, /private scheduleOpenCodeStatusRefresh/);
+  assert.match(sidebarSource, /this\.sendContextSummary\(contextOptions, 'opencode', modelId\)/);
+  assert.match(sidebarSource, /private clearOpenCodeStatusRefreshTimers/);
+  assert.match(script, /contextSummary\?\.mcpStatusPending/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.loading'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.unavailable'\)/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.loading': 'Loading MCPs\.\.\.'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.unavailable': 'MCP status unavailable'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.loading': '正在加载 MCP\.\.\.'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.unavailable': 'MCP 状态不可用'/);
+});
+
+test('webview renders OpenCode thinking as a separate assistant detail block', () => {
+  const formatterSource = readFileSync(new URL('../src/outputFormatter.ts', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+
+  assert.match(formatterSource, /thinking\?: string;/);
+  assert.match(sidebarSource, /thinking: normalized\.thinking/);
+  assert.match(sidebarSource, /status: normalized\.status/);
+  assert.match(script, /function updateStreamThinking\(message\)/);
+  assert.match(script, /item\.thinking = appendChunkText\(item\.thinking, message\.thinking\)/);
+  assert.match(script, /appendMessageThinking\(bubble, item\.thinking\)/);
+  assert.match(script, /function appendMessageThinking\(bubble, text\)/);
+  assert.match(css, /\.message-thinking\s*\{/);
+  assert.match(css, /\.message-thinking-label\s*\{/);
+  assert.match(css, /\.message-thinking-body\s*\{/);
 });
 
 test('webview composer uses compact Code X style controls', () => {
@@ -1207,12 +1367,18 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.ok(properties['agentsHub.apiProviders.agentProviderByCliId']);
   assert.ok(properties['agentsHub.home.visibleAgentIds']);
   assert.ok(properties['agentsHub.home.agentOrder']);
+  assert.ok(properties['agentsHub.commitMessage.provider']);
   assert.match(html, /id="settingsNavAgents"/);
   assert.match(html, /id="settingsNavApiProviders"/);
+  assert.match(html, /id="settingsNavCommitMessage"/);
   assert.match(html, /class="settings-nav-icon"/);
   assert.match(html, /class="settings-nav-label"[^>]*data-i18n="settings\.agents"/);
   assert.match(html, /class="settings-nav-label"[^>]*data-i18n="settings\.apiProviders"/);
+  assert.match(html, /class="settings-nav-label"[^>]*data-i18n="settings\.commitMessage"/);
   assert.match(html, /id="homeAgentList"/);
+  assert.match(html, /id="commitMessageProviderSelect"/);
+  assert.match(html, /id="commitMessageLanguageSelect"/);
+  assert.match(html, /id="commitMessageMaxDiffChars"/);
   assert.match(html, /id="apiProviderSettingsPage"/);
   assert.doesNotMatch(html, /aria-modal="true"/);
   assert.match(html, /id="apiProviderApiKeyEnv"/);
@@ -1220,12 +1386,16 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /function visibleInstalledProfiles\(\)/);
   assert.match(script, /function orderedInstalledProfiles\(\)/);
   assert.match(script, /function renderHomeAgentSettings\(\)/);
+  assert.match(script, /function renderCommitMessageSettings\(\)/);
+  assert.match(script, /function saveCommitMessageSettings\(\)/);
   assert.match(script, /function moveHomeAgent\(/);
   assert.match(script, /data-home-agent-move/);
   assert.match(script, /agentOrder/);
   assert.match(sidebarSource, /config\.get<string\[]>\('agentOrder', \[]\)/);
   assert.match(sidebarSource, /config\.update\('agentOrder', settings\.agentOrder/);
-  assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.messages,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(sidebarSource, /saveCommitMessageSettings/);
+  assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(script, /switch \(activeSettingsSection\)/);
   assert.match(css, /\.api-settings-panel\s*\{\s*[^}]*container-type:\s*inline-size;/s);
   assert.match(css, /\.settings-nav-item\s*\{\s*[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.settings-nav-icon svg\s*\{\s*[^}]*width:\s*15px;/s);
@@ -1235,6 +1405,8 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(css, /\.home-agent-sort\s*\{/);
   assert.match(script, /saveApiProviderSettings/);
   assert.match(script, /saveHomeAgentSettings/);
+  assert.match(script, /saveCommitMessageSettings/);
+  assert.match(script, /commitMessageSettings/);
   assert.match(script, /refreshApiProviderSettings/);
   assert.match(script, /openProviderSettings/);
 });
@@ -1341,11 +1513,12 @@ test('webview composer popovers avoid viewport clipping', () => {
 test('webview pins composer to the bottom when task board is hidden', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"messages"\s*"composer";/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
   assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-rows:\s*max-content minmax\(0,\s*1fr\) max-content;/s);
   assert.match(css, /\.toolbar\s*\{\s*[^}]*grid-area:\s*toolbar;/s);
   assert.doesNotMatch(css, /\.task-board\s*\{\s*[^}]*grid-area:/s);
-  assert.match(css, /\.messages\s*\{\s*[^}]*grid-area:\s*messages;/s);
+  assert.match(css, /\.main-content\s*\{\s*[^}]*grid-area:\s*main-content;/s);
+  assert.match(css, /\.messages\s*\{\s*[^}]*grid-area:\s*auto;/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*grid-area:\s*composer;/s);
 });
 
@@ -1377,7 +1550,7 @@ test('webview uses one primary composer action slot for send and stop', () => {
 test('webview refreshes context after a concrete provider is active', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
 
-  assert.match(script, /function refreshActiveContext\(\) \{\s*if \(!activeId\) \{\s*return;\s*\}\s*vscode\.postMessage\(\{ command: 'refreshContext', cliId: activeId, contextOptions \}\);\s*\}/);
+  assert.match(script, /function refreshActiveContext\(\) \{\s*if \(!activeId\) \{\s*return;\s*\}\s*vscode\.postMessage\(\{ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId\(\) \}\);\s*\}/);
   assert.match(script, /providerSelect\.addEventListener\('change', \(\) => \{[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*\}\);/);
   assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
@@ -1390,6 +1563,23 @@ test('webview empty state is visible in large blank panels', () => {
   assert.match(css, /\.empty-state\s*\{\s*[^}]*margin:\s*min\(18vh,\s*96px\) auto auto;/s);
   assert.match(css, /\.empty-state\s*\{\s*[^}]*width:\s*min\(100%,\s*360px\);/s);
   assert.match(css, /\.empty-title\s*\{\s*[^}]*text-wrap:\s*balance;/s);
+});
+
+test('webview shows provider detection as a loading state before empty provider state', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+
+  assert.match(script, /let profilesLoading = true;/);
+  assert.match(script, /if \(profilesLoading\) \{[\s\S]*option\.textContent = i18n\.t\('provider\.loading'\)/);
+  assert.match(script, /providerHint\.classList\.add\('is-loading'\)/);
+  assert.match(script, /appendProviderLoadingState\(\)/);
+  assert.match(script, /profilesLoading = false;\s*profiles = message\.profiles \|\| \[\];/);
+  assert.match(script, /input\.placeholder = profilesLoading\s*\?\s*i18n\.t\('input\.placeholderLoading'\)/);
+  assert.match(css, /\.empty-state\.is-loading/);
+  assert.match(css, /\.loading-spinner/);
+  assert.match(i18nScript, /'provider\.loading': 'Detecting providers'/);
+  assert.match(i18nScript, /'provider\.loading': '正在检测提供方'/);
 });
 
 test('webview shows the selected provider without a generic picker prefix', () => {
@@ -1524,7 +1714,10 @@ test('webview displays attached context window usage details', () => {
   assert.match(script, /profile\.contextWindowTokens/);
   assert.match(script, /contextSummary\?\.tokenUsage/);
   assert.match(script, /case 'contextSummary':[\s\S]*renderContextBudget\(\);[\s\S]*break;/);
-  assert.match(script, /contextWindow\.usedRemaining/);
+  assert.match(script, /contextWindow\.usedPercent/);
+  assert.match(script, /contextWindow\.usedTokens/);
+  assert.match(script, /contextWindow\.totalTokens/);
+  assert.match(script, /contextWindow\.remaining/);
   assert.match(script, /contextWindow\.autoCompact/);
   assert.match(script, /tokenUsage\.precision === 'exact'/);
   assert.match(script, /contextWindow\.exactUnavailable/);
@@ -1535,8 +1728,8 @@ test('webview displays attached context window usage details', () => {
   assert.match(css, /\.context-budget-popover\s*\{\s*[^}]*width:\s*min\(220px,\s*calc\(100vw - 20px\)\);/s);
   assert.match(css, /\.context-budget:hover \.context-budget-popover/);
   assert.match(i18nScript, /'contextWindow\.title'/);
-  assert.match(i18nScript, /'contextWindow\.usedTotal'/);
-  assert.match(i18nScript, /'contextWindow\.tokenizer'/);
+  assert.match(i18nScript, /'contextWindow\.totalTokens'/);
+  assert.match(i18nScript, /'contextWindow\.remaining'/);
 });
 
 test('webview hides low-value default composer chips', () => {
@@ -1560,7 +1753,7 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(css, /html\s*\{\s*[^}]*padding:\s*0;/s);
   assert.match(css, /body\s*\{\s*[^}]*padding:\s*0;/s);
   assert.match(css, /\.app-shell\s*\{\s*[^}]*width:\s*100%;/s);
-  assert.match(css, /\.composer\s*\{\s*[^}]*padding:\s*8px 8px 7px;/s);
+  assert.match(css, /\.composer\s*\{\s*[^}]*padding:\s*8px clamp\(14px,\s*2\.4vw,\s*18px\) 7px;/s);
   assert.ok(script.indexOf('const ORPHAN_ANSI_PATTERN') < script.indexOf('normalizeSavedThreads'));
   assert.match(script, /if \(item\.meta && item\.role !== 'user'\)/);
   assert.doesNotMatch(script, /parts\.push\(summary\.workspace\)/);
@@ -1595,8 +1788,8 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(sidebarSource, /private async copyMessageText\(messageText: unknown\)/);
   assert.match(sidebarSource, /vscode\.env\.clipboard\.writeText\(text\)/);
   assert.match(localizationSource, /'notification\.messageCopied'/);
-  assert.match(i18nScript, /'message\.copy': 'Copy message'/);
-  assert.match(i18nScript, /'message\.copy': '复制消息'/);
+  assert.match(i18nScript, /'message\.copy': 'Copy'/);
+  assert.match(i18nScript, /'message\.copy': '复制'/);
   assert.match(css, /\.messages\s*\{\s*[^}]*padding:\s*10px clamp\(14px,\s*2\.4vw,\s*18px\) 18px;/s);
   assert.match(css, /\.message-actions\s*\{\s*[^}]*display:\s*flex;/s);
   assert.match(css, /\.message-copy-button\s*\{/);
@@ -1626,7 +1819,7 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.doesNotMatch(script, /typing-dots/);
   assert.match(css, /\.message\.user \.message-bubble\s*\{\s*[^}]*max-width:\s*min\(72%,\s*520px\);/s);
   assert.match(css, /\.message\.user \.message-bubble\s*\{\s*[^}]*padding:\s*7px 11px;/s);
-  assert.match(css, /\.message\.user \.message-bubble\s*\{\s*[^}]*border-color:\s*var\(--assistant-soft-border\);/s);
+  assert.match(css, /\.message\.user \.message-bubble\s*\{\s*[^}]*border:\s*1px solid var\(--assistant-border\);/s);
   assert.match(script, /const structuralTag = parseAssistantMarkupTag\(trimmed\);/);
   assert.match(script, /appendAssistantSectionLabel\(container, structuralTag\.name\);/);
   assert.match(script, /const lineParts = splitAssistantMarkupTags\(line\);/);
@@ -1672,7 +1865,8 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(css, /\.message-content\s*\{\s*[^}]*line-height:\s*1\.46;/s);
   assert.match(css, /\.md-section-label\s*\{/);
   assert.match(css, /\.md-file-list\s*\{/);
-  assert.match(css, /\.md-file-summary,\s*\.md-file-row-summary\s*\{/);
+  assert.match(css, /\.md-file-summary\s*\{/);
+  assert.match(css, /\.md-file-row-summary\s*\{/);
   assert.match(css, /\.md-file-row\[data-collapsible\] \.md-file-row-summary\s*\{/);
   assert.match(css, /\.md-file-path\s*\{/);
   assert.match(css, /\.md-file-detail\s*\{/);
@@ -1698,6 +1892,33 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(css, /\.md-token\.diff-remove\s*\{/);
   assert.match(css, /\.md-table-wrap\s*\{\s*[^}]*scrollbar-width:\s*thin;/s);
   assert.match(i18nScript, /'message\.statusElapsed': '\{status\} · \{elapsed\}'/);
+});
+
+test('webview renders edited files as an OpenCode-style change card', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+
+  assert.match(script, /const FILE_CARD_COLLAPSE_LIMIT = 3;/);
+  assert.match(script, /summaryTitle\.textContent = i18n\.t\('fileCard\.edited'/);
+  assert.match(script, /summaryMeta\.className = 'md-file-summary-meta';/);
+  assert.match(script, /actions\.className = 'md-file-actions';/);
+  assert.match(script, /button\.dataset\.fileCardAction = action;/);
+  assert.match(script, /showMore\.dataset\.fileCardShowMore = 'true';/);
+  assert.match(script, /fileResults\.slice\(0, FILE_CARD_COLLAPSE_LIMIT\)/);
+  assert.match(script, /messages\.addEventListener\('click'[\s\S]*data-file-card-action/s);
+  assert.match(script, /executeOpenCodeNativeSlashCommand\(\{ name: 'undo' \}\);/);
+  assert.match(script, /send\('freeform', fileCardReviewPrompt\(\)\);/);
+  assert.match(script, /function fileCardReviewPrompt\(\)/);
+  assert.match(css, /\.md-file-summary\s*\{\s*[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto;/s);
+  assert.match(css, /\.md-file-header-icon\s*\{/);
+  assert.match(css, /\.md-file-actions\s*\{/);
+  assert.match(css, /\.md-file-show-more\s*\{/);
+  assert.match(css, /\.md-file-row.is-hidden\s*\{/);
+  assert.match(i18nScript, /'fileCard\.edited': 'Edited \{count\} \{fileLabel\}'/);
+  assert.match(i18nScript, /'fileCard\.edited': '已编辑 \{count\} 个文件'/);
+  assert.match(i18nScript, /'fileCard\.showMore': 'Show \{count\} more \{fileLabel\}'/);
+  assert.match(i18nScript, /'fileCard\.showMore': '再显示 \{count\} 个文件'/);
 });
 
 test('webview does not persist transient running message state', () => {
@@ -1750,13 +1971,72 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /providers:\s*\['goose'\]/);
   assert.match(script, /providers:\s*\['aider'\]/);
   assert.match(script, /function slashCommandMatchesProvider/);
-  assert.match(script, /local:\s*'models',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /local:\s*'agents',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'new',\s*aliases:\s*\['clear'\]/);
+  assert.match(script, /name:\s*'sessions',\s*aliases:\s*\['session',\s*'resume',\s*'continue'\],\s*kind:\s*'local',\s*local:\s*'sessions',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'models',\s*aliases:\s*\['model'\],\s*kind:\s*'local',\s*local:\s*'models',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'agents',\s*aliases:\s*\['agent'\],\s*kind:\s*'local',\s*local:\s*'agents',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'mcps',\s*aliases:\s*\['mcp'\],\s*kind:\s*'local',\s*local:\s*'mcp',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'variants',\s*kind:\s*'local',\s*local:\s*'variants',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'connect',\s*kind:\s*'local',\s*local:\s*'connect',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'org',\s*aliases:\s*\['orgs',\s*'switch-org'\],\s*kind:\s*'local',\s*local:\s*'org',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'status',\s*kind:\s*'local',\s*local:\s*'status',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'themes',\s*aliases:\s*\['theme'\],\s*kind:\s*'local',\s*local:\s*'themes',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /name:\s*'exit',\s*aliases:\s*\['quit',\s*'q'\],\s*kind:\s*'local',\s*local:\s*'exit',\s*providers:\s*\['opencode'\]/);
+  assert.match(script, /const OPENCODE_SLASH_COMMAND_NAMES = new Set/);
   assert.match(script, /seen\.has\(command\.name\)/);
+  assert.match(script, /case 'sessions':/);
+  assert.match(script, /showOpenCodeStatusDialog\('sessions'\)/);
   assert.match(script, /case 'models':/);
-  assert.match(script, /modelMenu\.open = true/);
+  assert.match(script, /showOpenCodeStatusDialog\('models'\)/);
   assert.match(script, /case 'agents':/);
-  assert.match(script, /modeMenu\.open = true/);
+  assert.match(script, /showOpenCodeStatusDialog\('agents'\)/);
+  assert.match(script, /case 'variants':/);
+  assert.match(script, /showOpenCodeStatusDialog\('variants'\)/);
+  assert.match(script, /case 'status':/);
+  assert.match(script, /showOpenCodeStatusDialog\('status'\)/);
+  assert.match(script, /case 'themes':/);
+  assert.match(script, /showOpenCodeStatusDialog\('themes'\)/);
+  assert.match(script, /case 'connect':/);
+  assert.match(script, /openSettingsPage\('apiProviders'\)/);
+  assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
+  assert.match(script, /function renderOpenCodeGroupedOptionDialogBody\(body, kind\)/);
+  assert.match(script, /function renderOpenCodeMcpDialogBody\(body\)/);
+  assert.match(script, /function openCodeMcpDialogOptions\(\)/);
+  assert.match(script, /function toggleOpenCodeMcp\(cliId, name\)/);
+  assert.match(script, /function openCodeModelOptionGroups\(\)/);
+  assert.match(script, /function openCodeDialogOptions\(kind\)/);
+  assert.match(script, /function selectOpenCodeDialogOption\(kind, value\)/);
+  assert.match(script, /disabledMcpByProvider/);
+  assert.match(script, /openCodeDialogActiveIndex/);
+  assert.match(script, /className = 'opencode-dialog-filter'/);
+  assert.match(script, /className = 'opencode-dialog-group-heading'/);
+  assert.match(script, /className = 'opencode-dialog-option-footer'/);
+  assert.match(script, /className = `opencode-dialog-option-footer is-\$\{option\.enabled \? 'enabled' : 'disabled'\}`/);
+  assert.match(script, /className = 'opencode-dialog-footer-actions'/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.title'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.search'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.searchAria'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.enabled'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.disabled'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.empty'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.status\.connected'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.status\.needsAuth'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.status\.failed'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.toggle'\)/);
+  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.space'\)/);
+  assert.match(script, /button\.dataset\.opencodeDialogValue = option\.id;/);
+  assert.match(script, /if \(openCodeDialogKind === 'mcp'\)/);
+  assert.match(script, /event\.key === ' '/);
+  assert.match(script, /activeModelByProvider\[activeId\] = value;/);
+  assert.match(script, /activeAgentModeByProvider\[activeId\] = value;/);
+  assert.match(script, /setActiveThread\('opencode', thread\)/);
+  assert.match(script, /function executeOpenCodeNativeSlashCommand/);
+  assert.match(script, /command: 'openCodeNativeCommand'/);
+  assert.match(script, /openCodeSessionId: activeOpenCodeSessionId\(\)/);
+  assert.match(script, /const OPENCODE_NATIVE_API_COMMAND_NAMES = new Set\(\[[\s\S]*'fork'/);
+  assert.match(script, /function handleOpenCodeForkResult/);
+  assert.match(script, /message\.newOpenCodeSessionId/);
+  assert.match(script, /case 'openCodeNativeCommandResult':/);
   assert.match(script, /function renderSlashPalette/);
   assert.match(script, /function executeSlashCommand/);
   assert.match(script, /event\.key === 'ArrowDown'/);
@@ -1767,10 +2047,69 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /setActiveThread/);
   assert.match(css, /\.slash-palette\s*\{/);
   assert.match(css, /\.slash-command\.is-active\s*\{/);
+  assert.match(script, /title\.className = 'slash-command-label';/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*font-family:\s*var\(--vscode-editor-font-family/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*min\(calc\(100% - 28px\),\s*640px\);/);
+  assert.match(css, /\.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(160px,\s*240px\) minmax\(0,\s*1fr\);/);
+  assert.match(css, /\.slash-command\.is-active\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/);
+  assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*border-radius:\s*7px;/);
+  assert.match(css, /\.opencode-dialog-option\s*\{/);
+  assert.match(css, /\.opencode-dialog-option\.is-selected\s*\{/);
+  assert.match(css, /\.opencode-dialog-option\.is-active\s*\{/);
+  assert.match(css, /\.opencode-dialog-filter\s*\{/);
+  assert.match(css, /\.opencode-dialog-group-heading\s*\{/);
+  assert.match(css, /\.opencode-dialog-option-footer\s*\{/);
+  assert.match(css, /\.opencode-dialog-option-footer\.is-enabled\s*\{/);
+  assert.match(css, /\.opencode-dialog-option-footer\.is-disabled\s*\{/);
+  assert.match(css, /\.opencode-dialog-footer-actions\s*\{/);
   assert.match(i18nScript, /'slash\.empty'/);
   assert.match(i18nScript, /'slash\.unsupported'/);
+  assert.match(i18nScript, /'slash\.sessions\.desc'/);
   assert.match(i18nScript, /'slash\.models\.desc'/);
   assert.match(i18nScript, /'slash\.agents\.desc'/);
+  assert.match(i18nScript, /'slash\.mcps\.desc'/);
+  assert.match(i18nScript, /'slash\.variants\.desc'/);
+  assert.match(i18nScript, /'slash\.connect\.desc'/);
+  assert.match(i18nScript, /'slash\.status\.desc'/);
+  assert.match(i18nScript, /'slash\.themes\.desc'/);
+  assert.match(i18nScript, /'slash\.exit\.desc'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.title': 'MCPs'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.search': 'Search'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.enabled': 'Enabled'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.disabled': 'Disabled'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.connected': 'Connected'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.needsAuth': 'Needs auth'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.failed': 'Failed'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.toggle': 'toggle'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.space': 'space'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.title': 'MCPs'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.search': '搜索'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.enabled': '已启用'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.disabled': '已禁用'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.connected': '已连接'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.needsAuth': '需要认证'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.failed': '失败'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.toggle': '切换'/);
+  assert.match(i18nScript, /'opencode\.dialog\.mcp\.space': '空格'/);
+});
+
+test('opencode fork native command creates and switches to the forked session', () => {
+  const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
+  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+
+  assert.match(typesSource, /\| 'fork'/);
+  assert.match(typesSource, /newOpenCodeSessionId\?: string;/);
+  assert.match(cliSource, /if \(command === 'fork'\)/);
+  assert.match(cliSource, /this\.openCodeSessionUrl\(serverUrl, sessionId, '\/fork'\)/);
+  assert.match(cliSource, /newOpenCodeSessionId: forkedSessionId/);
+  assert.match(sidebarSource, /newOpenCodeSessionId: result\.newOpenCodeSessionId/);
+  assert.match(script, /function handleOpenCodeForkResult\(message\)/);
+  assert.match(script, /forkedThread\.openCodeSessionId = message\.newOpenCodeSessionId;/);
+  assert.match(script, /setActiveThread\('opencode', forkedThread\);/);
+  assert.match(i18nScript, /'slash\.opencode\.forked'/);
 });
 
 test('webview slash command palette shows each command label once', () => {
@@ -2030,20 +2369,20 @@ test('normalizeCliOutputChunk hides Claude Code final JSON messages after partia
   );
 });
 
-test('normalizeCliOutputChunk hides OpenCode thinking details from transcript text', () => {
+test('normalizeCliOutputChunk streams OpenCode thinking details separately from answer text', () => {
   assert.deepEqual(
     normalizeCliOutputChunk(
       '{"type":"message.part.delta","properties":{"part":{"type":"reasoning"},"delta":"先分析\\n再回答"}}\n',
       'opencode'
     ),
-    { text: '', buffer: '', status: 'thinking' }
+    { text: '', buffer: '', status: 'thinking', thinking: '先分析\n再回答' }
   );
   assert.deepEqual(
     normalizeCliOutputChunk(
       '{"type":"message.part.delta","properties":{"part":{"type":"reasoning"},"delta":"The user is asking"}}\n',
       'opencode'
     ),
-    { text: '', buffer: '', status: 'thinking' }
+    { text: '', buffer: '', status: 'thinking', thinking: 'The user is asking' }
   );
 });
 
@@ -2060,7 +2399,48 @@ test('normalizeCliOutputChunk handles OpenCode run JSON text events', () => {
       '{"type":"reasoning","timestamp":1,"sessionID":"ses_1","part":{"type":"reasoning","text":"先想一下"}}\n',
       'opencode'
     ),
-    { text: '', buffer: '', status: 'thinking' }
+    { text: '', buffer: '', status: 'thinking', thinking: '先想一下' }
+  );
+});
+
+test('normalizeCliOutputChunk handles OpenCode updated text and message errors', () => {
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.updated","properties":{"sessionID":"ses_1","part":{"type":"text","text":"fix(env): 添加空行"}}}\n',
+      'opencode'
+    ),
+    { text: 'fix(env): 添加空行', buffer: '' }
+  );
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.updated","properties":{"sessionID":"ses_1","part":{"type":"reasoning","text":"先想一下"}}}\n',
+      'opencode'
+    ),
+    { text: '', buffer: '', status: 'thinking', thinking: '先想一下' }
+  );
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.updated","properties":{"sessionID":"ses_1","info":{"role":"assistant","error":{"name":"APIError","data":{"message":"Model quota exhausted","isRetryable":false}}}}}\n',
+      'opencode'
+    ),
+    { text: 'Error: Model quota exhausted\n', buffer: '' }
+  );
+});
+
+test('normalizeCliOutputChunk handles OpenCode top-level event fields from SSE', () => {
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.delta","partID":"prt_1","field":"text","delta":"chore(env): "}\n',
+      'opencode'
+    ),
+    { text: 'chore(env): ', buffer: '' }
+  );
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.updated","part":{"id":"prt_1","type":"text","text":"chore(env): 添加空行"}}\n',
+      'opencode'
+    ),
+    { text: 'chore(env): 添加空行', buffer: '' }
   );
 });
 
@@ -2082,6 +2462,42 @@ test('normalizeCliOutput explains OpenCode database lock errors', () => {
     ),
     'Error: OpenCode local database is locked by another running OpenCode server. Close that server or run this workspace from the same OpenCode server, then retry.\n'
   );
+});
+
+test('normalizeCliOutput surfaces OpenCode top-level provider errors', () => {
+  const errorLine = '{"type":"error","timestamp":1778855556690,"sessionID":"ses_1","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details."}}}\n';
+
+  assert.deepEqual(
+    normalizeCliOutputChunk(errorLine, 'opencode'),
+    {
+      text: 'Error: Unexpected server error. Check server logs for details.\n',
+      buffer: '',
+    }
+  );
+  assert.equal(
+    normalizeCliOutput(errorLine, 'opencode'),
+    'Error: Unexpected server error. Check server logs for details.\n'
+  );
+});
+
+test('cli manager can run OpenCode prompts through the server API and detect retry status', () => {
+  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /runOpenCodePromptViaServer/);
+  assert.match(source, /modelId\?: string/);
+  assert.match(source, /parseOpenCodeModelId\(modelId\)/);
+  assert.match(source, /OPEN_CODE_SERVER_READY_TIMEOUT_MS/);
+  assert.match(source, /waitForOpenCodeServerReady\(serverUrl, directory\)/);
+  assert.match(source, /openCodeApiUrl\(serverUrl, '\/session', directory\)/);
+  assert.match(source, /timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS/);
+  assert.match(source, /\/prompt_async`/);
+  assert.match(source, /\.\.\.\(model \? \{ model \} : \{\}\)/);
+  assert.match(source, /openCodeApiUrl\(serverUrl, '\/session\/status', directory\)/);
+  assert.match(source, /url\.searchParams\.set\('directory', directory\)/);
+  assert.match(source, /OpenCode request to \$\{url\.pathname\} timed out/);
+  assert.match(source, /quota exhausted/i);
+  assert.match(source, /abortOpenCodeServerSession/);
+  assert.match(source, /extractOpenCodeAssistantText/);
 });
 
 test('normalizeCliOutput condenses Codex JSON errors into a readable message', () => {

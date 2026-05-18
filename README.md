@@ -1,9 +1,9 @@
-# AI Assistant Hub
+# Agents Hub
 
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=agents-hub.agents-hub)
 [![CI](https://github.com/agents-hub/vscode-agents-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/agents-hub/vscode-agents-hub/actions/workflows/ci.yml)
 
-**AI Assistant Hub** is a VS Code extension that turns your editor into a multi-agent workbench. It brings together multiple AI coding assistants — Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider — under a single sidebar interface with context-aware prompts, CLI profile management, and API provider bridging.
+**Agents Hub** is a VS Code extension that turns your editor into a multi-agent workbench. It brings together multiple AI coding assistants — Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider — under a single sidebar interface with context-aware prompts, CLI profile management, and API provider bridging.
 
 > ⚠️ **Early Release (v0.1.0).** The core extension logic and webview UI are complete. Expect rapid iteration as we validate the workbench model.
 
@@ -41,7 +41,7 @@
 
 1. **Install the extension** from the VS Code Marketplace.
 2. **Install at least one CLI agent** (see Requirements above).
-3. **Open the AI Assistant sidebar** — click the AI icon in the activity bar, or run `AI Assistant: Open Panel`.
+3. **Open the Agents Hub sidebar** — click the AI icon in the activity bar, or run `Agents Hub: Open Panel`.
 4. **Select a provider** from the dropdown in the sidebar header, then start typing your request.
 
 > The extension defaults to **OpenCode** if no provider is selected. You can change this in `agentsHub.defaultProvider`.

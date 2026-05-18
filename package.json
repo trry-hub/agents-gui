@@ -44,7 +44,12 @@
     "onCommand:agentsHub.explainSelection",
     "onCommand:agentsHub.reviewFile",
     "onCommand:agentsHub.generateTests",
-    "onCommand:agentsHub.refactorSelection"
+    "onCommand:agentsHub.refactorSelection",
+    "onCommand:agentsHub.generateCommitMessage",
+    "onCommand:agentsHub.cancelCommitMessageGeneration"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -104,6 +109,19 @@
       {
         "command": "agentsHub.refactorSelection",
         "title": "%command.refactorSelection.title%"
+      },
+      {
+        "command": "agentsHub.generateCommitMessage",
+        "title": "%command.generateCommitMessage.title%",
+        "icon": {
+          "light": "media/commit-message-light.svg",
+          "dark": "media/commit-message-dark.svg"
+        }
+      },
+      {
+        "command": "agentsHub.cancelCommitMessageGeneration",
+        "title": "%command.cancelCommitMessageGeneration.title%",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -117,6 +135,18 @@
           "command": "agentsHub.openProviderSettings",
           "when": "view == agentsHub.sidebar",
           "group": "navigation@2"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "agentsHub.generateCommitMessage",
+          "when": "scmProvider == git && !agentsHub.commitMessageGenerating",
+          "group": "navigation@-100"
+        },
+        {
+          "command": "agentsHub.cancelCommitMessageGeneration",
+          "when": "scmProvider == git && agentsHub.commitMessageGenerating",
+          "group": "navigation@-101"
         }
       ],
       "editor/context": [
@@ -277,6 +307,36 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "agentsHub.commitMessage.provider": {
+          "type": "string",
+          "default": "default",
+          "enum": [
+            "default",
+            "claude",
+            "gemini",
+            "codex",
+            "opencode",
+            "goose",
+            "aider"
+          ],
+          "description": "%config.commitMessage.provider.description%"
+        },
+        "agentsHub.commitMessage.language": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "en",
+            "zh-CN"
+          ],
+          "description": "%config.commitMessage.language.description%"
+        },
+        "agentsHub.commitMessage.maxDiffChars": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 1000,
+          "description": "%config.commitMessage.maxDiffChars.description%"
         }
       }
     }

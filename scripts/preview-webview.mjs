@@ -105,7 +105,7 @@ window.acquireVsCodeApi = () => ({
           { id: 'claude', name: 'Claude Code', accent: '#d97757', installed: true, version: '2.1.118', webviewIcon: ${JSON.stringify(providerIcons.claude)}, installHint: 'curl -fsSL https://claude.ai/install.sh | bash', defaultAgentMode: 'build', agentModes: claudeModes, defaultPermissionMode: 'default', permissionModes: claudePermissions },
           { id: 'gemini', name: 'Gemini CLI', accent: '#4285f4', installed: true, version: '0.40.0', webviewIcon: ${JSON.stringify(providerIcons.gemini)}, installHint: 'npm install -g @google/gemini-cli', defaultAgentMode: 'assist', agentModes: geminiModes },
           { id: 'codex', name: 'Codex CLI', accent: '#10a37f', installed: true, version: '0.128.0', webviewIcon: ${JSON.stringify(providerIcons.codex)}, installHint: 'npm install -g @openai/codex', defaultAgentMode: 'build', agentModes: codexModes, defaultModel: 'gpt-5.4', modelOptions: codexModels, defaultRuntime: 'localProcessing', runtimeModes: codexRuntimes, defaultPermissionMode: 'workspaceWrite', permissionModes: codexPermissions },
-          { id: 'opencode', name: 'OpenCode', accent: '#a855f7', installed: true, webviewIcon: ${JSON.stringify(providerIcons.opencode)}, installHint: 'brew install opencode-ai/tap/opencode', defaultAgentMode: 'Sisyphus - Ultraworker', agentModes: opencodeModes, defaultModel: 'mimo/mimo-v2.5-pro', modelOptions: opencodeModels },
+          { id: 'opencode', name: 'OpenCode', accent: '#a855f7', installed: true, version: '1.14.49', webviewIcon: ${JSON.stringify(providerIcons.opencode)}, installHint: 'brew install opencode-ai/tap/opencode', defaultAgentMode: 'Sisyphus - Ultraworker', agentModes: opencodeModes, defaultModel: 'mimo/mimo-v2.5-pro', modelOptions: opencodeModels },
           { id: 'missing', name: 'Missing CLI', accent: '#d97757', installed: false, installHint: 'install missing-cli' }
         ],
       }})), 20);
@@ -115,9 +115,20 @@ window.acquireVsCodeApi = () => ({
         command: 'contextSummary',
         summary: {
           workspace: 'agents-hub',
+          workspacePath: '/Users/t/6bt/myproject/agents-hub',
+          workspaceBranch: 'main',
+          openCodeProject: { id: 'preview-project', worktree: '/Users/t/6bt/project/xiaoyaojing-platform', vcs: 'git' },
           activeFile: 'src/extension.ts',
           selection: 'lines 1-8',
           diagnostics: 2,
+          tokenUsage: { precision: 'exact', tokens: 73224, tokenizer: 'preview' },
+          contextWindowTokens: 128000,
+          mcpServers: [
+            { name: 'context7', status: 'connected' },
+            { name: 'supercharged-figma', status: 'needs_auth' },
+            { name: 'figma', status: 'failed', error: 'MCP error -32000: Connection closed' },
+          ],
+          lspServers: [],
         },
       }})), 20);
     }

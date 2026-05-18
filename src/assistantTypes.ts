@@ -111,11 +111,58 @@ export interface AssistantWebviewRequest {
 
 export interface AssistantContextSummary {
   workspace?: string;
+  workspacePath?: string;
+  workspaceBranch?: string;
+  openCodeProject?: AssistantOpenCodeProject;
+  mcpServers?: AssistantMcpServerStatus[];
+  mcpStatusPending?: boolean;
+  lspServers?: AssistantLspServerStatus[];
   activeFile?: string;
   selection?: string;
   diagnostics: number;
   tokenUsage?: AssistantTokenUsage;
   contextWindowTokens?: number;
+}
+
+export interface AssistantOpenCodeStatus {
+  project?: AssistantOpenCodeProject;
+  mcpServers?: AssistantMcpServerStatus[];
+  lspServers?: AssistantLspServerStatus[];
+}
+
+export type AssistantOpenCodeNativeCommand =
+  | 'share'
+  | 'unshare'
+  | 'compact'
+  | 'fork'
+  | 'undo'
+  | 'redo';
+
+export interface AssistantOpenCodeNativeCommandResult {
+  command: AssistantOpenCodeNativeCommand;
+  ok: boolean;
+  message?: string;
+  url?: string;
+  newOpenCodeSessionId?: string;
+  title?: string;
+}
+
+export interface AssistantOpenCodeProject {
+  id?: string;
+  worktree?: string;
+  vcs?: string;
+}
+
+export interface AssistantMcpServerStatus {
+  name: string;
+  status: string;
+  error?: string;
+}
+
+export interface AssistantLspServerStatus {
+  name: string;
+  status?: string;
+  error?: string;
 }
 
 export type AssistantTokenPrecision = 'exact' | 'unavailable';

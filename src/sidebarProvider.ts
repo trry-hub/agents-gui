@@ -11,9 +11,13 @@ import {
 import {
   AssistantActionId,
   AssistantContextOptions,
+  AssistantContextSummary,
   AssistantImageAttachment,
   AssistantImageAttachmentInput,
   AssistantMode,
+  AssistantOpenCodeNativeCommand,
+  AssistantOpenCodeNativeCommandResult,
+  AssistantOpenCodeStatus,
   AssistantWebviewRequest,
 } from './assistantTypes';
 import { actionRequiresActiveFile, actionRequiresSelection } from './actionGuards';
@@ -66,12 +70,23 @@ interface HomeAgentSettings {
   agentOrder: string[];
 }
 
+interface CommitMessageSettings {
+  provider: string;
+  language: 'auto' | 'en' | 'zh-CN';
+  maxDiffChars: number;
+}
+
 const MAX_IMAGE_ATTACHMENTS = 8;
 const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const DEFAULT_CLI_ID = 'opencode';
+const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
+const DEFAULT_COMMIT_MESSAGE_LANGUAGE: CommitMessageSettings['language'] = 'auto';
+const DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS = 60_000;
 const NO_OUTPUT_NOTICE_MS = 45_000;
+const OPENCODE_STATUS_REFRESH_DELAYS_MS = [1_500, 3_000, 6_000, 10_000, 15_000];
 const LAST_PROVIDER_STATE_KEY = 'agentsHub.lastProviderId';
 const AGENT_MODE_STATE_KEY = 'agentsHub.agentModeByProvider';
+const MODEL_STATE_KEY = 'agentsHub.modelByProvider';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'agentsHub.sidebar';
@@ -83,6 +98,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private disposables: vscode.Disposable[] = [];
   private outputBuffers = new Map<string, string>();
   private noOutputNoticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private openCodeStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private openCodeStatusRefreshAttempts = new Map<string, number>();
   private profilesById = new Map<string, CliProfile>();
   private webviewAssetVersion = Date.now();
   private webviewReloadTimer?: ReturnType<typeof setTimeout>;
@@ -121,6 +138,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     void this.sendContextSummary();
     void this.sendHomeAgentSettings();
     void this.sendApiProviderSettings();
+    void this.sendCommitMessageSettings();
     void this.flushPendingRequests();
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
@@ -138,6 +156,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'saveApiProviderSettings':
           await this.saveApiProviderSettings(message.settings);
           break;
+        case 'saveCommitMessageSettings':
+          await this.saveCommitMessageSettings(message.settings);
+          break;
         case 'refreshApiProviderSettings':
           await this.sendApiProviderSettings();
           break;
@@ -149,6 +170,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'refreshContext':
           await this.sendContextSummary(message.contextOptions, this.resolveCliId(message), message.modelId);
+          break;
+        case 'openCodeNativeCommand':
+          await this.handleOpenCodeNativeCommand(message);
+          break;
+        case 'openFilePalette':
+          await vscode.commands.executeCommand('workbench.action.quickOpen');
           break;
         case 'openProviderExtension':
           await this.openProviderExtension(this.resolveCliId(message));
@@ -199,6 +226,35 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async handleOpenCodeNativeCommand(message: {
+    nativeCommand?: AssistantOpenCodeNativeCommand;
+    openCodeSessionId?: string;
+  }): Promise<void> {
+    const nativeCommand = message.nativeCommand;
+    if (!nativeCommand) {
+      return;
+    }
+
+    const result: AssistantOpenCodeNativeCommandResult = await this.cliManager.executeOpenCodeNativeCommand(
+      nativeCommand,
+      message.openCodeSessionId
+    ).catch((error) => ({
+      command: nativeCommand,
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    await this.view?.webview.postMessage({
+      command: 'openCodeNativeCommandResult',
+      nativeCommand: result.command,
+      ok: result.ok,
+      message: result.message,
+      url: result.url,
+      newOpenCodeSessionId: result.newOpenCodeSessionId,
+      title: result.title,
+    });
+    await this.sendContextSummary(undefined, 'opencode');
+  }
+
   async switchProvider(providerId: string): Promise<void> {
     const profile = getCliProfile(providerId);
     if (!profile) {
@@ -233,6 +289,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sendContextSummary();
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
+    await this.sendCommitMessageSettings();
   }
 
   async openProviderSettings(section = 'agents'): Promise<void> {
@@ -240,6 +297,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.view?.show(true);
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
+    await this.sendCommitMessageSettings();
     await this.view?.webview.postMessage({ command: 'openProviderSettings', section });
   }
 
@@ -286,6 +344,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       defaultProviderId: this.getDefaultCliId(),
       activeProviderId: storedProviderId,
       activeAgentModeByProvider: this.getStoredAgentModeState(),
+      activeModelByProvider: this.getStoredModelState(),
     });
   }
 
@@ -315,6 +374,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private async sendCommitMessageSettings(): Promise<void> {
+    this.view?.webview.postMessage({
+      command: 'commitMessageSettings',
+      settings: this.getCommitMessageSettings(),
+    });
+  }
+
   private async saveHomeAgentSettings(rawSettings: unknown): Promise<void> {
     const settings = this.normalizeHomeAgentSettings(rawSettings);
     const config = vscode.workspace.getConfiguration('agentsHub.home');
@@ -341,6 +407,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sendApiProviderSettings();
   }
 
+  private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
+    const settings = this.normalizeCommitMessageSettings(rawSettings);
+    const config = vscode.workspace.getConfiguration('agentsHub.commitMessage');
+
+    await Promise.all([
+      config.update('provider', settings.provider, vscode.ConfigurationTarget.Global),
+      config.update('language', settings.language, vscode.ConfigurationTarget.Global),
+      config.update('maxDiffChars', settings.maxDiffChars, vscode.ConfigurationTarget.Global),
+    ]);
+
+    await this.sendCommitMessageSettings();
+  }
+
   private getApiProviderSettings(): ApiProviderSettings {
     const config = vscode.workspace.getConfiguration('agentsHub.apiProviders');
     return sanitizeApiProviderSettings({
@@ -356,6 +435,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       visibleAgentIds: config.get<string[]>('visibleAgentIds', []),
       agentOrder: config.get<string[]>('agentOrder', []),
     });
+  }
+
+  private getCommitMessageSettings(): CommitMessageSettings {
+    const config = vscode.workspace.getConfiguration('agentsHub.commitMessage');
+    return this.normalizeCommitMessageSettings({
+      provider: config.get<string>('provider', DEFAULT_COMMIT_MESSAGE_PROVIDER),
+      language: config.get<string>('language', DEFAULT_COMMIT_MESSAGE_LANGUAGE),
+      maxDiffChars: config.get<number>('maxDiffChars', DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS),
+    });
+  }
+
+  private normalizeCommitMessageSettings(rawSettings: unknown): CommitMessageSettings {
+    const record = rawSettings && typeof rawSettings === 'object'
+      ? rawSettings as { provider?: unknown; language?: unknown; maxDiffChars?: unknown }
+      : {};
+    const knownProviderIds = new Set([
+      DEFAULT_COMMIT_MESSAGE_PROVIDER,
+      ...CLI_PROFILES.map((profile) => profile.id),
+    ]);
+    const provider = typeof record.provider === 'string' && knownProviderIds.has(record.provider)
+      ? record.provider
+      : DEFAULT_COMMIT_MESSAGE_PROVIDER;
+    const language = record.language === 'en' || record.language === 'zh-CN'
+      ? record.language
+      : DEFAULT_COMMIT_MESSAGE_LANGUAGE;
+    const maxDiffChars = Number(record.maxDiffChars);
+
+    return {
+      provider,
+      language,
+      maxDiffChars: Number.isFinite(maxDiffChars)
+        ? Math.max(1000, Math.round(maxDiffChars))
+        : DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS,
+    };
   }
 
   private normalizeHomeAgentSettings(rawSettings: unknown): HomeAgentSettings {
@@ -436,17 +549,110 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const options = this.resolveContextOptions(contextOptions);
     const snapshot = await this.contextCollector.collect(options, this.getContextLimits());
     const profile = getCliProfile(cliId) ?? getCliProfile(this.getDefaultCliId());
+    const baseSummary = this.contextCollector.summarize(snapshot);
+    const openCodeStatus = profile?.id === 'opencode'
+      ? await this.cliManager.getOpenCodeStatus()
+      : undefined;
+    const mcpStatusPending = this.shouldRetryOpenCodeStatus(profile?.id, openCodeStatus);
+    const workspaceBranch = await this.getWorkspaceBranch(
+      openCodeStatus?.project?.worktree ?? baseSummary.workspacePath
+    );
     const summary = profile
       ? {
-          ...this.contextCollector.summarize(snapshot),
+          ...baseSummary,
+          workspaceBranch,
+          openCodeProject: openCodeStatus?.project,
+          mcpServers: openCodeStatus?.mcpServers,
+          mcpStatusPending,
+          lspServers: openCodeStatus?.lspServers,
           tokenUsage: countContextTokens(snapshot, profile, modelId),
           contextWindowTokens: profile.contextWindowTokens ?? inferContextWindowTokens(modelId),
         }
-      : this.contextCollector.summarize(snapshot);
+      : {
+          ...baseSummary,
+          workspaceBranch,
+        };
     this.view?.webview.postMessage({
       command: 'contextSummary',
       summary,
     });
+    this.scheduleOpenCodeStatusRefresh(profile?.id, openCodeStatus, contextOptions, modelId);
+  }
+
+  private shouldRetryOpenCodeStatus(
+    profileId: string | undefined,
+    status: AssistantOpenCodeStatus | undefined
+  ): boolean {
+    if (profileId !== 'opencode') {
+      return false;
+    }
+    if (Array.isArray(status?.mcpServers) && status.mcpServers.length > 0) {
+      return false;
+    }
+    return (this.openCodeStatusRefreshAttempts.get('opencode') ?? 0) < OPENCODE_STATUS_REFRESH_DELAYS_MS.length;
+  }
+
+  private scheduleOpenCodeStatusRefresh(
+    profileId: string | undefined,
+    status: AssistantOpenCodeStatus | undefined,
+    contextOptions: Partial<AssistantContextOptions>,
+    modelId?: string
+  ): void {
+    if (profileId !== 'opencode') {
+      return;
+    }
+
+    const key = 'opencode';
+    if (Array.isArray(status?.mcpServers) && status.mcpServers.length > 0) {
+      this.clearOpenCodeStatusRefreshTimers();
+      this.openCodeStatusRefreshAttempts.delete(key);
+      return;
+    }
+
+    const attempts = this.openCodeStatusRefreshAttempts.get(key) ?? 0;
+    if (attempts >= OPENCODE_STATUS_REFRESH_DELAYS_MS.length || this.openCodeStatusRefreshTimers.has(key)) {
+      return;
+    }
+
+    const delay = OPENCODE_STATUS_REFRESH_DELAYS_MS[attempts];
+    this.openCodeStatusRefreshAttempts.set(key, attempts + 1);
+    const timer = setTimeout(() => {
+      this.openCodeStatusRefreshTimers.delete(key);
+      void this.sendContextSummary(contextOptions, 'opencode', modelId);
+    }, delay);
+    this.openCodeStatusRefreshTimers.set(key, timer);
+  }
+
+  private async getWorkspaceBranch(workspacePath?: string): Promise<string | undefined> {
+    if (!workspacePath) {
+      return undefined;
+    }
+
+    try {
+      const gitExtension = vscode.extensions.getExtension('vscode.git');
+      if (!gitExtension) {
+        return undefined;
+      }
+
+      const gitExports = gitExtension.isActive ? gitExtension.exports : await gitExtension.activate();
+      const gitApi = gitExports?.getAPI?.(1);
+      const repositories = Array.isArray(gitApi?.repositories)
+        ? gitApi.repositories as Array<{
+            rootUri?: vscode.Uri;
+            state?: { HEAD?: { name?: string } };
+          }>
+        : [];
+      const repository = repositories.find((item) => item.rootUri?.fsPath === workspacePath) ??
+        repositories.find((item) => {
+          const rootPath = item.rootUri?.fsPath;
+          return Boolean(rootPath && workspacePath.startsWith(`${rootPath}${path.sep}`));
+        }) ??
+        repositories[0];
+      const branch = String(repository?.state?.HEAD?.name || '').trim();
+      return branch || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private async handleAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
@@ -487,8 +693,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const contextOptions = this.resolveContextOptionsForAction(action, message.contextOptions);
 
     const snapshot = await this.contextCollector.collect(contextOptions, this.getContextLimits());
+    const baseContextSummary: AssistantContextSummary = this.contextCollector.summarize(snapshot);
     const contextSummary = {
-      ...this.contextCollector.summarize(snapshot),
+      ...baseContextSummary,
       tokenUsage: countContextTokens(snapshot, profile, modelOption.id),
     };
     if (actionRequiresActiveFile(action) && !snapshot.activeFile) {
@@ -599,7 +806,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.outputBuffers.get(session.id) ?? ''
       );
       this.outputBuffers.set(session.id, normalized.buffer);
-      if (!normalized.text && normalized.status !== 'thinking') {
+      if (!normalized.text && !normalized.thinking && normalized.status !== 'thinking') {
         return;
       }
 
@@ -607,7 +814,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         command: 'output',
         cliId: session.cliId,
         text: normalized.text,
+        thinking: normalized.thinking,
+        status: normalized.status,
         sessionId: session.id,
+        openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),
         stream: 'stdout',
       });
     });
@@ -649,6 +859,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           cliId: session.cliId,
           text: flushed,
           sessionId: session.id,
+          openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),
           stream: 'stdout',
         });
       }
@@ -658,6 +869,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         cliId: session.cliId,
         exitCode: code,
         sessionId: session.id,
+        openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),
       });
       this.activeSessions.delete(session.cliId);
       this.wiredSessionIds.delete(session.id);
@@ -732,6 +944,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.noOutputNoticeTimers.clear();
   }
 
+  private clearOpenCodeStatusRefreshTimers(): void {
+    for (const timer of this.openCodeStatusRefreshTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.openCodeStatusRefreshTimers.clear();
+  }
+
   private async openProviderExtension(cliId: string): Promise<void> {
     const bridge = getProviderExtensionBridge(cliId);
     const profile = getCliProfile(cliId);
@@ -796,6 +1015,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const payload = message as {
       activeProviderId?: unknown;
       activeAgentModeByProvider?: unknown;
+      activeModelByProvider?: unknown;
     };
     const providerId = typeof payload.activeProviderId === 'string' ? payload.activeProviderId : '';
     if (providerId && getCliProfile(providerId)) {
@@ -806,6 +1026,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.state.update(
       AGENT_MODE_STATE_KEY,
       this.normalizeAgentModeState(payload.activeAgentModeByProvider)
+    );
+    await this.state.update(
+      MODEL_STATE_KEY,
+      this.normalizeModelState(payload.activeModelByProvider)
     );
   }
 
@@ -823,6 +1047,29 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const mode = profile?.agentModes.find((item) => item.id === modeId && !item.disabled);
       if (mode) {
         result[providerId] = modeId;
+      }
+    }
+    return result;
+  }
+
+  private getStoredModelState(): Record<string, string> {
+    return this.normalizeModelState(this.state?.get<Record<string, string>>(MODEL_STATE_KEY, {}));
+  }
+
+  private normalizeModelState(value: unknown): Record<string, string> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    const result: Record<string, string> = {};
+    for (const [providerId, modelId] of Object.entries(value)) {
+      if (typeof providerId !== 'string' || typeof modelId !== 'string') {
+        continue;
+      }
+      const profile = this.profilesById.get(providerId) ?? getCliProfile(providerId);
+      const model = profile?.modelOptions?.find((item) => item.id === modelId && !item.disabled);
+      if (model) {
+        result[providerId] = modelId;
       }
     }
     return result;
@@ -1022,6 +1269,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.webviewReloadTimer = undefined;
     }
     this.clearNoOutputNoticeTimers();
+    this.clearOpenCodeStatusRefreshTimers();
+    this.openCodeStatusRefreshAttempts.clear();
     this.outputBuffers.clear();
     for (const [, session] of this.activeSessions) {
       this.cliManager.stop(session.id);

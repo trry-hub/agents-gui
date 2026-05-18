@@ -112,6 +112,7 @@ export class AssistantContextCollector {
 
     if (snapshot.workspace) {
       summary.workspace = snapshot.workspace.name;
+      summary.workspacePath = snapshot.workspace.rootPath;
     }
     if (snapshot.activeFile) {
       summary.activeFile = snapshot.activeFile.relativePath;

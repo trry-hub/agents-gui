@@ -25,17 +25,24 @@
   const TASK_ACTIVE_STATUSES = ['preparing', 'running'];
   const VISUAL_TASK_BOARD_ENABLED = false;
   const MESSAGE_BOTTOM_STICKY_THRESHOLD = 48;
+  const FILE_CARD_COLLAPSE_LIMIT = 3;
+  const FILE_CARD_ICON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 2.8h5.2l2 2v8.4H3.6V2.8h1.6z"/><path d="M10.4 2.8v2h2M8 6.2v4.2M5.9 8.3h4.2"/></svg>';
 
   const saved = vscode.getState() || {};
   let profiles = [];
+  let profilesLoading = true;
   let activeId = saved.activeId || '';
   let activeAgentModeByProvider = saved.activeAgentModeByProvider || {};
   let activeModelByProvider = saved.activeModelByProvider || {};
+  let recentModelByProvider = saved.recentModelByProvider || {};
+  let favoriteModelByProvider = saved.favoriteModelByProvider || {};
+  let disabledMcpByProvider = saved.disabledMcpByProvider || {};
   let customModelByProvider = saved.customModelByProvider || {};
   let activeRuntimeByProvider = saved.activeRuntimeByProvider || {};
   let activePermissionByProvider = saved.activePermissionByProvider || {};
   let apiProviderSettings = { customProviders: [], defaultProviderId: '', agentProviderByCliId: {} };
   let homeAgentSettings = { visibleAgentIds: [], agentOrder: [] };
+  let commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
   let apiProviderEnvStatusById = {};
   let editingApiProviderId = '';
   let activeSettingsSection = 'agents';
@@ -62,8 +69,12 @@
   let messageStatusTimer = undefined;
   let renderedMessageThreadKey = '';
   let promptAttachments = [];
+  let openCodeDialogKind = '';
+  let openCodeDialogQuery = '';
+  let openCodeDialogActiveIndex = 0;
 
   const taskBoard = document.getElementById('taskBoard');
+  const sidebar = document.getElementById('sidebar');
   const providerSelect = document.getElementById('providerSelect');
   const providerTabs = document.getElementById('providerTabs');
   const providerHint = document.getElementById('providerHint');
@@ -119,11 +130,18 @@
   const settingsNav = document.getElementById('settingsNav');
   const settingsNavAgents = document.getElementById('settingsNavAgents');
   const settingsNavApiProviders = document.getElementById('settingsNavApiProviders');
+  const settingsNavCommitMessage = document.getElementById('settingsNavCommitMessage');
   const settingsSectionAgents = document.getElementById('settingsSectionAgents');
   const settingsSectionApiProviders = document.getElementById('settingsSectionApiProviders');
+  const settingsSectionCommitMessage = document.getElementById('settingsSectionCommitMessage');
   const homeAgentList = document.getElementById('homeAgentList');
   const homeAgentsReset = document.getElementById('homeAgentsReset');
   const homeAgentsSave = document.getElementById('homeAgentsSave');
+  const commitMessageProviderSelect = document.getElementById('commitMessageProviderSelect');
+  const commitMessageLanguageSelect = document.getElementById('commitMessageLanguageSelect');
+  const commitMessageMaxDiffChars = document.getElementById('commitMessageMaxDiffChars');
+  const commitMessageReset = document.getElementById('commitMessageReset');
+  const commitMessageSave = document.getElementById('commitMessageSave');
   const apiProviderList = document.getElementById('apiProviderList');
   const apiProviderAdd = document.getElementById('apiProviderAdd');
   const apiProviderForm = document.getElementById('apiProviderForm');
@@ -140,15 +158,23 @@
   const apiProviderDelete = document.getElementById('apiProviderDelete');
   const apiProviderCancel = document.getElementById('apiProviderCancel');
   const SLASH_COMMANDS = [
-    { name: 'new', kind: 'local', local: 'new', descriptionKey: 'slash.new.desc' },
+    { name: 'new', aliases: ['clear'], kind: 'local', local: 'new', descriptionKey: 'slash.new.desc' },
     { name: 'clear', kind: 'local', local: 'new', descriptionKey: 'slash.clear.desc' },
     { name: 'help', kind: 'local', local: 'help', descriptionKey: 'slash.help.desc' },
     { name: 'context', kind: 'local', local: 'context', descriptionKey: 'slash.context.desc' },
     { name: 'refresh', kind: 'local', local: 'refresh', descriptionKey: 'slash.refresh.desc' },
     { name: 'stop', kind: 'local', local: 'stop', descriptionKey: 'slash.stop.desc' },
     { name: 'copy', kind: 'local', local: 'copy', descriptionKey: 'slash.copy.desc' },
+    { name: 'sessions', aliases: ['session', 'resume', 'continue'], kind: 'local', local: 'sessions', providers: ['opencode'], descriptionKey: 'slash.sessions.desc' },
     { name: 'models', aliases: ['model'], kind: 'local', local: 'models', providers: ['opencode'], descriptionKey: 'slash.models.desc' },
     { name: 'agents', aliases: ['agent'], kind: 'local', local: 'agents', providers: ['opencode'], descriptionKey: 'slash.agents.desc' },
+    { name: 'mcps', aliases: ['mcp'], kind: 'local', local: 'mcp', providers: ['opencode'], descriptionKey: 'slash.mcps.desc' },
+    { name: 'variants', kind: 'local', local: 'variants', providers: ['opencode'], descriptionKey: 'slash.variants.desc' },
+    { name: 'connect', kind: 'local', local: 'connect', providers: ['opencode'], descriptionKey: 'slash.connect.desc' },
+    { name: 'org', aliases: ['orgs', 'switch-org'], kind: 'local', local: 'org', providers: ['opencode'], descriptionKey: 'slash.org.desc' },
+    { name: 'status', kind: 'local', local: 'status', providers: ['opencode'], descriptionKey: 'slash.status.desc' },
+    { name: 'themes', aliases: ['theme'], kind: 'local', local: 'themes', providers: ['opencode'], descriptionKey: 'slash.themes.desc' },
+    { name: 'exit', aliases: ['quit', 'q'], kind: 'local', local: 'exit', providers: ['opencode'], descriptionKey: 'slash.exit.desc' },
     {
       name: 'review',
       action: 'reviewFile',
@@ -236,24 +262,11 @@
       'keymap',
     ].map((name) => ({ name, kind: 'native', providers: ['codex'], descriptionKey: 'slash.native.desc' })),
     ...[
-      'connect',
-      'compact',
-      'summarize',
-      'details',
-      'editor',
-      'exit',
-      'quit',
-      'q',
-      'export',
-      'models',
-      'redo',
-      'sessions',
-      'resume',
-      'continue',
-      'share',
-      'themes',
-      'thinking',
       'undo',
+      'redo',
+      'compact',
+      'fork',
+      'share',
       'unshare',
     ].map((name) => ({ name, kind: 'native', providers: ['opencode'], descriptionKey: 'slash.native.desc' })),
     ...[
@@ -351,6 +364,34 @@
       'web',
     ].map((name) => ({ name, kind: 'native', providers: ['aider'], descriptionKey: 'slash.native.desc' })),
   ];
+  const OPENCODE_SLASH_COMMAND_NAMES = new Set([
+    'new',
+    'help',
+    'sessions',
+    'models',
+    'agents',
+    'mcps',
+    'variants',
+    'connect',
+    'org',
+    'status',
+    'themes',
+    'exit',
+    'undo',
+    'redo',
+    'compact',
+    'fork',
+    'share',
+    'unshare',
+  ]);
+  const OPENCODE_NATIVE_API_COMMAND_NAMES = new Set([
+    'share',
+    'unshare',
+    'compact',
+    'fork',
+    'undo',
+    'redo',
+  ]);
   let slashMatches = [];
   let slashActiveIndex = 0;
   let forceContextMenuVisible = false;
@@ -392,6 +433,9 @@
       activeId,
       activeAgentModeByProvider,
       activeModelByProvider,
+      recentModelByProvider,
+      favoriteModelByProvider,
+      disabledMcpByProvider,
       customModelByProvider,
       activeRuntimeByProvider,
       activePermissionByProvider,
@@ -425,6 +469,7 @@
       command: 'saveSelectionState',
       activeProviderId: activeId,
       activeAgentModeByProvider,
+      activeModelByProvider,
     });
   }
 
@@ -673,6 +718,7 @@
           title: thread.title || deriveThreadTitle(thread.messages) || i18n.t('history.untitled'),
           createdAt: Number(thread.createdAt) || Date.now(),
           updatedAt: Number(thread.updatedAt) || Date.now(),
+          openCodeSessionId: typeof thread.openCodeSessionId === 'string' ? thread.openCodeSessionId : undefined,
           messages: normalizeThreadMessages(thread.messages),
         }));
     });
@@ -722,6 +768,7 @@
       title: deriveThreadTitle(initialMessages) || i18n.t('history.newThread'),
       createdAt: now,
       updatedAt: now,
+      openCodeSessionId: undefined,
       messages: initialMessages,
     };
   }
@@ -740,6 +787,7 @@
         ...message,
         running: false,
         text: filterInternalPromptEcho(message.text).text,
+        thinking: normalizeMessageText(message.thinking),
       };
     });
   }
@@ -831,6 +879,25 @@
 
   function activeThreadId(cliId = activeId) {
     return ensureActiveThread(cliId)?.id || '';
+  }
+
+  function activeOpenCodeSessionId() {
+    return ensureActiveThread('opencode')?.openCodeSessionId || '';
+  }
+
+  function noteOpenCodeSessionId(cliId, threadId, openCodeSessionId) {
+    if (cliId !== 'opencode' || !openCodeSessionId || !String(openCodeSessionId).startsWith('ses')) {
+      return;
+    }
+
+    const thread = ensureThread(cliId, threadId);
+    if (!thread || thread.openCodeSessionId === openCodeSessionId) {
+      return;
+    }
+
+    thread.openCodeSessionId = openCodeSessionId;
+    persist();
+    renderOpenCodeSidebar();
   }
 
   function ensureConversation(cliId, threadId) {
@@ -1111,6 +1178,17 @@
 
   function renderProviderSelect() {
     providerSelect.innerHTML = '';
+
+    if (profilesLoading) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = i18n.t('provider.loading');
+      providerSelect.appendChild(option);
+      providerSelect.value = '';
+      providerSelect.disabled = true;
+      return;
+    }
+
     const availableProfiles = visibleInstalledProfiles();
 
     if (availableProfiles.length === 0) {
@@ -1151,9 +1229,9 @@
     }
 
     const availableProfiles = visibleInstalledProfiles();
-    providerTabs.hidden = availableProfiles.length === 0;
+    providerTabs.hidden = profilesLoading || availableProfiles.length === 0;
 
-    if (availableProfiles.length === 0) {
+    if (profilesLoading || availableProfiles.length === 0) {
       providerTabs.innerHTML = '';
       return;
     }
@@ -1227,11 +1305,33 @@
       });
   }
 
+  function normalizeCommitMessageSettings(value) {
+    const record = value && typeof value === 'object' ? value : {};
+    const knownProviderIds = new Set([
+      'default',
+      'claude',
+      'gemini',
+      'codex',
+      'opencode',
+      'goose',
+      'aider',
+      ...profiles.map((profile) => profile.id),
+    ]);
+    const provider = knownProviderIds.has(record.provider) ? record.provider : 'default';
+    const language = ['auto', 'zh-CN', 'en'].includes(record.language) ? record.language : 'auto';
+    const maxDiffChars = Number(record.maxDiffChars);
+    return {
+      provider,
+      language,
+      maxDiffChars: Number.isFinite(maxDiffChars) ? Math.max(1000, Math.round(maxDiffChars)) : 60000,
+    };
+  }
+
   function openSettingsPage(section = 'agents') {
     if (!apiSettingsPage) {
       return;
     }
-    activeSettingsSection = section === 'apiProviders' ? 'apiProviders' : 'agents';
+    activeSettingsSection = ['agents', 'apiProviders', 'commitMessage'].includes(section) ? section : 'agents';
     if (!editingApiProviderId) {
       editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
     }
@@ -1240,27 +1340,45 @@
     document.body.classList.add('is-api-settings-open');
     const focusTarget = activeSettingsSection === 'apiProviders'
       ? apiProviderName
-      : homeAgentList?.querySelector('input');
+      : activeSettingsSection === 'commitMessage'
+        ? commitMessageProviderSelect
+        : homeAgentList?.querySelector('input');
     focusTarget?.focus();
   }
 
   function renderSettingsPage() {
     renderSettingsSection();
-    renderHomeAgentSettings();
-    renderApiProviderSettings();
+    switch (activeSettingsSection) {
+      case 'apiProviders':
+        renderApiProviderSettings();
+        break;
+      case 'commitMessage':
+        renderCommitMessageSettings();
+        break;
+      default:
+        renderHomeAgentSettings();
+        break;
+    }
   }
 
   function renderSettingsSection() {
     const isAgents = activeSettingsSection === 'agents';
+    const isApiProviders = activeSettingsSection === 'apiProviders';
+    const isCommitMessage = activeSettingsSection === 'commitMessage';
     settingsNavAgents?.classList.toggle('is-active', isAgents);
-    settingsNavApiProviders?.classList.toggle('is-active', !isAgents);
+    settingsNavApiProviders?.classList.toggle('is-active', isApiProviders);
+    settingsNavCommitMessage?.classList.toggle('is-active', isCommitMessage);
     settingsNavAgents?.setAttribute('aria-current', isAgents ? 'page' : 'false');
-    settingsNavApiProviders?.setAttribute('aria-current', !isAgents ? 'page' : 'false');
+    settingsNavApiProviders?.setAttribute('aria-current', isApiProviders ? 'page' : 'false');
+    settingsNavCommitMessage?.setAttribute('aria-current', isCommitMessage ? 'page' : 'false');
     if (settingsSectionAgents) {
       settingsSectionAgents.hidden = !isAgents;
     }
     if (settingsSectionApiProviders) {
-      settingsSectionApiProviders.hidden = isAgents;
+      settingsSectionApiProviders.hidden = !isApiProviders;
+    }
+    if (settingsSectionCommitMessage) {
+      settingsSectionCommitMessage.hidden = !isCommitMessage;
     }
   }
 
@@ -1396,6 +1514,44 @@
     vscode.postMessage({ command: 'saveHomeAgentSettings', settings: homeAgentSettings });
     renderAll();
     renderHomeAgentSettings();
+  }
+
+  function renderCommitMessageSettings() {
+    if (!commitMessageProviderSelect || !commitMessageLanguageSelect || !commitMessageMaxDiffChars) {
+      return;
+    }
+
+    commitMessageProviderSelect.innerHTML = '';
+    appendApiProviderOption(commitMessageProviderSelect, 'default', i18n.t('commitSettings.providerDefault'));
+    profiles.forEach((profile) => {
+      appendApiProviderOption(commitMessageProviderSelect, profile.id, profile.name);
+    });
+
+    const normalized = normalizeCommitMessageSettings(commitMessageSettings);
+    commitMessageSettings = normalized;
+    commitMessageProviderSelect.value = normalized.provider;
+    commitMessageLanguageSelect.value = normalized.language;
+    commitMessageMaxDiffChars.value = String(normalized.maxDiffChars);
+  }
+
+  function collectCommitMessageSettings() {
+    return normalizeCommitMessageSettings({
+      provider: commitMessageProviderSelect?.value || 'default',
+      language: commitMessageLanguageSelect?.value || 'auto',
+      maxDiffChars: commitMessageMaxDiffChars?.value || 60000,
+    });
+  }
+
+  function saveCommitMessageSettings() {
+    commitMessageSettings = collectCommitMessageSettings();
+    vscode.postMessage({ command: 'saveCommitMessageSettings', settings: commitMessageSettings });
+    renderCommitMessageSettings();
+  }
+
+  function resetCommitMessageSettings() {
+    commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
+    renderCommitMessageSettings();
+    vscode.postMessage({ command: 'saveCommitMessageSettings', settings: commitMessageSettings });
   }
 
   function normalizeApiProviderSettings(value) {
@@ -1869,9 +2025,16 @@
 
   function renderProviderHint() {
     const profile = activeProfile();
-    providerHint.classList.remove('is-warning');
+    providerHint.classList.remove('is-warning', 'is-loading');
     providerHint.textContent = '';
     providerHint.title = '';
+
+    if (profilesLoading) {
+      providerHint.classList.add('is-loading');
+      providerHint.textContent = i18n.t('provider.loading');
+      providerHint.title = i18n.t('provider.loadingSubtitle');
+      return;
+    }
 
     if (!profile) {
       providerHint.classList.add('is-warning');
@@ -1950,6 +2113,10 @@
   }
 
   function slashCommandMatchesProvider(command, profile) {
+    if (profile?.id === 'opencode' && !OPENCODE_SLASH_COMMAND_NAMES.has(command.name)) {
+      return false;
+    }
+
     return !command.providers || command.providers.includes(profile?.id);
   }
 
@@ -2020,7 +2187,7 @@
       button.setAttribute('aria-selected', index === slashActiveIndex ? 'true' : 'false');
 
       const title = document.createElement('span');
-      title.className = 'slash-command-title';
+      title.className = 'slash-command-label';
       title.textContent = `/${command.name}`;
       const description = document.createElement('span');
       description.className = 'slash-command-description';
@@ -2084,6 +2251,11 @@
         startNewThread(activeId);
         return;
       case 'help':
+        if (activeProfile()?.id === 'opencode') {
+          closeComposerMenus();
+          showOpenCodeStatusDialog('help');
+          return;
+        }
         addMessage(activeId, 'system', buildSlashHelpMessage());
         renderAll();
         return;
@@ -2117,25 +2289,138 @@
           addMessage(activeId, 'system', i18n.t('slash.copied'));
         }
         return;
+      case 'sessions':
+        closeComposerMenus();
+        showOpenCodeStatusDialog('sessions');
+        return;
       case 'models':
-        if (modelMenu) {
-          closeComposerMenus(modelMenu);
-          modelMenu.classList.add('is-visible');
-          modelMenu.open = true;
-        }
-        renderComposer();
+        closeComposerMenus();
+        showOpenCodeStatusDialog('models');
         return;
       case 'agents':
-        if (modeMenu) {
-          closeComposerMenus(modeMenu);
-          modeMenu.classList.add('is-visible');
-          modeMenu.open = true;
-        }
-        renderComposer();
+        closeComposerMenus();
+        showOpenCodeStatusDialog('agents');
+        return;
+      case 'mcp':
+        closeComposerMenus();
+        showOpenCodeStatusDialog('mcp');
+        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId() });
+        return;
+      case 'variants':
+        closeComposerMenus();
+        showOpenCodeStatusDialog('variants');
+        return;
+      case 'connect':
+        closeComposerMenus();
+        openSettingsPage('apiProviders');
+        return;
+      case 'org':
+        closeComposerMenus();
+        showOpenCodeStatusDialog('org');
+        return;
+      case 'status':
+        closeComposerMenus();
+        showOpenCodeStatusDialog('status');
+        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId() });
+        return;
+      case 'themes':
+        closeComposerMenus();
+        showOpenCodeStatusDialog('themes');
+        return;
+      case 'exit':
+        closeComposerMenus();
+        addMessage(activeId, 'system', i18n.t('slash.exit.message'));
+        renderAll();
+        return;
+      case 'open':
+        vscode.postMessage({ command: 'openFilePalette' });
+        return;
+      case 'terminal':
+        vscode.postMessage({ command: 'openProviderExtension', cliId: activeId });
         return;
       default:
         return;
     }
+  }
+
+  function executeOpenCodeNativeSlashCommand(command) {
+    if (!OPENCODE_NATIVE_API_COMMAND_NAMES.has(command.name)) {
+      addMessage(
+        activeId,
+        'system',
+        i18n.t('slash.unsupported', {
+          command: `/${command.name}`,
+          provider: activeProfile()?.name || activeId,
+        })
+      );
+      return;
+    }
+
+    const openCodeSessionId = activeOpenCodeSessionId();
+    if (!openCodeSessionId) {
+      addMessage(activeId, 'error', i18n.t('slash.opencode.noSession'), undefined, false, activeThreadId(activeId));
+      return;
+    }
+
+    vscode.postMessage({
+      command: 'openCodeNativeCommand',
+      nativeCommand: command.name,
+      openCodeSessionId: activeOpenCodeSessionId(),
+    });
+  }
+
+  function openCodeNativeCommandResultText(message) {
+    const command = `/${message.nativeCommand || message.command || 'opencode'}`;
+    if (message.ok) {
+      if (message.newOpenCodeSessionId && message.nativeCommand === 'fork') {
+        return i18n.t('slash.opencode.forked');
+      }
+      if (message.url) {
+        return i18n.t('slash.opencode.shared', { url: message.url });
+      }
+      return i18n.t('slash.opencode.done', { command });
+    }
+
+    return i18n.t('slash.opencode.failed', {
+      command,
+      message: message.message || i18n.t('message.unknownError'),
+    });
+  }
+
+  function cloneMessagesForOpenCodeFork(messages) {
+    return (messages || []).map((message) => {
+      if (!message || typeof message !== 'object') {
+        return message;
+      }
+
+      const cloned = { ...message, running: false };
+      delete cloned.startedAt;
+      delete cloned.runningNotice;
+      return cloned;
+    });
+  }
+
+  function handleOpenCodeForkResult(message) {
+    if (!message?.newOpenCodeSessionId) {
+      return false;
+    }
+
+    const currentThread = ensureActiveThread('opencode');
+    const forkedThread = createThread(
+      'opencode',
+      cloneMessagesForOpenCodeFork(currentThread?.messages || [])
+    );
+    forkedThread.openCodeSessionId = message.newOpenCodeSessionId;
+    if (message.title) {
+      forkedThread.title = message.title;
+    }
+
+    setActiveThread('opencode', forkedThread);
+    activeId = 'opencode';
+    addMessage('opencode', 'system', i18n.t('slash.opencode.forked'), undefined, false, forkedThread.id);
+    persist();
+    renderAll();
+    return true;
   }
 
   function executeSlashCommand(command) {
@@ -2158,14 +2443,18 @@
     }
 
     if (command.kind === 'native') {
-      addMessage(
-        activeId,
-        'system',
-        i18n.t('slash.unsupported', {
-          command: `/${command.name}`,
-          provider: activeProfile()?.name || activeId,
-        })
-      );
+      if (activeProfile()?.id === 'opencode') {
+        executeOpenCodeNativeSlashCommand(command);
+      } else {
+        addMessage(
+          activeId,
+          'system',
+          i18n.t('slash.unsupported', {
+            command: `/${command.name}`,
+            provider: activeProfile()?.name || activeId,
+          })
+        );
+      }
       renderComposer();
       return;
     }
@@ -2315,6 +2604,1175 @@
     }
 
     contextBudget.style.setProperty('--context-budget-popover-left', `${Math.round(left)}px`);
+  }
+
+  function formatOpenCodeNumber(value) {
+    return Math.max(0, Math.round(Number(value) || 0)).toLocaleString('en-US');
+  }
+
+  function formatOpenCodeTimestamp(value) {
+    const date = new Date(Number(value) || Date.now());
+    return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+  }
+
+  function compactOpenCodePath(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+      .replace(/^\/home\/[^/]+(?=\/|$)/, '~');
+  }
+
+  function openCodeSessionTitle(thread) {
+    const title = String(thread?.title || '').trim();
+    if (!title || title === i18n.t('history.newThread') || title === i18n.t('history.untitled')) {
+      return 'New session';
+    }
+
+    return title;
+  }
+
+  function openCodeContextMetrics(profile) {
+    const tokenUsage = contextSummary?.tokenUsage;
+    const isExact = tokenUsage?.precision === 'exact' && Number.isFinite(Number(tokenUsage.tokens));
+    const usedTokens = isExact ? Math.max(0, Math.round(Number(tokenUsage.tokens) || 0)) : 0;
+    const totalTokens = Math.max(0, Math.round(Number(contextSummary?.contextWindowTokens) || Number(profile?.contextWindowTokens) || 0));
+    const usedPercent = totalTokens > 0 ? Math.min(100, Math.round((usedTokens / totalTokens) * 100)) : 0;
+
+    return [
+      { text: `${formatOpenCodeNumber(usedTokens)} tokens`, strong: true },
+      { text: `${usedPercent}% used` },
+      { text: '$0.00 spent' },
+    ];
+  }
+
+  function openCodeMcpStatusLabel(entry) {
+    const status = String(entry?.status || 'unknown');
+    if (status === 'connected') {
+      return i18n.t('opencode.dialog.mcp.status.connected');
+    }
+    if (status === 'needs_auth') {
+      return i18n.t('opencode.dialog.mcp.status.needsAuth');
+    }
+    if (status === 'disabled') {
+      return i18n.t('opencode.dialog.mcp.disabled');
+    }
+    if (status === 'failed') {
+      return entry?.error || i18n.t('opencode.dialog.mcp.status.failed');
+    }
+    return entry?.error || status;
+  }
+
+  function openCodeMcpStatusKind(entry) {
+    const status = String(entry?.status || '');
+    if (status === 'connected') {
+      return 'connected';
+    }
+    if (status === 'failed') {
+      return 'error';
+    }
+    if (status === 'needs_auth') {
+      return 'warning';
+    }
+    if (status === 'disabled') {
+      return 'disabled';
+    }
+    return '';
+  }
+
+  function normalizedMcpMemory(value) {
+    return Array.isArray(value) ? value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean) : [];
+  }
+
+  function disabledMcpNames(cliId = activeId) {
+    return new Set(normalizedMcpMemory(disabledMcpByProvider[cliId]));
+  }
+
+  function isOpenCodeMcpDisabled(entry, cliId = activeId) {
+    const name = String(entry?.name || '').trim();
+    if (!name) {
+      return false;
+    }
+    if (String(entry?.status || '') === 'disabled') {
+      return true;
+    }
+    return disabledMcpNames(cliId).has(name);
+  }
+
+  function openCodeMcpDialogStatusLabel(entry) {
+    const status = String(entry?.status || '').trim();
+    if (!status) {
+      return 'unknown';
+    }
+    if (status === 'connected') {
+      return i18n.t('opencode.dialog.mcp.status.connected');
+    }
+    if (status === 'needs_auth') {
+      return i18n.t('opencode.dialog.mcp.status.needsAuth');
+    }
+    if (status === 'disabled') {
+      return i18n.t('opencode.dialog.mcp.disabled');
+    }
+    if (status === 'failed') {
+      return i18n.t('opencode.dialog.mcp.status.failed');
+    }
+    return status;
+  }
+
+  function openCodeMcpEnabledStateLabel(enabled) {
+    if (enabled) {
+      return `✓ ${i18n.t('opencode.dialog.mcp.enabled')}`;
+    }
+    return `○ ${i18n.t('opencode.dialog.mcp.disabled')}`;
+  }
+
+  function openCodeMcpDialogOptions() {
+    const servers = Array.isArray(contextSummary?.mcpServers) ? contextSummary.mcpServers : [];
+    const needle = openCodeDialogQuery.trim().toLowerCase();
+    return servers
+      .map((entry) => {
+        const name = String(entry?.name || '').trim();
+        if (!name) {
+          return undefined;
+        }
+        const enabled = !isOpenCodeMcpDisabled(entry);
+        return {
+          id: name,
+          label: name,
+          meta: openCodeMcpDialogStatusLabel(entry),
+          footer: openCodeMcpEnabledStateLabel(enabled),
+          enabled,
+          status: openCodeMcpStatusKind(entry),
+        };
+      })
+      .filter(Boolean)
+      .filter((option) => {
+        if (!needle) {
+          return true;
+        }
+        return [option.label, option.meta, option.footer]
+          .some((value) => String(value || '').toLowerCase().includes(needle));
+      });
+  }
+
+  function toggleOpenCodeMcp(cliId, name) {
+    const normalized = String(name || '').trim();
+    if (!cliId || !normalized) {
+      return;
+    }
+    const disabled = disabledMcpNames(cliId);
+    if (disabled.has(normalized)) {
+      disabled.delete(normalized);
+    } else {
+      disabled.add(normalized);
+    }
+    disabledMcpByProvider[cliId] = Array.from(disabled);
+    persist();
+  }
+
+  function openCodeMcpLines() {
+    const servers = contextSummary?.mcpServers;
+    if (!Array.isArray(servers)) {
+      return [{ text: contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.unavailable') }];
+    }
+    if (servers.length === 0) {
+      return [{ text: contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.empty') }];
+    }
+
+    return servers.map((entry) => ({
+      status: isOpenCodeMcpDisabled(entry) ? 'disabled' : openCodeMcpStatusKind(entry),
+      text: [
+        entry.name,
+        isOpenCodeMcpDisabled(entry) ? i18n.t('opencode.dialog.mcp.disabled') : openCodeMcpStatusLabel(entry),
+      ].filter(Boolean).join(' '),
+    }));
+  }
+
+  function openCodeLspStatusLabel(entry) {
+    const status = String(entry?.status || '').trim();
+    if (!status) {
+      return '';
+    }
+    if (status === 'connected') {
+      return 'Connected';
+    }
+    if (status === 'failed') {
+      return entry?.error || 'Failed';
+    }
+    if (status === 'disabled') {
+      return 'Disabled';
+    }
+    return entry?.error || status;
+  }
+
+  function openCodeLspStatusKind(entry) {
+    const status = String(entry?.status || '').trim();
+    if (status === 'connected') {
+      return 'connected';
+    }
+    if (status === 'failed') {
+      return 'error';
+    }
+    if (status === 'disabled') {
+      return 'disabled';
+    }
+    return '';
+  }
+
+  function openCodeLspLines() {
+    const servers = Array.isArray(contextSummary?.lspServers) ? contextSummary.lspServers : [];
+    if (servers.length === 0) {
+      return [{ text: 'LSPs auto-detected from file types' }];
+    }
+
+    return servers.map((entry) => {
+      const label = openCodeLspStatusLabel(entry);
+      return {
+        status: openCodeLspStatusKind(entry),
+        text: [entry.name, label].filter(Boolean).join(' '),
+      };
+    });
+  }
+
+  function openCodeProjectPath() {
+    return contextSummary?.openCodeProject?.worktree || contextSummary?.workspacePath || '';
+  }
+
+  function appendOpenCodeBlock(parent, titleText, lines, options = {}) {
+    const section = document.createElement('section');
+    section.className = 'opencode-sidebar-block';
+    if (options.key) {
+      section.dataset.openCodeBlock = options.key;
+    }
+
+    const title = document.createElement('div');
+    title.className = `opencode-sidebar-heading${options.toggle ? ' is-toggle' : ''}${options.action ? ' is-action' : ''}`;
+    title.textContent = options.toggle ? `▼ ${titleText}` : titleText;
+    if (options.action) {
+      title.setAttribute('role', 'button');
+      title.setAttribute('tabindex', '0');
+      title.addEventListener('click', options.action);
+      title.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          options.action();
+        }
+      });
+    }
+    section.appendChild(title);
+
+    lines.forEach((line) => {
+      if (!line) {
+        return;
+      }
+      const item = document.createElement('div');
+      item.className = `opencode-sidebar-line${line.strong ? ' is-strong' : ''}${line.status ? ' is-status' : ''}`;
+      if (line.status) {
+        const dot = document.createElement('span');
+        dot.className = `opencode-sidebar-dot is-${line.status}`;
+        dot.setAttribute('aria-hidden', 'true');
+        item.appendChild(dot);
+      }
+      const value = document.createElement('span');
+      value.textContent = String(line.text || '');
+      item.appendChild(value);
+      section.appendChild(item);
+    });
+
+    parent.appendChild(section);
+  }
+
+  function openCodeWorkspaceFooter() {
+    const workspace = compactOpenCodePath(openCodeProjectPath()) || contextSummary?.workspace || '';
+    const branch = String(contextSummary?.workspaceBranch || '').trim();
+    if (!workspace) {
+      return '';
+    }
+
+    return branch ? `${workspace}:${branch}` : workspace;
+  }
+
+  function normalizedModelMemory(value) {
+    return Array.isArray(value) ? value.filter(Boolean).map(String) : [];
+  }
+
+  function recentModelIds(cliId = activeId) {
+    const selected = activeModelId(cliId);
+    const recent = normalizedModelMemory(recentModelByProvider[cliId]);
+    return [selected, ...recent.filter((item) => item !== selected)].slice(0, 6);
+  }
+
+  function favoriteModelIds(cliId = activeId) {
+    return normalizedModelMemory(favoriteModelByProvider[cliId]);
+  }
+
+  function rememberRecentModel(cliId, modelId) {
+    if (!cliId || !modelId) {
+      return;
+    }
+    const recent = normalizedModelMemory(recentModelByProvider[cliId]);
+    recentModelByProvider[cliId] = [modelId, ...recent.filter((item) => item !== modelId)].slice(0, 8);
+  }
+
+  function toggleFavoriteModel(cliId, modelId) {
+    if (!cliId || !modelId) {
+      return;
+    }
+    const favorites = new Set(favoriteModelIds(cliId));
+    if (favorites.has(modelId)) {
+      favorites.delete(modelId);
+    } else {
+      favorites.add(modelId);
+    }
+    favoriteModelByProvider[cliId] = Array.from(favorites).slice(0, 12);
+    persist();
+  }
+
+  function openCodeModelProviderId(modelId) {
+    const value = String(modelId || '');
+    return value.includes('/') ? value.split('/')[0] : 'configured';
+  }
+
+  function openCodeModelProviderName(providerId) {
+    const names = {
+      anthropic: 'Anthropic',
+      google: 'Google',
+      groq: 'Groq',
+      mistral: 'Mistral',
+      mimo: 'Xiaomi MiMo',
+      ollama: 'Ollama',
+      openai: 'OpenAI',
+      opencode: 'OpenCode Zen',
+      openrouter: 'OpenRouter',
+      xai: 'xAI',
+    };
+    if (names[providerId]) {
+      return names[providerId];
+    }
+    return String(providerId || 'Configured')
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  function openCodeModelTokenTitle(token) {
+    const known = {
+      chatgpt: 'ChatGPT',
+      claude: 'Claude',
+      codestral: 'Codestral',
+      deepseek: 'DeepSeek',
+      gemini: 'Gemini',
+      gpt: 'GPT',
+      llama: 'Llama',
+      minimax: 'MiniMax',
+      mimo: 'MiMo',
+      nemotron: 'Nemotron',
+      qwen: 'Qwen',
+    };
+    const value = String(token || '');
+    const lower = value.toLowerCase();
+    if (known[lower]) {
+      return known[lower];
+    }
+    if (/^v?\d/.test(lower)) {
+      return lower.toUpperCase();
+    }
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }
+
+  function openCodeModelTitle(modelId, fallback) {
+    const id = String(modelId || '');
+    const raw = id.includes('/') ? id.split('/').pop() : id;
+    const label = String(fallback || '').trim();
+    if (label && label !== id) {
+      return label;
+    }
+    return raw
+      .split('-')
+      .filter(Boolean)
+      .map(openCodeModelTokenTitle)
+      .join(' ') || id;
+  }
+
+  function openCodeModelFooter(option, providerId) {
+    const id = String(option?.id || '');
+    if (providerId === 'opencode' || /(?:^|-)free$/.test(id)) {
+      return 'Free';
+    }
+    return '';
+  }
+
+  function openCodeDialogModelOptions() {
+    const profile = activeProfile();
+    const selectedId = activeModel(profile).id;
+    const favorites = new Set(favoriteModelIds(activeId));
+    return modelOptionsFor(profile).filter(selectableOption).map((option) => {
+      const display = localizedCliOption(option, 'model');
+      const providerId = openCodeModelProviderId(option.id);
+      return {
+        id: option.id,
+        label: option.custom && activeCustomModel(activeId)
+          ? activeCustomModel(activeId)
+          : openCodeModelTitle(option.id, display.label),
+        meta: option.custom ? display.description : openCodeModelProviderName(providerId),
+        category: openCodeModelProviderName(providerId),
+        providerId,
+        footer: openCodeModelFooter(option, providerId),
+        selected: option.id === selectedId,
+        favorite: favorites.has(option.id),
+        disabled: Boolean(option.disabled),
+      };
+    });
+  }
+
+  function openCodeModelOptionGroups() {
+    const options = openCodeDialogModelOptions();
+    const needle = openCodeDialogQuery.trim().toLowerCase();
+    if (needle) {
+      return [{
+        title: '',
+        options: options.filter((option) => [
+          option.label,
+          option.meta,
+          option.category,
+          option.id,
+        ].some((value) => String(value || '').toLowerCase().includes(needle))),
+      }];
+    }
+
+    const byId = new Map(options.map((option) => [option.id, option]));
+    const favoriteIds = favoriteModelIds(activeId);
+    const recentIds = recentModelIds(activeId).filter((id) => !favoriteIds.includes(id));
+    const usedIds = new Set();
+    const groups = [];
+    const favoriteOptions = favoriteIds.map((id) => byId.get(id)).filter(Boolean);
+    const recentOptions = recentIds.map((id) => byId.get(id)).filter(Boolean);
+
+    if (favoriteOptions.length > 0) {
+      groups.push({ title: 'Favorites', options: favoriteOptions });
+      favoriteOptions.forEach((option) => usedIds.add(option.id));
+    }
+    if (recentOptions.length > 0) {
+      groups.push({ title: 'Recent', options: recentOptions });
+      recentOptions.forEach((option) => usedIds.add(option.id));
+    }
+
+    const grouped = new Map();
+    options
+      .filter((option) => !usedIds.has(option.id))
+      .forEach((option) => {
+        if (!grouped.has(option.category)) {
+          grouped.set(option.category, []);
+        }
+        grouped.get(option.category).push(option);
+      });
+
+    grouped.forEach((items, title) => {
+      groups.push({
+        title,
+        options: items.sort((a, b) => {
+          if (a.footer === 'Free' && b.footer !== 'Free') {
+            return -1;
+          }
+          if (a.footer !== 'Free' && b.footer === 'Free') {
+            return 1;
+          }
+          return a.label.localeCompare(b.label);
+        }),
+      });
+    });
+
+    return groups;
+  }
+
+  function openCodeSessionOptions() {
+    ensureActiveThread('opencode');
+    const selectedId = activeThreadId('opencode');
+    return ensureThreadList('opencode')
+      .slice()
+      .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))
+      .map((thread) => ({
+        id: thread.id,
+        label: openCodeSessionTitle(thread),
+        meta: [
+          thread.openCodeSessionId || '',
+          formatOpenCodeTimestamp(thread.updatedAt || thread.createdAt),
+        ].filter(Boolean).join(' · '),
+        selected: thread.id === selectedId,
+      }));
+  }
+
+  function openCodeStatusLines(profile) {
+    const model = activeModel(profile);
+    const modelLabel = model.custom && activeCustomModel(activeId)
+      ? activeCustomModel(activeId)
+      : localizedCliOption(model, 'model')?.label;
+    const mode = localizedCliOption(activeAgentMode(profile), 'agentMode');
+    const mcpServers = Array.isArray(contextSummary?.mcpServers) ? contextSummary.mcpServers : [];
+    const connectedMcpCount = mcpServers.filter((entry) => entry?.status === 'connected').length;
+    const versionLabel = formatProviderVersion(profile?.version);
+
+    return [
+      { text: versionLabel ? `OpenCode ${versionLabel}` : 'OpenCode' },
+      { text: `Session ${activeOpenCodeSessionId() || activeThreadId('opencode') || 'local'}` },
+      { text: `Model ${modelLabel || 'Default'}` },
+      { text: `Agent ${mode?.label || 'Default'}` },
+      { text: `MCP ${connectedMcpCount}/${mcpServers.length}` },
+      ...openCodeContextMetrics(profile),
+    ];
+  }
+
+  function openCodeHelpLines() {
+    return commandsForActiveProvider()
+      .map((command) => ({
+        text: `/${command.name} - ${slashCommandDescription(command)}`,
+      }));
+  }
+
+  function openCodeThemeLines() {
+    return [{ text: 'Theme follows the active VS Code color theme' }];
+  }
+
+  function openCodeVariantLines() {
+    return [{ text: 'No model variants configured' }];
+  }
+
+  function openCodeOrgLines() {
+    return [{ text: 'Organizations are managed by the configured OpenCode provider' }];
+  }
+
+  function openCodeDialogEmptyText(kind) {
+    if (kind === 'sessions') {
+      return 'No sessions';
+    }
+    if (kind === 'models') {
+      return 'No models';
+    }
+    if (kind === 'mcp') {
+      return contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.empty');
+    }
+    if (kind === 'variants') {
+      return 'No model variants configured';
+    }
+    return 'No options';
+  }
+
+  function openCodeDialogTitle(kind) {
+    if (kind === 'sessions') {
+      return 'Sessions';
+    }
+    if (kind === 'models') {
+      return 'Select model';
+    }
+    if (kind === 'agents') {
+      return 'Agents';
+    }
+    if (kind === 'variants') {
+      return 'Variants';
+    }
+    if (kind === 'mcp') {
+      return i18n.t('opencode.dialog.mcp.title');
+    }
+    if (kind === 'lsp') {
+      return 'LSP';
+    }
+    if (kind === 'org') {
+      return 'Organizations';
+    }
+    if (kind === 'status') {
+      return 'Status';
+    }
+    if (kind === 'themes') {
+      return 'Themes';
+    }
+    if (kind === 'help') {
+      return 'Help';
+    }
+    return 'OpenCode';
+  }
+
+  function openCodeDialogDescription(kind) {
+    if (kind === 'sessions') {
+      const count = ensureThreadList('opencode').length;
+      return `${count} ${count === 1 ? 'session' : 'sessions'}`;
+    }
+    if (kind === 'models') {
+      return '';
+    }
+    if (kind === 'agents') {
+      const mode = localizedCliOption(activeAgentMode(), 'agentMode');
+      return mode?.label ? `Current agent: ${mode.label}` : 'Select an agent';
+    }
+    if (kind === 'mcp') {
+      return '';
+    }
+    if (kind === 'lsp') {
+      return 'LSPs auto-detected from file types';
+    }
+    if (kind === 'variants') {
+      return 'Select a model variant';
+    }
+    if (kind === 'org') {
+      return 'Switch OpenCode organization';
+    }
+    if (kind === 'status') {
+      return 'Current OpenCode workspace status';
+    }
+    if (kind === 'themes') {
+      return 'Theme selection follows VS Code';
+    }
+    if (kind === 'help') {
+      return 'OpenCode slash commands';
+    }
+    return '';
+  }
+
+  function openCodeDialogLines(kind) {
+    if (kind === 'lsp') {
+      return openCodeLspLines();
+    }
+    if (kind === 'mcp') {
+      return openCodeMcpLines();
+    }
+    if (kind === 'status') {
+      return openCodeStatusLines(activeProfile());
+    }
+    if (kind === 'themes') {
+      return openCodeThemeLines();
+    }
+    if (kind === 'variants') {
+      return openCodeVariantLines();
+    }
+    if (kind === 'org') {
+      return openCodeOrgLines();
+    }
+    if (kind === 'help') {
+      return openCodeHelpLines();
+    }
+    return [];
+  }
+
+  function openCodeDialogOptions(kind) {
+    const profile = activeProfile();
+    if (kind === 'sessions') {
+      return openCodeSessionOptions();
+    }
+
+    if (kind === 'models') {
+      const selectedId = activeModel(profile).id;
+      return modelOptionsFor(profile).filter(selectableOption).map((option) => {
+        const display = localizedCliOption(option, 'model');
+        return {
+          id: option.id,
+          label: option.custom && activeCustomModel(activeId) ? activeCustomModel(activeId) : display.label,
+          meta: display.description || display.summaryLabel || '',
+          selected: option.id === selectedId,
+          disabled: Boolean(option.disabled),
+        };
+      });
+    }
+
+    if (kind === 'agents') {
+      const selectedId = activeAgentModeId(activeId);
+      return agentModesFor(profile).map((mode) => {
+        const display = localizedCliOption(mode, 'agentMode');
+        const splitMode = profile?.id === 'opencode' ? splitAgentModeLabel(display.label) : undefined;
+        return {
+          id: mode.id,
+          label: splitMode?.title || display.label,
+          meta: splitMode?.detail || display.description || mode.instruction || '',
+          selected: mode.id === selectedId,
+          disabled: Boolean(mode.disabled),
+        };
+      });
+    }
+
+    return [];
+  }
+
+  function closeOpenCodeStatusDialog() {
+    openCodeDialogKind = '';
+    renderOpenCodeStatusDialog();
+  }
+
+  function showOpenCodeStatusDialog(kind) {
+    openCodeDialogKind = kind;
+    openCodeDialogQuery = '';
+    openCodeDialogActiveIndex = 0;
+    renderOpenCodeStatusDialog();
+  }
+
+  function renderOpenCodeStatusDialog() {
+    document.querySelector('.opencode-dialog-backdrop')?.remove();
+    if (!openCodeDialogKind || activeProfile()?.id !== 'opencode') {
+      return;
+    }
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'opencode-dialog-backdrop';
+    backdrop.addEventListener('mousedown', (event) => {
+      if (event.target === backdrop) {
+        closeOpenCodeStatusDialog();
+      }
+    });
+
+    const dialog = document.createElement('section');
+    dialog.className = `opencode-dialog is-${openCodeDialogKind}`;
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+
+    const header = document.createElement('header');
+    header.className = 'opencode-dialog-header';
+
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('h2');
+    title.textContent = openCodeDialogTitle(openCodeDialogKind);
+    titleWrap.appendChild(title);
+    const descriptionText = openCodeDialogDescription(openCodeDialogKind);
+    if (descriptionText) {
+      const description = document.createElement('p');
+      description.textContent = descriptionText;
+      titleWrap.appendChild(description);
+    }
+
+    const close = document.createElement('button');
+    close.className = 'opencode-dialog-close';
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = 'esc';
+    close.addEventListener('click', closeOpenCodeStatusDialog);
+
+    header.append(titleWrap, close);
+    dialog.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'opencode-dialog-body';
+    if (openCodeDialogKind === 'models') {
+      renderOpenCodeGroupedOptionDialogBody(body, openCodeDialogKind);
+      dialog.appendChild(body);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+      body.querySelector('.opencode-dialog-filter')?.focus();
+      return;
+    }
+    if (openCodeDialogKind === 'mcp') {
+      dialog.addEventListener('keydown', handleOpenCodeMcpDialogKeydown);
+      renderOpenCodeMcpDialogBody(body);
+      dialog.appendChild(body);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+      body.querySelector('.opencode-dialog-filter')?.focus();
+      return;
+    }
+    if (openCodeDialogKind === 'sessions' || openCodeDialogKind === 'models' || openCodeDialogKind === 'agents') {
+      renderOpenCodeOptionDialogBody(body, openCodeDialogKind);
+      dialog.appendChild(body);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+      return;
+    }
+
+    openCodeDialogLines(openCodeDialogKind).forEach((line) => {
+      const row = document.createElement('div');
+      row.className = `opencode-dialog-row${line.status ? ' is-status' : ''}`;
+      if (line.status) {
+        const dot = document.createElement('span');
+        dot.className = `opencode-sidebar-dot is-${line.status}`;
+        dot.setAttribute('aria-hidden', 'true');
+        row.appendChild(dot);
+      }
+      const text = document.createElement('span');
+      text.textContent = String(line.text || '');
+      row.appendChild(text);
+      body.appendChild(row);
+    });
+    dialog.appendChild(body);
+
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+  }
+
+  function renderOpenCodeGroupedOptionDialogBody(body, kind) {
+    const filter = document.createElement('input');
+    filter.className = 'opencode-dialog-filter';
+    filter.type = 'text';
+    filter.value = openCodeDialogQuery;
+    filter.placeholder = 'Search';
+    filter.setAttribute('aria-label', 'Search');
+    filter.addEventListener('input', () => {
+      openCodeDialogQuery = filter.value;
+      renderOpenCodeModelGroups(list);
+    });
+    body.appendChild(filter);
+
+    const list = document.createElement('div');
+    list.className = 'opencode-dialog-grouped-options';
+    body.appendChild(list);
+    renderOpenCodeModelGroups(list);
+
+    const actions = document.createElement('div');
+    actions.className = 'opencode-dialog-footer-actions';
+
+    const connect = document.createElement('button');
+    connect.type = 'button';
+    connect.className = 'opencode-dialog-footer-action';
+    connect.textContent = 'Connect provider';
+    connect.addEventListener('click', () => {
+      closeOpenCodeStatusDialog();
+      openSettingsPage('apiProviders');
+    });
+    actions.appendChild(connect);
+
+    const connectKey = document.createElement('span');
+    connectKey.className = 'opencode-dialog-footer-key';
+    connectKey.textContent = 'ctrl+a';
+    actions.appendChild(connectKey);
+
+    const favorite = document.createElement('button');
+    favorite.type = 'button';
+    favorite.className = 'opencode-dialog-footer-action';
+    favorite.textContent = 'Favorite';
+    favorite.addEventListener('click', () => {
+      toggleFavoriteModel(activeId, activeModelId(activeId));
+      renderOpenCodeModelGroups(list);
+    });
+    actions.appendChild(favorite);
+
+    const favoriteKey = document.createElement('span');
+    favoriteKey.className = 'opencode-dialog-footer-key';
+    favoriteKey.textContent = 'ctrl+f';
+    actions.appendChild(favoriteKey);
+
+    body.appendChild(actions);
+  }
+
+  function renderOpenCodeMcpDialogBody(body) {
+    const filter = document.createElement('input');
+    filter.className = 'opencode-dialog-filter';
+    filter.type = 'text';
+    filter.value = openCodeDialogQuery;
+    filter.placeholder = i18n.t('opencode.dialog.mcp.search');
+    filter.setAttribute('aria-label', i18n.t('opencode.dialog.mcp.searchAria'));
+    filter.addEventListener('input', () => {
+      openCodeDialogQuery = filter.value;
+      openCodeDialogActiveIndex = 0;
+      renderOpenCodeMcpOptions(list);
+    });
+    body.appendChild(filter);
+
+    const list = document.createElement('div');
+    list.className = 'opencode-dialog-mcp-options';
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', i18n.t('opencode.dialog.mcp.title'));
+    body.appendChild(list);
+    renderOpenCodeMcpOptions(list);
+
+    const actions = document.createElement('div');
+    actions.className = 'opencode-dialog-footer-actions';
+
+    const toggle = document.createElement('span');
+    toggle.className = 'opencode-dialog-footer-action';
+    toggle.textContent = i18n.t('opencode.dialog.mcp.toggle');
+    actions.appendChild(toggle);
+
+    const key = document.createElement('span');
+    key.className = 'opencode-dialog-footer-key';
+    key.textContent = i18n.t('opencode.dialog.mcp.space');
+    actions.appendChild(key);
+
+    body.appendChild(actions);
+  }
+
+  function renderOpenCodeMcpOptions(parent) {
+    parent.innerHTML = '';
+    const options = openCodeMcpDialogOptions();
+    if (options.length === 0) {
+      openCodeDialogActiveIndex = 0;
+      const empty = document.createElement('div');
+      empty.className = 'opencode-dialog-row';
+      empty.textContent = openCodeDialogEmptyText('mcp');
+      parent.appendChild(empty);
+      return;
+    }
+
+    openCodeDialogActiveIndex = Math.min(Math.max(openCodeDialogActiveIndex, 0), options.length - 1);
+    options.forEach((option, index) => {
+      parent.appendChild(createOpenCodeMcpOptionButton(option, index));
+    });
+  }
+
+  function createOpenCodeMcpOptionButton(option, index) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = [
+      'opencode-dialog-option',
+      index === openCodeDialogActiveIndex ? 'is-active' : '',
+      option.enabled ? 'is-enabled' : 'is-disabled',
+    ].filter(Boolean).join(' ');
+    button.dataset.opencodeDialogKind = 'mcp';
+    button.dataset.opencodeDialogValue = option.id;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', index === openCodeDialogActiveIndex ? 'true' : 'false');
+    button.addEventListener('click', () => {
+      openCodeDialogActiveIndex = index;
+      toggleOpenCodeMcp(activeId, option.id);
+      renderAll();
+      requestAnimationFrame(focusOpenCodeMcpActiveOption);
+    });
+
+    const check = document.createElement('span');
+    check.className = 'opencode-dialog-option-check';
+    check.setAttribute('aria-hidden', 'true');
+    button.appendChild(check);
+
+    const content = document.createElement('span');
+    content.className = 'opencode-dialog-option-content';
+
+    const label = document.createElement('span');
+    label.className = 'opencode-dialog-option-label';
+    label.textContent = option.label;
+    content.appendChild(label);
+
+    if (option.meta) {
+      const meta = document.createElement('span');
+      meta.className = 'opencode-dialog-option-meta';
+      meta.textContent = option.meta;
+      content.appendChild(meta);
+    }
+
+    button.appendChild(content);
+
+    const footer = document.createElement('span');
+    footer.className = `opencode-dialog-option-footer is-${option.enabled ? 'enabled' : 'disabled'}`;
+    footer.textContent = option.footer;
+    button.appendChild(footer);
+
+    return button;
+  }
+
+  function handleOpenCodeMcpDialogKeydown(event) {
+    if (openCodeDialogKind !== 'mcp') {
+      return;
+    }
+
+    const options = openCodeMcpDialogOptions();
+    if (options.length === 0) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      openCodeDialogActiveIndex = (openCodeDialogActiveIndex + delta + options.length) % options.length;
+      renderOpenCodeStatusDialog();
+      requestAnimationFrame(focusOpenCodeMcpActiveOption);
+      return;
+    }
+
+    if (event.key === ' ') {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.classList.contains('opencode-dialog-filter')) {
+        return;
+      }
+      event.preventDefault();
+      const option = options[openCodeDialogActiveIndex];
+      toggleOpenCodeMcp(activeId, option.id);
+      renderAll();
+      requestAnimationFrame(focusOpenCodeMcpActiveOption);
+    }
+  }
+
+  function focusOpenCodeMcpActiveOption() {
+    document.querySelector('.opencode-dialog.is-mcp .opencode-dialog-option.is-active')?.focus();
+  }
+
+  function renderOpenCodeModelGroups(parent) {
+    parent.innerHTML = '';
+    const groups = openCodeModelOptionGroups().filter((group) => group.options.length > 0);
+    if (groups.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'opencode-dialog-row';
+      empty.textContent = openCodeDialogEmptyText('models');
+      parent.appendChild(empty);
+      return;
+    }
+
+    groups.forEach((group) => {
+      if (group.title) {
+        const heading = document.createElement('div');
+        heading.className = 'opencode-dialog-group-heading';
+        heading.textContent = group.title;
+        parent.appendChild(heading);
+      }
+
+      group.options.forEach((option) => {
+        parent.appendChild(createOpenCodeDialogOptionButton('models', option));
+      });
+    });
+  }
+
+  function renderOpenCodeOptionDialogBody(body, kind) {
+    const options = openCodeDialogOptions(kind);
+    if (options.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'opencode-dialog-row';
+      empty.textContent = openCodeDialogEmptyText(kind);
+      body.appendChild(empty);
+      return;
+    }
+
+    options.forEach((option) => {
+      body.appendChild(createOpenCodeDialogOptionButton(kind, option));
+    });
+  }
+
+  function createOpenCodeDialogOptionButton(kind, option) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = [
+      'opencode-dialog-option',
+      option.selected ? 'is-selected' : '',
+      option.disabled ? 'is-disabled' : '',
+    ].filter(Boolean).join(' ');
+    button.dataset.opencodeDialogKind = kind;
+    button.dataset.opencodeDialogValue = option.id;
+    button.disabled = Boolean(option.disabled);
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+    button.addEventListener('click', () => selectOpenCodeDialogOption(kind, option.id));
+
+    const check = document.createElement('span');
+    check.className = 'opencode-dialog-option-check';
+    check.setAttribute('aria-hidden', 'true');
+    button.appendChild(check);
+
+    const content = document.createElement('span');
+    content.className = 'opencode-dialog-option-content';
+
+    const label = document.createElement('span');
+    label.className = 'opencode-dialog-option-label';
+    label.textContent = option.label;
+    content.appendChild(label);
+
+    if (option.meta) {
+      const meta = document.createElement('span');
+      meta.className = 'opencode-dialog-option-meta';
+      meta.textContent = option.meta;
+      content.appendChild(meta);
+    }
+
+    button.appendChild(content);
+
+    if (option.footer) {
+      const footer = document.createElement('span');
+      footer.className = 'opencode-dialog-option-footer';
+      footer.textContent = option.footer;
+      button.appendChild(footer);
+    }
+
+    return button;
+  }
+
+  function selectOpenCodeDialogOption(kind, value) {
+    if (kind === 'sessions') {
+      const thread = findThread('opencode', value);
+      if (!thread) {
+        return;
+      }
+
+      setActiveThread('opencode', thread);
+      activeId = 'opencode';
+      persist();
+      closeOpenCodeStatusDialog();
+      renderAll();
+      return;
+    }
+
+    if (kind === 'models') {
+      const option = modelOptionsFor(activeProfile()).find((item) => item.id === value);
+      activeModelByProvider[activeId] = value;
+      modelSelect.value = value;
+      rememberRecentModel(activeId, value);
+      persist();
+      persistUserSelection();
+      closeOpenCodeStatusDialog();
+      renderAll();
+      if (option?.custom) {
+        modelMenu.open = true;
+        customModelInput.focus();
+      }
+      return;
+    }
+
+    if (kind === 'agents') {
+      activeAgentModeByProvider[activeId] = value;
+      agentModeSelect.value = value;
+      legacyWorkflowMode = undefined;
+      persist();
+      persistUserSelection();
+      closeOpenCodeStatusDialog();
+      renderAll();
+      return;
+    }
+
+    if (kind === 'mcp') {
+      toggleOpenCodeMcp(activeId, value);
+      renderAll();
+    }
+  }
+
+  function renderOpenCodeSidebar() {
+    if (!sidebar) {
+      return;
+    }
+
+    const profile = activeProfile();
+    sidebar.hidden = profile?.id !== 'opencode';
+    sidebar.innerHTML = '';
+    if (profile?.id !== 'opencode') {
+      return;
+    }
+
+    const thread = ensureActiveThread(profile.id);
+    const versionLabel = formatProviderVersion(profile.version);
+    const shell = document.createElement('div');
+    shell.className = 'opencode-sidebar';
+
+    const sessionTitle = document.createElement('div');
+    sessionTitle.className = 'opencode-sidebar-session-title';
+    sessionTitle.textContent = `${openCodeSessionTitle(thread)} - ${formatOpenCodeTimestamp(thread?.createdAt)}`;
+    shell.appendChild(sessionTitle);
+
+    appendOpenCodeBlock(shell, 'Context', openCodeContextMetrics(profile), { key: 'context' });
+    appendOpenCodeBlock(shell, 'MCP', openCodeMcpLines(), {
+      key: 'mcp',
+      toggle: true,
+      action: () => showOpenCodeStatusDialog('mcp'),
+    });
+    appendOpenCodeBlock(shell, 'LSP', openCodeLspLines(), {
+      key: 'lsp',
+      action: () => showOpenCodeStatusDialog('lsp'),
+    });
+
+    const spacer = document.createElement('div');
+    spacer.className = 'opencode-sidebar-spacer';
+    shell.appendChild(spacer);
+
+    const footer = document.createElement('div');
+    footer.className = 'opencode-sidebar-footer';
+    const workspace = openCodeWorkspaceFooter();
+    if (workspace) {
+      const workspaceLine = document.createElement('div');
+      workspaceLine.textContent = workspace;
+      footer.appendChild(workspaceLine);
+    }
+    const versionLine = document.createElement('div');
+    versionLine.className = 'opencode-sidebar-version';
+    versionLine.textContent = versionLabel ? `OpenCode ${versionLabel}` : 'OpenCode';
+    footer.appendChild(versionLine);
+    shell.appendChild(footer);
+
+    sidebar.appendChild(shell);
   }
 
   function taskStatusCounts(source) {
@@ -2481,6 +3939,13 @@
     const selectedProfile = activeProfile();
     messages.innerHTML = '';
 
+    if (profilesLoading) {
+      syncMessageStatusTimer(false);
+      appendProviderLoadingState();
+      restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
+      return;
+    }
+
     if (!activeId || !selectedProfile) {
       const firstInstallHintProfile = profiles.find((profile) => profile?.installHint && !profile.installed);
       const noProviderSubtitle = firstInstallHintProfile
@@ -2537,6 +4002,9 @@
 
       const body = document.createElement('div');
       body.className = 'message-content';
+      if (item.role === 'assistant' && normalizeMessageText(item.thinking).trim()) {
+        appendMessageThinking(bubble, item.thinking);
+      }
       renderMarkdownLite(body, normalizeMessageText(item.text));
       bubble.appendChild(body);
 
@@ -2789,6 +4257,28 @@
     }
 
     empty.appendChild(suggestions);
+    messages.appendChild(empty);
+  }
+
+  function appendProviderLoadingState() {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state is-loading';
+
+    const spinner = document.createElement('div');
+    spinner.className = 'loading-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    empty.appendChild(spinner);
+
+    const title = document.createElement('div');
+    title.className = 'empty-title';
+    title.textContent = i18n.t('provider.loading');
+    empty.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.className = 'empty-subtitle';
+    subtitle.textContent = i18n.t('provider.loadingSubtitle');
+    empty.appendChild(subtitle);
+
     messages.appendChild(empty);
   }
 
@@ -3177,7 +4667,7 @@
     permissionOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
       button.disabled = !canSend || busy;
     });
-    input.placeholder = canSend
+    input.placeholder = profilesLoading ? i18n.t('input.placeholderLoading') : canSend
       ? (profile?.id === 'claude' && !missingSelection
           ? i18n.t('claude.placeholder')
           : (missingSelection
@@ -3229,6 +4719,8 @@
     renderProviderHint();
     renderContextSummaryLabel();
     renderContextBudget();
+    renderOpenCodeSidebar();
+    renderOpenCodeStatusDialog();
     renderMessages();
     renderAttachmentStrip();
     renderComposer();
@@ -3332,24 +4824,47 @@
     return { threadId: thread?.id || '', index: conversation.length - 1 };
   }
 
-  function updateStream(message) {
+  function appendChunkText(current, chunk) {
+    const normalized = normalizeMessageText(chunk);
+    if (!normalized) {
+      return current || '';
+    }
+
+    return `${current || ''}${normalized}`;
+  }
+
+  function ensureStreamTarget(message) {
     let target = streamTargets[message.sessionId];
-    if (!target) {
-      const result = addMessage(
-        message.cliId,
-        message.stream === 'error' ? 'error' : 'assistant',
-        '',
-        undefined,
-        true
-      );
-      target = { cliId: message.cliId, threadId: result.threadId, index: result.index, buffer: '' };
-      streamTargets[message.sessionId] = target;
+    if (target) {
+      return target;
+    }
+
+    const result = addMessage(
+      message.cliId,
+      message.stream === 'error' ? 'error' : 'assistant',
+      '',
+      undefined,
+      true
+    );
+    target = { cliId: message.cliId, threadId: result.threadId, index: result.index, buffer: '' };
+    streamTargets[message.sessionId] = target;
+    return target;
+  }
+
+  function updateStream(message) {
+    const target = ensureStreamTarget(message);
+    if (message.thinking) {
+      updateStreamThinking(message);
+      if (!normalizeMessageText(message.text).trim()) {
+        return;
+      }
     }
 
     const item = ensureConversation(target.cliId, target.threadId)[target.index];
     if (!item) {
       return;
     }
+    noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
 
     const buffered = `${target.buffer || item.text || ''}${normalizeMessageText(message.text)}`;
     const filtered = filterInternalPromptEcho(buffered);
@@ -3362,6 +4877,21 @@
       item.role = 'error';
       updateTaskStatus(taskBySessionId[message.sessionId], { status: 'failed' });
     }
+    persist();
+    if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
+      renderMessages();
+    }
+  }
+
+  function updateStreamThinking(message) {
+    const target = ensureStreamTarget(message);
+    const item = ensureConversation(target.cliId, target.threadId)[target.index];
+    if (!item) {
+      return;
+    }
+
+    noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
+    item.thinking = appendChunkText(item.thinking, message.thinking);
     persist();
     if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
       renderMessages();
@@ -3388,6 +4918,9 @@
 
   function markSessionEnded(message) {
     const target = streamTargets[message.sessionId];
+    if (target) {
+      noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
+    }
     updateTaskStatus(taskBySessionId[message.sessionId], {
       status: Number(message.exitCode) === 0 ? 'completed' : 'failed',
     });
@@ -3459,6 +4992,28 @@
     }
 
     return parts.length ? `${i18n.t('context.prefix')}: ${parts.join(', ')}` : undefined;
+  }
+
+  function appendMessageThinking(bubble, text) {
+    const normalized = normalizeMessageText(text);
+    if (!normalized.trim()) {
+      return;
+    }
+
+    const thinking = document.createElement('div');
+    thinking.className = 'message-thinking';
+
+    const label = document.createElement('div');
+    label.className = 'message-thinking-label';
+    label.textContent = `${i18n.t('message.thinking')}:`;
+    thinking.appendChild(label);
+
+    const body = document.createElement('div');
+    body.className = 'message-thinking-body';
+    body.textContent = normalized;
+    thinking.appendChild(body);
+
+    bubble.appendChild(thinking);
   }
 
   function renderMarkdownLite(container, text) {
@@ -4221,20 +5776,73 @@
     const summary = document.createElement('div');
     summary.className = 'md-file-summary';
 
-    const summaryText = document.createElement('span');
-    summaryText.textContent = i18n.locale === 'zh-CN'
-      ? `${fileResults.length} 个文件`
-      : `${fileResults.length} ${fileResults.length === 1 ? 'file' : 'files'}`;
-    summary.appendChild(summaryText);
+    const icon = document.createElement('span');
+    icon.className = 'md-file-header-icon';
+    icon.innerHTML = FILE_CARD_ICON_SVG;
+    summary.appendChild(icon);
 
-    appendFileStats(summary, totalFileStats(fileResults), 'md-file-summary-stats');
+    const summaryBody = document.createElement('div');
+    summaryBody.className = 'md-file-summary-body';
+
+    const summaryTitle = document.createElement('div');
+    summaryTitle.className = 'md-file-summary-title';
+    summaryTitle.textContent = i18n.t('fileCard.edited', {
+      count: String(fileResults.length),
+      fileLabel: fileCardFileLabel(fileResults.length),
+    });
+    summaryBody.appendChild(summaryTitle);
+
+    const summaryMeta = document.createElement('div');
+    summaryMeta.className = 'md-file-summary-meta';
+    appendFileStats(summaryMeta, totalFileStats(fileResults), 'md-file-summary-stats');
+    summaryBody.appendChild(summaryMeta);
+    summary.appendChild(summaryBody);
+
+    const actions = document.createElement('div');
+    actions.className = 'md-file-actions';
+    actions.appendChild(createFileCardActionButton('undo', i18n.t('fileCard.undo'), '↶'));
+    actions.appendChild(createFileCardActionButton('review', i18n.t('fileCard.review')));
+    summary.appendChild(actions);
     list.appendChild(summary);
 
-    fileResults.forEach((fileResult) => {
+    fileResults.slice(0, FILE_CARD_COLLAPSE_LIMIT).forEach((fileResult) => {
       list.appendChild(createFileResultRow(fileResult));
     });
 
+    const hiddenResults = fileResults.slice(FILE_CARD_COLLAPSE_LIMIT);
+    hiddenResults.forEach((fileResult) => {
+      const row = createFileResultRow(fileResult);
+      row.classList.add('is-hidden');
+      row.hidden = true;
+      list.appendChild(row);
+    });
+
+    if (hiddenResults.length > 0) {
+      const showMore = document.createElement('button');
+      showMore.className = 'md-file-show-more';
+      showMore.type = 'button';
+      showMore.dataset.fileCardShowMore = 'true';
+      showMore.textContent = i18n.t('fileCard.showMore', {
+        count: String(hiddenResults.length),
+        fileLabel: fileCardFileLabel(hiddenResults.length),
+      });
+      list.appendChild(showMore);
+    }
+
     container.appendChild(list);
+  }
+
+  function createFileCardActionButton(action, label, suffix = '') {
+    const button = document.createElement('button');
+    button.className = 'md-file-action';
+    button.type = 'button';
+    button.dataset.fileCardAction = action;
+    button.textContent = suffix ? `${label} ${suffix}` : label;
+    return button;
+  }
+
+  function fileCardFileLabel(count) {
+    return i18n.t(count === 1 ? 'fileCard.file' : 'fileCard.files');
   }
 
   function totalFileStats(fileResults) {
@@ -4255,22 +5863,13 @@
     const summary = document.createElement(hasDetail ? 'summary' : 'div');
     summary.className = 'md-file-row-summary';
 
-    const body = document.createElement('div');
-    body.className = 'md-file-body';
-
-    const title = document.createElement('div');
-    title.className = 'md-file-title';
-
     const path = document.createElement('code');
     path.className = 'md-file-path';
     path.textContent = compactFilePathForDisplay(fileResult.path);
     path.title = fileResult.path;
-    title.appendChild(path);
+    summary.appendChild(path);
 
-    appendFileStats(title, fileResult, 'md-file-row-stats');
-    body.appendChild(title);
-
-    summary.appendChild(body);
+    appendFileStats(summary, fileResult, 'md-file-row-stats');
 
     if (hasDetail) {
       const chevron = document.createElement('span');
@@ -4317,6 +5916,23 @@
 
   function isFileStatsOnly(detail) {
     return /^(?:(?:\+\d+|-\d+)\s*)+$/.test(normalizeMessageText(detail).trim());
+  }
+
+  function revealFileCardRows(button) {
+    const card = button.closest('.md-file-list');
+    if (!card) {
+      return;
+    }
+
+    card.querySelectorAll('.md-file-row.is-hidden').forEach((row) => {
+      row.classList.remove('is-hidden');
+      row.hidden = false;
+    });
+    button.remove();
+  }
+
+  function fileCardReviewPrompt() {
+    return i18n.t('fileCard.reviewPrompt');
   }
 
   function appendCodeBlock(container, code, language) {
@@ -4700,7 +6316,9 @@
     if (!button) {
       return;
     }
-    activeSettingsSection = button.dataset.settingsSection === 'apiProviders' ? 'apiProviders' : 'agents';
+    activeSettingsSection = ['agents', 'apiProviders', 'commitMessage'].includes(button.dataset.settingsSection)
+      ? button.dataset.settingsSection
+      : 'agents';
     renderSettingsPage();
   });
 
@@ -4721,6 +6339,9 @@
   });
 
   homeAgentsSave?.addEventListener('click', saveHomeAgentSettings);
+
+  commitMessageSave?.addEventListener('click', saveCommitMessageSettings);
+  commitMessageReset?.addEventListener('click', resetCommitMessageSettings);
 
   apiProviderAdd?.addEventListener('click', () => {
     const provider = createApiProviderDraft();
@@ -4861,7 +6482,9 @@
 
   modelSelect.addEventListener('change', () => {
     activeModelByProvider[activeId] = modelSelect.value;
+    rememberRecentModel(activeId, modelSelect.value);
     persist();
+    persistUserSelection();
     renderAll();
   });
 
@@ -4874,7 +6497,9 @@
     const option = modelOptionsFor(activeProfile()).find((item) => item.id === button.dataset.value);
     activeModelByProvider[activeId] = button.dataset.value;
     modelSelect.value = button.dataset.value;
+    rememberRecentModel(activeId, button.dataset.value);
     persist();
+    persistUserSelection();
     renderAll();
 
     if (option?.custom) {
@@ -4947,6 +6572,26 @@
   });
 
   messages.addEventListener('click', (event) => {
+    const fileCardShowMore = event.target.closest('[data-file-card-show-more]');
+    if (fileCardShowMore) {
+      event.preventDefault();
+      event.stopPropagation();
+      revealFileCardRows(fileCardShowMore);
+      return;
+    }
+
+    const fileCardAction = event.target.closest('[data-file-card-action]');
+    if (fileCardAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (fileCardAction.dataset.fileCardAction === 'undo') {
+        executeOpenCodeNativeSlashCommand({ name: 'undo' });
+      } else if (fileCardAction.dataset.fileCardAction === 'review') {
+        send('freeform', fileCardReviewPrompt());
+      }
+      return;
+    }
+
     const copyButton = event.target.closest('[data-message-copy]');
     if (copyButton) {
       event.preventDefault();
@@ -5016,6 +6661,10 @@
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      if (openCodeDialogKind) {
+        closeOpenCodeStatusDialog();
+        return;
+      }
       if (apiSettingsPage && !apiSettingsPage.hidden) {
         closeApiProviderSettings();
         return;
@@ -5033,13 +6682,18 @@
     const message = event.data;
     switch (message.command) {
       case 'profiles':
+        profilesLoading = false;
         profiles = message.profiles || [];
         {
           const availableProfiles = visibleInstalledProfiles();
           const storedAgentModes = persistedSelectionMap(message.activeAgentModeByProvider);
+          const storedModels = persistedSelectionMap(message.activeModelByProvider);
           activeAgentModeByProvider = hasAppliedPersistentSelection
             ? { ...storedAgentModes, ...activeAgentModeByProvider }
             : { ...activeAgentModeByProvider, ...storedAgentModes };
+          activeModelByProvider = hasAppliedPersistentSelection
+            ? { ...storedModels, ...activeModelByProvider }
+            : { ...activeModelByProvider, ...storedModels };
           const storedProviderProfile = availableProfiles.find(
             (profile) => profile.id === message.activeProviderId
           );
@@ -5053,8 +6707,13 @@
           if (!activeId || !availableProfiles.some((profile) => profile.id === activeId)) {
             activeId = defaultProfile?.id || availableProfiles[0]?.id || '';
           }
+          if (activeId) {
+            activeAgentModeId(activeId);
+            activeModelId(activeId);
+          }
         }
         persist();
+        persistUserSelection();
         renderAll();
         refreshActiveContext();
         break;
@@ -5066,6 +6725,8 @@
         renderProviderHint();
         renderContextSummaryLabel();
         renderContextBudget();
+        renderOpenCodeSidebar();
+        renderOpenCodeStatusDialog();
         break;
       case 'apiProviderSettings':
         apiProviderSettings = normalizeApiProviderSettings(message.settings);
@@ -5078,6 +6739,10 @@
       case 'homeAgentSettings':
         homeAgentSettings = normalizeHomeAgentSettings(message.settings);
         renderAll();
+        break;
+      case 'commitMessageSettings':
+        commitMessageSettings = normalizeCommitMessageSettings(message.settings);
+        renderSettingsPage();
         break;
       case 'openProviderSettings':
         openSettingsPage(message.section);
@@ -5138,6 +6803,20 @@
         break;
       case 'output':
         updateStream(message);
+        break;
+      case 'openCodeNativeCommandResult':
+        if (message.ok && message.nativeCommand === 'fork' && handleOpenCodeForkResult(message)) {
+          break;
+        }
+        addMessage(
+          'opencode',
+          message.ok ? 'system' : 'error',
+          openCodeNativeCommandResultText(message),
+          undefined,
+          false,
+          activeThreadId('opencode')
+        );
+        renderAll();
         break;
       case 'sessionNotice':
         updateSessionNotice(message);

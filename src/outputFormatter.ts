@@ -17,11 +17,13 @@ export interface NormalizedCliOutputChunk {
   text: string;
   buffer: string;
   status?: 'thinking';
+  thinking?: string;
 }
 
 interface RenderedOpenCodeJsonEvent {
   text: string;
   status?: NormalizedCliOutputChunk['status'];
+  thinking?: string;
 }
 
 interface RenderedClaudeJsonEvent {
@@ -272,6 +274,7 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
   const lines = text.split('\n');
   const buffer = text.endsWith('\n') ? '' : lines.pop() ?? '';
   const rendered: string[] = [];
+  const renderedThinking: string[] = [];
   let parsedAny = false;
   let status: NormalizedCliOutputChunk['status'];
 
@@ -287,6 +290,9 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
     parsedAny = true;
     status = renderedEvent.status ?? status;
     rendered.push(renderedEvent.text);
+    if (renderedEvent.thinking) {
+      renderedThinking.push(renderedEvent.thinking);
+    }
   }
 
   if (!parsedAny && buffer) {
@@ -295,6 +301,9 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
       const result: NormalizedCliOutputChunk = { text: renderedEvent.text, buffer: '' };
       if (renderedEvent.status) {
         result.status = renderedEvent.status;
+      }
+      if (renderedEvent.thinking) {
+        result.thinking = renderedEvent.thinking;
       }
       return result;
     }
@@ -307,6 +316,9 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
   const result: NormalizedCliOutputChunk = { text: rendered.join(''), buffer };
   if (status) {
     result.status = status;
+  }
+  if (renderedThinking.length > 0) {
+    result.thinking = renderedThinking.join('');
   }
   return result;
 }
@@ -350,6 +362,19 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
   const part = firstObject(data.part, event.part);
   const partType = pickString(part.type, data.partType, event.partType);
 
+  if (eventType?.includes('message.part.updated')) {
+    const text = pickString(part.text, data.text, event.text);
+    if (partType === 'reasoning') {
+      return { text: '', status: 'thinking', ...(text ? { thinking: text } : {}) };
+    }
+
+    if (partType === 'text' && text) {
+      return { text };
+    }
+
+    return { text: '' };
+  }
+
   if (eventType?.includes('message.part.delta')) {
     const delta = pickString(data.delta, data.text, part.delta, part.text, event.delta, event.text);
     if (!delta) {
@@ -357,14 +382,15 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
     }
 
     if (partType === 'reasoning') {
-      return { text: '', status: 'thinking' };
+      return { text: '', status: 'thinking', thinking: delta };
     }
 
     return { text: delta };
   }
 
   if (eventType === 'reasoning') {
-    return { text: '', status: 'thinking' };
+    const text = pickString(part.text, data.text, event.text);
+    return { text: '', status: 'thinking', ...(text ? { thinking: text } : {}) };
   }
 
   if (eventType === 'text') {
@@ -376,7 +402,28 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
     return { text };
   }
 
+  if (eventType === 'message.updated') {
+    const message = openCodeErrorMessage(firstObject(data.info, event.info));
+    return { text: message ? `Error: ${message}\n` : '' };
+  }
+
+  if (eventType === 'error') {
+    const message = openCodeErrorMessage(firstObject(data.error, event.error, event));
+    return { text: message ? `Error: ${message}\n` : '' };
+  }
+
+  if (eventType === 'session.error') {
+    const message = openCodeErrorMessage(firstObject(data.error, event.error));
+    return { text: message ? `Error: ${message}\n` : '' };
+  }
+
   return { text: '' };
+}
+
+function openCodeErrorMessage(errorOwner: Record<string, unknown>): string | undefined {
+  const error = firstObject(errorOwner.error, errorOwner);
+  const data = firstObject(error.data);
+  return pickString(data.message, error.message);
 }
 
 function extractOpenCodeReadableError(text: string): string | undefined {

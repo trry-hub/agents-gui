@@ -5,9 +5,9 @@
 # ═══════════════════════════════════════════════════
 ---
 brain: default
-updated: 2026-05-07T08:34:07
-neurons: 7
-synapses: 7
+updated: 2026-05-13T10:10:24
+neurons: 106
+synapses: 373
 token_budget: 1200
 depth_available: [surface, detail, deep]
 ---
@@ -17,50 +17,71 @@ depth_available: [surface, detail, deep]
 # Agent: scan this section to understand the knowledge landscape.
 # Format: [id] content (type) {p:N} →edge→ [target_id_or_text]
 
-[c1] Agents Hub UI decision: task board should not persist for… (concept) {p:5}
-  →involves→ "not persist for completed/failed/stopped history"
-  →related_to→ "ui decision"
-  →related_to→ "agents hub"
-  →involves→ "Agents Hub UI"
-  →related_to→ "hub ui"
+[c22] qxs-factory_vue3 material migration status on 2026-05-12: material routes are… (concept) {p:6}
+  →co_occurs→ [c6] "Decision: task board should not persist for…"
+  →co_occurs→ [c6] "Decision: task board should not persist for…"
+  →related_to→ "factory_vue3"
+  →related_to→ "factory_vue3"
+  →involves→ "resolution"
 
-[i1] not persist for completed/failed/stopped history (intent) {p:4}
+[c23] finding: only first-level visible factory entries still using microapp are… (concept) {p:6}
+  →co_occurs→ [c1] "Error: compaction for ksh-factory_vue/qxs-factory_vue3"
+  →co_occurs→ [c2] "ksh-factory_vue/qxs-factory_vue3 migration analysis on…"
+  →co_occurs→ [c2] "ksh-factory_vue/qxs-factory_vue3 migration analysis on…"
+  →related_to→ "level visible"
+  →related_to→ "finding first"
 
-[c2] ui decision (concept) {p:4}
+[c1] Error: compaction for ksh-factory_vue/qxs-factory_vue3 (concept) {p:7}
+  →stored_by→ "Error: compaction for ksh-factory_vue/qxs-factory_vue3"
+  →related_to→ "factory_vue3"
+  →related_to→ "factory_vue3"
+  →related_to→ "factory_vue3"
+  →related_to→ "factory_vue3"
 
-[c3] hub ui (concept) {p:4}
-
-[c4] agents hub (concept) {p:4}
-
-[c5] Agents Hub UI (concept) {p:4}
+[c2] ksh-factory_vue/qxs-factory_vue3 migration analysis on 2026-05-12 found… (concept) {p:7}
+  →involves→ "MicroApp"
+  →involves→ "factory_vue3"
+  →related_to→ "factory_vue3"
+  →related_to→ "factory_vue3"
+  →related_to→ "factory_vue3"
 
 # ── CLUSTERS ───────────────────────────────────────
 # Auto-detected topic groups from brain.db entity co-occurrence.
 # Agent: use clusters to scope recall queries.
 
-@hub: [16b6aa03-57b5-4c3c-b76b-ad94a3d24055, 2dcfacc4-4ead-43d8-a876-820750008491, 37f51921-4d6e-4426-87c5-18842b52bb69, 4df5c67d-4029-430a-9b63-5898a3eba795, aaae6b60-08fc-4aaf-ba04-debeab875150] "not persist for completed/failed/stopped, Agents Hub UI, agents hub"
+@ksh-factory_vue/qxs-factory_vue3: [381829f5-2ea9-4b11-bfee-09cfd5a79e27, 5df464ba-2ba7-4a70-ac64-fee2e7523f38, 7a0d9d06-3273-467c-ac2c-64d04f13ed1f, b02a50db-29fb-4880-9112-6d79a7e2f881, f2e2530a-b595-4363-a01f-17c4faf05144] "ksh-factory_vue/qxs-factory_vue3 migrati, factory_vue3, factory_vue"
+@decision: [01321bf3-44ea-48e3-b55b-52b292eed4d2, 230fd0b7-0f50-4d21-95c4-ae6fd72ad45f, 41488799-ebc8-4e54-b2a2-918d3bbdc744, 674dd5e8-3646-454d-8b24-628119b52417, 6825bdaf-d935-4d8c-8b31-85ca2ba60fa5] "Decision: task board should not persist "
+@started: [8253418e-1582-4a39-b710-615cd6674c3c, 8bb48ff2-3f73-40da-bcd6-d5a63a1830f8] "Started qxs-factory_vue main sidebar mig, screenshot"
+@qxs-factory_vue3: [7274123a-572e-4589-a83d-78557af10ba4, fc8ef172-420e-40d5-9512-5df0d89717c8] "qxs-factory_vue3 help center should matc, HelpCenter"
 
 # ── SIGNALS ────────────────────────────────────────
 # Active alerts, unresolved items, pending decisions.
 # Agent: check this FIRST each session for urgent context.
 
-~ Agents Hub UI decision: task board should not persist for completed/failed/stopp
+! ksh-factory_vue sidebar decision on 2026-05-13: used the existing Vue 2 Element
+! Started qxs-factory_vue main sidebar migration to Element Plus on 2026-05-13; cu
+! qxs-factory_vue3 help center should match old scheme: keep `/help/**` route acce
+~ qxs-factory_vue3 help-center migration completion: changed legacy `/sub-app/help
+! [Session reflection] 'decision' is a recurring theme across 3 memories
+~ Session summary: 5 memories across topics: tab, task, board, persist, completed.
+! Error: can coincide with the tab switch due to prefetchdelay or occurs when a ro
+! Decision: task board should not persist for completed/failed/stopped history\n-
+! Error: compaction\n- [concept] microapp\n- [concept] app
+! ksh-factory_vue/qxs-factory_vue3 material migration status on 2026-05-13: route/
 
 # ── DEPTH MAP ──────────────────────────────────────
 # When surface isn't enough, this tells agent WHERE to dig.
 # Format: [id] → depth_hint (context)
 
-[c1] → SUFFICIENT (5 edges on surface)
-[i1] → SUFFICIENT (0 edges, fully represented)
-[c2] → SUFFICIENT (0 edges, fully represented)
-[c3] → SUFFICIENT (0 edges, fully represented)
-[c4] → SUFFICIENT (0 edges, fully represented)
-[c5] → SUFFICIENT (0 edges, fully represented)
+[c1] → NEEDS_DEEP (21 synapses in brain.db, recall "Error: compaction for…")
+[c2] → NEEDS_DEEP (21 synapses in brain.db, recall "ksh-factory_vue/qxs-factory_vue3…")
+[c22] → NEEDS_DEEP (16 synapses in brain.db, recall "qxs-factory_vue3 material migration…")
+[c23] → NEEDS_DETAIL (11 total synapses, recall "finding: only first-level visible…")
 
 # ── META ───────────────────────────────────────────
 # Stats for agent to gauge brain richness
 
-coverage: 0.86
-staleness: 0.0
-last_consolidation: 2026-05-07T08:34:07
-top_entities: [Agents, not, ui, hub, agents]
+coverage: 0.28
+staleness: 0.01
+last_consolidation: 2026-05-13T10:10:24
+top_entities: [Error:, ksh-factory_vue/qxs-factory_vue3, Agents, Decision:, Started]
