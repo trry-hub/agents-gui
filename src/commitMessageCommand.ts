@@ -24,6 +24,7 @@ import {
   cleanGeneratedCommitMessage,
   resolveCommitMessageLanguage,
   truncateCommitDiff,
+  type CommitMessageLanguage,
   type CommitMessageLanguageSetting,
 } from './commitMessage';
 import {
@@ -42,6 +43,7 @@ interface GitChange {
 
 interface GitRepositoryState {
   readonly indexChanges: GitChange[];
+  readonly workingTreeChanges?: GitChange[];
 }
 
 interface GitRepositoryUIState {
@@ -81,14 +83,21 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     noRepository: 'No Git repository was found in this workspace.',
     chooseRepository: 'Choose a repository for the staged commit message',
     noStagedChanges: 'No staged changes found. Stage the files you want to commit first.',
+    openSourceControl: 'Open Source Control',
+    stageAllAndGenerate: 'Stage All and Generate',
     providerUnavailable: '{provider} is not installed or cannot be started.',
+    chooseInstalledProvider: '{provider} is not installed. Choose an installed provider for commit messages.',
+    useProviderForCommitMessage: 'Use for Git commit messages',
+    openCommitSettings: 'Open Commit Message Settings',
+    openCommitSettingsDescription: 'Configure providers, language, and diff limits',
+    providerSelected: '{provider} will be used for Git commit messages.',
+    providerSetupRequired: '{provider} is not installed. Install or configure an AI provider to generate commit messages.',
+    openSetup: 'Open Setup',
+    copyInstallCommand: 'Copy Install Command',
+    installCommandCopied: 'Install command copied.',
     emptyOutput: 'The AI provider did not return a commit message.',
     generated: 'Commit message generated from staged changes.',
     generatedTruncated: 'Commit message generated from truncated staged changes.',
-    existingMessage: 'The Source Control input already has a commit message.',
-    overwrite: 'Overwrite',
-    append: 'Append',
-    cancel: 'Cancel',
     cancelled: 'Commit message generation was cancelled.',
     failed: 'Failed to generate commit message: {message}',
   },
@@ -100,14 +109,21 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     noRepository: '当前工作区没有找到 Git 仓库。',
     chooseRepository: '选择要生成暂存区提交信息的仓库',
     noStagedChanges: '暂存区没有变更，请先 git add 需要提交的文件。',
+    openSourceControl: '打开源代码管理',
+    stageAllAndGenerate: '暂存全部并生成',
     providerUnavailable: '{provider} 未安装或无法启动。',
+    chooseInstalledProvider: '{provider} 未安装。选择一个已安装提供方用于提交信息生成。',
+    useProviderForCommitMessage: '用于 Git 提交信息生成',
+    openCommitSettings: '打开提交信息设置',
+    openCommitSettingsDescription: '配置提供方、语言和 diff 限制',
+    providerSelected: '将使用 {provider} 生成 Git 提交信息。',
+    providerSetupRequired: '{provider} 未安装。请安装或配置一个 AI 提供方后再生成提交信息。',
+    openSetup: '打开配置',
+    copyInstallCommand: '复制安装命令',
+    installCommandCopied: '安装命令已复制。',
     emptyOutput: 'AI 提供方没有返回提交信息。',
     generated: '已根据暂存区变更生成提交信息。',
     generatedTruncated: '已根据截断后的暂存区变更生成提交信息。',
-    existingMessage: 'Source Control 输入框中已有提交信息。',
-    overwrite: '覆盖',
-    append: '追加',
-    cancel: '取消',
     cancelled: '已取消生成提交信息。',
     failed: '生成提交信息失败：{message}',
   },
@@ -135,6 +151,9 @@ export class CommitMessageCommand {
     this.isGenerating = true;
     const cancellation = new vscode.CancellationTokenSource();
     this.currentCancellation = cancellation;
+    let streamingRepository: GitRepository | undefined;
+    let originalInputValue = '';
+    let wroteGeneratedMessage = false;
 
     try {
       await vscode.commands.executeCommand('setContext', 'agentsHub.commitMessageGenerating', true);
@@ -143,15 +162,20 @@ export class CommitMessageCommand {
         return;
       }
 
-      if (repository.state.indexChanges.length === 0) {
-        vscode.window.showInformationMessage(this.t(locale, 'noStagedChanges'));
-        return;
-      }
-
-      const rawDiff = await repository.diff(true);
+      let rawDiff = repository.state.indexChanges.length > 0
+        ? await repository.diff(true)
+        : '';
       if (!rawDiff.trim()) {
-        vscode.window.showInformationMessage(this.t(locale, 'noStagedChanges'));
-        return;
+        const shouldContinue = await this.handleNoStagedChanges(repository, locale);
+        if (!shouldContinue) {
+          return;
+        }
+
+        rawDiff = await repository.diff(true);
+        if (!rawDiff.trim()) {
+          vscode.window.showInformationMessage(this.t(locale, 'noStagedChanges'));
+          return;
+        }
       }
 
       const { diff, truncated } = truncateCommitDiff(rawDiff, this.getMaxDiffChars());
@@ -161,23 +185,44 @@ export class CommitMessageCommand {
       );
       const inputMessage = repository.inputBox.value.trim();
       const prompt = buildCommitMessagePrompt({ diff, language, truncated, inputMessage });
-      const generatedMessage = await this.generateCommitMessageWithCancellation(
-        prompt,
-        repository.rootUri.fsPath,
-        cancellation.token,
-        externalToken
-      );
-      const message = await this.resolveInputValue(repository, generatedMessage, locale);
-      if (message === undefined) {
+      const profile = await this.resolveReadyProfile(locale);
+      if (!profile) {
         return;
       }
 
+      streamingRepository = repository;
+      originalInputValue = repository.inputBox.value;
+      repository.inputBox.value = '';
+      const streamCommitMessage = (output: string) => {
+        const partialMessage = this.cleanCommitMessageOutput(output, language, diff, inputMessage, true);
+        if (partialMessage) {
+          wroteGeneratedMessage = true;
+          repository.inputBox.value = partialMessage;
+        }
+      };
+      const message = await this.generateCommitMessageWithCancellation(
+        profile,
+        prompt,
+        repository.rootUri.fsPath,
+        language,
+        diff,
+        streamCommitMessage,
+        inputMessage,
+        cancellation.token,
+        externalToken
+      );
+
+      wroteGeneratedMessage = true;
       repository.inputBox.value = message;
       await vscode.commands.executeCommand('workbench.view.scm');
       vscode.window.showInformationMessage(
         this.t(locale, truncated ? 'generatedTruncated' : 'generated')
       );
     } catch (error) {
+      if (!wroteGeneratedMessage && streamingRepository) {
+        streamingRepository.inputBox.value = originalInputValue;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       if (message === 'cancelled') {
         vscode.window.showInformationMessage(this.t(locale, 'cancelled'));
@@ -268,25 +313,140 @@ export class CommitMessageCommand {
     return extension.getAPI(1);
   }
 
-  private async generateCommitMessage(
-    prompt: string,
-    repositoryRoot: string,
-    token: vscode.CancellationToken
-  ): Promise<string> {
-    const profile = this.getDefaultProfile();
-    const installed = await this.cliManager.checkInstalled(profile.id);
-    if (!installed) {
-      throw new Error(
-        this.t(this.getRuntimeLocale(), 'providerUnavailable', { provider: profile.name })
+  private async handleNoStagedChanges(
+    repository: GitRepository,
+    locale: RuntimeLocale
+  ): Promise<boolean> {
+    const openSourceControl = this.t(locale, 'openSourceControl');
+    const hasWorkingTreeChanges = (repository.state.workingTreeChanges?.length ?? 0) > 0;
+    if (!hasWorkingTreeChanges) {
+      const choice = await vscode.window.showInformationMessage(
+        this.t(locale, 'noStagedChanges'),
+        openSourceControl
       );
+      if (choice === openSourceControl) {
+        await vscode.commands.executeCommand('workbench.view.scm');
+      }
+
+      return false;
     }
 
+    const stageAllAndGenerate = this.t(locale, 'stageAllAndGenerate');
+    const choice = await vscode.window.showInformationMessage(
+      this.t(locale, 'noStagedChanges'),
+      stageAllAndGenerate,
+      openSourceControl
+    );
+    if (choice === stageAllAndGenerate) {
+      await vscode.commands.executeCommand('git.stageAll');
+      return true;
+    }
+
+    if (choice === openSourceControl) {
+      await vscode.commands.executeCommand('workbench.view.scm');
+    }
+
+    return false;
+  }
+
+  private async resolveReadyProfile(locale: RuntimeLocale): Promise<CliProfile | undefined> {
+    const preferred = this.getDefaultProfile();
+    if (await this.cliManager.checkInstalled(preferred.id)) {
+      return preferred;
+    }
+
+    const installedProfiles = await this.getInstalledProfiles();
+    if (installedProfiles.length > 0) {
+      const providerItems = [
+        ...installedProfiles.map((profile) => ({
+          label: profile.name,
+          description: this.t(locale, 'useProviderForCommitMessage'),
+          profile,
+        })),
+        {
+          label: this.t(locale, 'openCommitSettings'),
+          description: this.t(locale, 'openCommitSettingsDescription'),
+          profile: undefined,
+        },
+      ];
+      const picked = await vscode.window.showQuickPick(providerItems, {
+        placeHolder: this.t(locale, 'chooseInstalledProvider', { provider: preferred.name }),
+      });
+      if (!picked) {
+        return undefined;
+      }
+
+      if (!picked.profile) {
+        await this.openCommitMessageSettings();
+        return undefined;
+      }
+
+      await vscode.workspace.getConfiguration('agentsHub.commitMessage').update(
+        'provider',
+        picked.profile.id,
+        vscode.ConfigurationTarget.Global
+      );
+      vscode.window.showInformationMessage(
+        this.t(locale, 'providerSelected', { provider: picked.profile.name })
+      );
+      return picked.profile;
+    }
+
+    const openSetup = this.t(locale, 'openSetup');
+    const copyInstallCommand = this.t(locale, 'copyInstallCommand');
+    const choice = await vscode.window.showWarningMessage(
+      this.t(locale, 'providerSetupRequired', { provider: preferred.name }),
+      openSetup,
+      copyInstallCommand
+    );
+    if (choice === openSetup) {
+      await this.openCommitMessageSettings();
+    }
+    if (choice === copyInstallCommand) {
+      await vscode.env.clipboard.writeText(preferred.installHint);
+      vscode.window.showInformationMessage(this.t(locale, 'installCommandCopied'));
+    }
+
+    return undefined;
+  }
+
+  private async getInstalledProfiles(): Promise<CliProfile[]> {
+    const results = await Promise.all(
+      CLI_PROFILES.map(async (profile) => ({
+        profile,
+        installed: await this.cliManager.checkInstalled(profile.id),
+      }))
+    );
+
+    return results.filter((result) => result.installed).map((result) => result.profile);
+  }
+
+  private async openCommitMessageSettings(): Promise<void> {
+    await vscode.commands.executeCommand('agentsHub.openProviderSettings', 'commitMessage');
+  }
+
+  private async generateCommitMessage(
+    profile: CliProfile,
+    prompt: string,
+    repositoryRoot: string,
+    language: CommitMessageLanguage,
+    diff: string,
+    onPartial: (output: string) => void,
+    inputMessage: string,
+    token: vscode.CancellationToken
+  ): Promise<string> {
     if (profile.id === 'opencode') {
-      return this.cliManager.runOpenCodePromptViaServer(
-        prompt,
-        token,
-        repositoryRoot,
-        this.getStoredOpenCodeModelId()
+      return this.cleanCommitMessageOutput(
+        await this.cliManager.runOpenCodePromptViaServer(
+          prompt,
+          token,
+          repositoryRoot,
+          this.getStoredOpenCodeModelId(),
+          onPartial
+        ),
+        language,
+        diff,
+        inputMessage
       );
     }
 
@@ -326,13 +486,23 @@ export class CommitMessageCommand {
       );
     }
 
-    const output = await this.waitForSessionOutput(session, token);
+    const output = await this.waitForSessionOutput(session, token, onPartial);
     if (isProviderErrorOutput(output)) {
       throw new Error(output.trim().replace(/^Error:\s*/i, ''));
     }
 
-    const message = cleanGeneratedCommitMessage(output);
-    if (!message) {
+    return this.cleanCommitMessageOutput(output, language, diff, inputMessage);
+  }
+
+  private cleanCommitMessageOutput(
+    output: string,
+    language: CommitMessageLanguage,
+    diff: string,
+    inputMessage: string,
+    allowEmpty = false
+  ): string {
+    const message = cleanGeneratedCommitMessage(output, { language, diff, inputMessage });
+    if (!message && !allowEmpty) {
       throw new Error(this.t(this.getRuntimeLocale(), 'emptyOutput'));
     }
 
@@ -341,7 +511,8 @@ export class CommitMessageCommand {
 
   private waitForSessionOutput(
     session: Session,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    onPartial: (output: string) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (token.isCancellationRequested) {
@@ -377,6 +548,7 @@ export class CommitMessageCommand {
           const normalized = normalizeCliOutputChunk(chunk, session.cliId, buffer);
           buffer = normalized.buffer;
           output += normalized.text;
+          onPartial(normalizeCliOutput(output, session.cliId));
         }),
         session.onStderr.event((chunk) => {
           stderr += normalizeCliOutput(chunk, session.cliId);
@@ -407,35 +579,6 @@ export class CommitMessageCommand {
         })
       );
     });
-  }
-
-  private async resolveInputValue(
-    repository: GitRepository,
-    message: string,
-    locale: RuntimeLocale
-  ): Promise<string | undefined> {
-    const current = repository.inputBox.value.trim();
-    if (!current) {
-      return message;
-    }
-
-    const overwrite = this.t(locale, 'overwrite');
-    const append = this.t(locale, 'append');
-    const choice = await vscode.window.showWarningMessage(
-      this.t(locale, 'existingMessage'),
-      overwrite,
-      append,
-      this.t(locale, 'cancel')
-    );
-
-    if (choice === overwrite) {
-      return message;
-    }
-    if (choice === append) {
-      return `${current}\n\n${message}`;
-    }
-
-    return undefined;
   }
 
   private getDefaultProfile(): CliProfile {
@@ -493,8 +636,13 @@ export class CommitMessageCommand {
   }
 
   private async generateCommitMessageWithCancellation(
+    profile: CliProfile,
     prompt: string,
     repositoryRoot: string,
+    language: CommitMessageLanguage,
+    diff: string,
+    onPartial: (output: string) => void,
+    inputMessage: string,
     token: vscode.CancellationToken,
     externalToken?: vscode.CancellationToken
   ): Promise<string> {
@@ -506,7 +654,16 @@ export class CommitMessageCommand {
             throw new Error('cancelled');
           }
 
-          return this.generateCommitMessage(prompt, repositoryRoot, token);
+          return this.generateCommitMessage(
+            profile,
+            prompt,
+            repositoryRoot,
+            language,
+            diff,
+            onPartial,
+            inputMessage,
+            token
+          );
         }
 
         const linkedCancellation = new vscode.CancellationTokenSource();
@@ -523,7 +680,16 @@ export class CommitMessageCommand {
             throw new Error('cancelled');
           }
 
-          return await this.generateCommitMessage(prompt, repositoryRoot, linkedCancellation.token);
+          return await this.generateCommitMessage(
+            profile,
+            prompt,
+            repositoryRoot,
+            language,
+            diff,
+            onPartial,
+            inputMessage,
+            linkedCancellation.token
+          );
         } finally {
           disposables.forEach((disposable) => disposable.dispose());
           linkedCancellation.dispose();

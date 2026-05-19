@@ -1,7 +1,7 @@
 # Agents Hub
 
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=agents-hub.agents-hub)
-[![CI](https://github.com/agents-hub/vscode-agents-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/agents-hub/vscode-agents-hub/actions/workflows/ci.yml)
+[![CI](https://github.com/trry-hub/agents-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/trry-hub/agents-hub/actions/workflows/ci.yml)
 
 **Agents Hub** is a VS Code extension that turns your editor into a multi-agent workbench. It brings together multiple AI coding assistants — Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider — under a single sidebar interface with context-aware prompts, CLI profile management, and API provider bridging.
 

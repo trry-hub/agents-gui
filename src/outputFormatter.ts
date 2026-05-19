@@ -7,23 +7,44 @@ const CONTROL_PATTERN =
   /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
 const ORPHAN_ANSI_PATTERN =
-  /(?:^|(?<=\s))\[(?:\??25[hl]|[0-9;]*[ABCDEFGJKSTfimnsu]|[0-9;]*[hl])/g;
+  /(?:^|(?<=\s))\[(?:\??25[hl]|[0-9;]*[ABCDEFGJKSTfimnsu]|[0-9;]*[hl])(?![A-Za-z0-9_-])/g;
 
 const INTERNAL_PROMPT_START = 'You are an AI coding assistant embedded in VS Code.';
 const INTERNAL_PROMPT_END_MARKER =
   '- Risks and caveats: call out assumptions, follow-up work, and edge cases.';
+const INTERNAL_PROMPT_START_MARKERS = [
+  INTERNAL_PROMPT_START,
+  '[search-mode]',
+  'search-mode]',
+  'earch-mode]',
+  '[analyze-mode]',
+  'Recent conversation in this thread:',
+  'IDE context, use only if relevant:',
+  'IDE context:',
+  'Response requirements:',
+];
 
 export interface NormalizedCliOutputChunk {
   text: string;
   buffer: string;
   status?: 'thinking';
   thinking?: string;
+  activities?: NormalizedCliActivity[];
+}
+
+export interface NormalizedCliActivity {
+  id?: string;
+  kind: 'file' | 'search' | 'command' | 'tool';
+  name?: string;
+  target?: string;
+  detail?: string;
 }
 
 interface RenderedOpenCodeJsonEvent {
   text: string;
   status?: NormalizedCliOutputChunk['status'];
   thinking?: string;
+  activities?: NormalizedCliActivity[];
 }
 
 interface RenderedClaudeJsonEvent {
@@ -32,13 +53,7 @@ interface RenderedClaudeJsonEvent {
 }
 
 export function normalizeCliOutput(text: string, providerId?: string): string {
-  const normalized = text
-    .replace(ANSI_PATTERN, '')
-    .replace(ORPHAN_ANSI_PATTERN, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(CONTROL_PATTERN, '')
-    .replace(/\n{4,}/g, '\n\n\n');
+  const normalized = normalizeDisplayText(text);
 
   const providerNormalized = normalizeProviderOutput(normalized, providerId);
   return stripInternalPromptEcho(providerNormalized);
@@ -275,6 +290,7 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
   const buffer = text.endsWith('\n') ? '' : lines.pop() ?? '';
   const rendered: string[] = [];
   const renderedThinking: string[] = [];
+  const renderedActivities: NormalizedCliActivity[] = [];
   let parsedAny = false;
   let status: NormalizedCliOutputChunk['status'];
 
@@ -293,6 +309,9 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
     if (renderedEvent.thinking) {
       renderedThinking.push(renderedEvent.thinking);
     }
+    if (renderedEvent.activities?.length) {
+      renderedActivities.push(...renderedEvent.activities);
+    }
   }
 
   if (!parsedAny && buffer) {
@@ -304,6 +323,9 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
       }
       if (renderedEvent.thinking) {
         result.thinking = renderedEvent.thinking;
+      }
+      if (renderedEvent.activities?.length) {
+        result.activities = renderedEvent.activities;
       }
       return result;
     }
@@ -319,6 +341,9 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
   }
   if (renderedThinking.length > 0) {
     result.thinking = renderedThinking.join('');
+  }
+  if (renderedActivities.length > 0) {
+    result.activities = renderedActivities;
   }
   return result;
 }
@@ -364,8 +389,14 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
 
   if (eventType?.includes('message.part.updated')) {
     const text = pickString(part.text, data.text, event.text);
+    if (partType === 'tool') {
+      const activity = openCodeToolActivity(event, data, part);
+      return { text: '', status: 'thinking', ...(activity ? { activities: [activity] } : {}) };
+    }
+
     if (partType === 'reasoning') {
-      return { text: '', status: 'thinking', ...(text ? { thinking: text } : {}) };
+      const thinking = sanitizeThinkingForDisplay(text);
+      return { text: '', status: 'thinking', ...(thinking ? { thinking } : {}) };
     }
 
     if (partType === 'text' && text) {
@@ -381,8 +412,14 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
       return { text: '' };
     }
 
+    if (partType === 'tool') {
+      const activity = openCodeToolActivity(event, data, part);
+      return { text: '', status: 'thinking', ...(activity ? { activities: [activity] } : {}) };
+    }
+
     if (partType === 'reasoning') {
-      return { text: '', status: 'thinking', thinking: delta };
+      const thinking = sanitizeThinkingForDisplay(delta);
+      return { text: '', status: 'thinking', ...(thinking ? { thinking } : {}) };
     }
 
     return { text: delta };
@@ -390,7 +427,8 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
 
   if (eventType === 'reasoning') {
     const text = pickString(part.text, data.text, event.text);
-    return { text: '', status: 'thinking', ...(text ? { thinking: text } : {}) };
+    const thinking = sanitizeThinkingForDisplay(text);
+    return { text: '', status: 'thinking', ...(thinking ? { thinking } : {}) };
   }
 
   if (eventType === 'text') {
@@ -426,9 +464,169 @@ function openCodeErrorMessage(errorOwner: Record<string, unknown>): string | und
   return pickString(data.message, error.message);
 }
 
+function openCodeToolActivity(
+  event: Record<string, unknown>,
+  data: Record<string, unknown>,
+  part: Record<string, unknown>
+): NormalizedCliActivity | undefined {
+  const state = firstObject(part.state, data.state, event.state);
+  const input = firstObject(
+    part.input,
+    part.args,
+    part.params,
+    state.input,
+    state.args,
+    state.params,
+    data.input,
+    data.args,
+    data.params,
+    event.input,
+    event.args,
+    event.params
+  );
+  const name = pickString(
+    part.tool,
+    part.name,
+    part.title,
+    data.tool,
+    data.name,
+    data.title,
+    event.tool,
+    event.name,
+    event.title
+  );
+  const command = pickString(
+    input.command,
+    input.cmd,
+    input.script,
+    part.command,
+    data.command,
+    event.command
+  );
+  const path = pickString(
+    input.file,
+    input.filePath,
+    input.filename,
+    input.path,
+    input.absolutePath,
+    input.relativePath,
+    part.file,
+    part.filePath,
+    part.path,
+    data.file,
+    data.filePath,
+    data.path,
+    event.file,
+    event.filePath,
+    event.path
+  );
+  const query = pickString(
+    input.query,
+    input.pattern,
+    input.glob,
+    input.regex,
+    part.query,
+    part.pattern,
+    data.query,
+    data.pattern,
+    event.query,
+    event.pattern
+  );
+  const detail = normalizeActivityDetail(
+    pickString(
+      input.output,
+      input.stdout,
+      input.stderr,
+      input.result,
+      input.error,
+      input.message,
+      state.output,
+      state.stdout,
+      state.stderr,
+      state.result,
+      state.error,
+      state.message,
+      part.output,
+      part.stdout,
+      part.stderr,
+      part.result,
+      part.error,
+      part.message,
+      data.output,
+      data.stdout,
+      data.stderr,
+      data.result,
+      data.error,
+      data.message,
+      event.output,
+      event.stdout,
+      event.stderr,
+      event.result,
+      event.error,
+      event.message
+    )
+  );
+  const target = path || command || query || name;
+
+  if (!name && !target) {
+    return undefined;
+  }
+
+  return {
+    ...(pickString(part.id, data.partID, event.partID, event.id) ? { id: pickString(part.id, data.partID, event.partID, event.id) } : {}),
+    kind: classifyOpenCodeToolActivity(name, target, command, path, query),
+    ...(name ? { name } : {}),
+    ...(target ? { target } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+function normalizeActivityDetail(value: string | undefined): string | undefined {
+  const normalized = normalizeDisplayText(String(value || '')).trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.length > 6000
+    ? `${normalized.slice(0, 6000)}\n...`
+    : normalized;
+}
+
+function classifyOpenCodeToolActivity(
+  name: string | undefined,
+  target: string | undefined,
+  command: string | undefined,
+  path: string | undefined,
+  query: string | undefined
+): NormalizedCliActivity['kind'] {
+  const normalizedName = String(name || '').toLowerCase();
+  if (command || /(?:^|[_.-])(?:bash|shell|terminal|exec|run|command)(?:$|[_.-])/.test(normalizedName)) {
+    return 'command';
+  }
+
+  if (query || /(?:^|[_.-])(?:grep|rg|glob|search|find|list|ls)(?:$|[_.-])/.test(normalizedName)) {
+    return 'search';
+  }
+
+  if (path || /(?:^|[_.-])(?:read|view|open|edit|write|patch|file|multiedit)(?:$|[_.-])/.test(normalizedName)) {
+    return 'file';
+  }
+
+  if (target && /(?:^|\/)[^/\s]+\.[A-Za-z0-9]{1,8}$/.test(target)) {
+    return 'file';
+  }
+
+  return 'tool';
+}
+
 function extractOpenCodeReadableError(text: string): string | undefined {
   if (text.includes("Failed to run the query 'PRAGMA wal_checkpoint(PASSIVE)'")) {
     return 'OpenCode local database is locked by another running OpenCode server. Close that server or run this workspace from the same OpenCode server, then retry.';
+  }
+
+  const unsupportedFormatMatch = /(?:^|\n)(?:Error:\s*)?Model\s+([^\s]+)\s+not supported for format\s+([^\s\n]+)/i.exec(text);
+  if (unsupportedFormatMatch) {
+    return `Model ${unsupportedFormatMatch[1]} is not supported for format ${unsupportedFormatMatch[2]}. Switch to another OpenCode model/provider and retry.`;
   }
 
   if (!text.includes('ProviderModelNotFoundError') && !text.includes('Model not found:')) {
@@ -472,9 +670,32 @@ function firstObject(...values: unknown[]): Record<string, unknown> {
     if (isObjectRecord(value)) {
       return value;
     }
+
+    const parsed = parseObjectString(value);
+    if (parsed) {
+      return parsed;
+    }
   }
 
   return {};
+}
+
+function parseObjectString(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return isObjectRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function pickString(...values: unknown[]): string | undefined {
@@ -534,7 +755,7 @@ function stripInternalPromptEcho(text: string): string {
     return text;
   }
 
-  if (!text.slice(firstContentIndex).startsWith(INTERNAL_PROMPT_START)) {
+  if (!startsWithInternalPromptEcho(text, firstContentIndex)) {
     return text;
   }
 
@@ -543,5 +764,28 @@ function stripInternalPromptEcho(text: string): string {
     return text;
   }
 
-  return text.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length).replace(/^\s+/, '');
+  return stripPromptBoundary(text.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length));
+}
+
+function startsWithInternalPromptEcho(text: string, firstContentIndex: number): boolean {
+  const candidate = text.slice(firstContentIndex);
+  return INTERNAL_PROMPT_START_MARKERS.some((marker) => candidate.startsWith(marker));
+}
+
+function stripPromptBoundary(text: string): string {
+  return text.replace(/^[\s"'“”]+/, '');
+}
+
+function sanitizeThinkingForDisplay(text: string | undefined): string {
+  return stripInternalPromptEcho(normalizeDisplayText(String(text || ''))).trim();
+}
+
+function normalizeDisplayText(text: string): string {
+  return text
+    .replace(ANSI_PATTERN, '')
+    .replace(ORPHAN_ANSI_PATTERN, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(CONTROL_PATTERN, '')
+    .replace(/\n{4,}/g, '\n\n\n');
 }

@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agents Hub — 多 Agent 工作台</title>
+  <link rel="icon" type="image/svg+xml" href="media/icon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ========== Theme Variables ========== */
+    :root {
+      /* Purple brand (shared) */
+      --purple-50: #f5f3ff;
+      --purple-100: #ede9fe;
+      --purple-200: #ddd6fe;
+      --purple-300: #c4b5fd;
+      --purple-400: #a78bfa;
+      --purple-500: #8b5cf6;
+      --purple-600: #7c3aed;
+      --purple-700: #6d28d9;
+      --purple-800: #5b21b6;
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+    }
+
+    /* Light theme (default) */
+    [data-theme="light"],
+    :root {
+      --bg-base: #fafafa;
+      --bg-elevated: #ffffff;
+      --bg-card: rgba(0,0,0,0.03);
+      --bg-card-hover: rgba(0,0,0,0.05);
+      --border-subtle: rgba(0,0,0,0.08);
+      --border-hover: rgba(0,0,0,0.15);
+      --text-primary: #1a1a2e;
+      --text-secondary: rgba(0,0,0,0.55);
+      --text-tertiary: rgba(0,0,0,0.30);
+      --gradient-brand: linear-gradient(135deg, #7c3aed, #a78bfa);
+      --glow: 0 0 40px rgba(124,58,237,0.10);
+      --nav-bg: rgba(250,250,250,0.88);
+      --hero-radial: rgba(124,58,237,0.06);
+      --badge-bg: rgba(124,58,237,0.08);
+      --badge-border: rgba(124,58,237,0.18);
+      --badge-text: #7c3aed;
+      --section-label: #7c3aed;
+      --feature-icon-bg: rgba(124,58,237,0.08);
+      --feature-icon-border: rgba(124,58,237,0.15);
+      --agent-tag-bg: rgba(0,0,0,0.04);
+      --cta-card-bg: linear-gradient(135deg, rgba(124,58,237,0.04), rgba(167,139,250,0.02));
+      --cta-card-border: rgba(124,58,237,0.12);
+      --cta-radial: rgba(124,58,237,0.04);
+    }
+
+    /* Dark theme */
+    [data-theme="dark"] {
+      --bg-base: #0b0d14;
+      --bg-elevated: #11131e;
+      --bg-card: rgba(255,255,255,0.04);
+      --bg-card-hover: rgba(255,255,255,0.07);
+      --border-subtle: rgba(255,255,255,0.06);
+      --border-hover: rgba(255,255,255,0.12);
+      --text-primary: #f0f2f5;
+      --text-secondary: rgba(255,255,255,0.55);
+      --text-tertiary: rgba(255,255,255,0.30);
+      --gradient-brand: linear-gradient(135deg, #7c3aed, #a78bfa);
+      --glow: 0 0 40px rgba(124,58,237,0.15);
+      --nav-bg: rgba(11,13,20,0.85);
+      --hero-radial: rgba(124,58,237,0.08);
+      --badge-bg: rgba(124,58,237,0.12);
+      --badge-border: rgba(124,58,237,0.25);
+      --badge-text: #a78bfa;
+      --section-label: #a78bfa;
+      --feature-icon-bg: rgba(124,58,237,0.12);
+      --feature-icon-border: rgba(124,58,237,0.20);
+      --agent-tag-bg: rgba(255,255,255,0.04);
+      --cta-card-bg: linear-gradient(135deg, rgba(124,58,237,0.06), rgba(167,139,250,0.03));
+      --cta-card-border: rgba(124,58,237,0.15);
+      --cta-radial: rgba(124,58,237,0.05);
+    }
+
+    /* System preference: default to dark if no explicit theme */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg-base: #0b0d14;
+        --bg-elevated: #11131e;
+        --bg-card: rgba(255,255,255,0.04);
+        --bg-card-hover: rgba(255,255,255,0.07);
+        --border-subtle: rgba(255,255,255,0.06);
+        --border-hover: rgba(255,255,255,0.12);
+        --text-primary: #f0f2f5;
+        --text-secondary: rgba(255,255,255,0.55);
+        --text-tertiary: rgba(255,255,255,0.30);
+        --gradient-brand: linear-gradient(135deg, #7c3aed, #a78bfa);
+        --glow: 0 0 40px rgba(124,58,237,0.15);
+        --nav-bg: rgba(11,13,20,0.85);
+        --hero-radial: rgba(124,58,237,0.08);
+        --badge-bg: rgba(124,58,237,0.12);
+        --badge-border: rgba(124,58,237,0.25);
+        --badge-text: #a78bfa;
+        --section-label: #a78bfa;
+        --feature-icon-bg: rgba(124,58,237,0.12);
+        --feature-icon-border: rgba(124,58,237,0.20);
+        --agent-tag-bg: rgba(255,255,255,0.04);
+        --cta-card-bg: linear-gradient(135deg, rgba(124,58,237,0.06), rgba(167,139,250,0.03));
+        --cta-card-border: rgba(124,58,237,0.15);
+        --cta-radial: rgba(124,58,237,0.05);
+      }
+    }
+
+    /* ========== Base ========== */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.02'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 9999;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+    button { font-family: inherit; cursor: pointer; }
+
+    /* ========== Theme Toggle ========== */
+    .theme-toggle {
+      background: transparent; border: 1px solid var(--border-subtle);
+      width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-secondary); transition: all 0.2s;
+      font-size: 16px;
+    }
+    .theme-toggle:hover {
+      background: var(--bg-card); color: var(--text-primary);
+      border-color: var(--border-hover);
+    }
+
+    /* ========== Navigation ========== */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: var(--nav-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border-subtle);
+      transition: background-color 0.3s;
+    }
+    nav .container {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 18px; letter-spacing: -0.3px;
+      text-decoration: none; color: var(--text-primary);
+    }
+    .nav-logo svg { width: 28px; height: 28px; }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-links a {
+      color: var(--text-secondary); text-decoration: none;
+      font-size: 14px; font-weight: 500;
+      transition: color 0.2s; position: relative;
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+    .nav-links a::after {
+      content: ''; position: absolute; bottom: -4px; left: 0; right: 0;
+      height: 2px; background: var(--gradient-brand);
+      border-radius: 1px; transform: scaleX(0); transition: transform 0.2s;
+    }
+    .nav-links a:hover::after { transform: scaleX(1); }
+    .nav-actions { display: flex; align-items: center; gap: 8px; }
+    .btn-ghost {
+      background: transparent; border: 1px solid var(--border-subtle);
+      color: var(--text-secondary); padding: 8px 16px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: all 0.2s; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .btn-ghost:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-hover); }
+    .btn-primary {
+      background: var(--gradient-brand); border: none;
+      color: #fff; padding: 10px 24px; border-radius: var(--radius-sm);
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      position: relative; overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,58,237,0.25); }
+    .btn-primary::before {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transform: translateX(-100%); transition: transform 0.5s;
+    }
+    .btn-primary:hover::before { transform: translateX(100%); }
+
+    /* ========== Hero ========== */
+    .hero {
+      padding: 140px 0 80px; text-align: center; position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      width: 800px; height: 800px;
+      background: radial-gradient(circle, var(--hero-radial) 0%, transparent 70%);
+      transform: translate(-50%, -50%); pointer-events: none;
+      transition: background 0.3s;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--badge-bg); border: 1px solid var(--badge-border);
+      color: var(--badge-text); padding: 6px 16px; border-radius: 999px;
+      font-size: 13px; font-weight: 500; margin-bottom: 24px;
+      transition: background 0.3s, border-color 0.3s, color 0.3s;
+    }
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 68px); font-weight: 900; letter-spacing: -1.5px;
+      line-height: 1.1; margin-bottom: 20px;
+    }
+    .hero h1 .gradient-text {
+      background: var(--gradient-brand);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hero p {
+      font-size: 18px; color: var(--text-secondary);
+      max-width: 600px; margin: 0 auto 36px; line-height: 1.7;
+    }
+    .hero-actions { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+    .hero-actions .btn-primary { padding: 14px 32px; font-size: 16px; border-radius: var(--radius-md); }
+    .hero-actions .btn-ghost { padding: 14px 32px; font-size: 16px; border-radius: var(--radius-md); }
+    .hero-stats { display: flex; justify-content: center; gap: 48px; margin-top: 60px; flex-wrap: wrap; }
+    .hero-stat { text-align: center; }
+    .hero-stat-number {
+      font-size: 28px; font-weight: 800; letter-spacing: -0.5px;
+      background: var(--gradient-brand);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hero-stat-label { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
+
+    /* ========== Sections ========== */
+    section { padding: 100px 0; }
+    .section-label {
+      display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--section-label); margin-bottom: 12px;
+      transition: color 0.3s;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.8px; margin-bottom: 16px;
+    }
+    .section-desc { color: var(--text-secondary); font-size: 16px; max-width: 560px; line-height: 1.7; }
+    .section-header { text-align: center; margin-bottom: 64px; }
+    .section-header .section-desc { margin: 0 auto; }
+
+    /* ========== Agents Grid ========== */
+    .agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 900px) { .agents-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .agents-grid { grid-template-columns: 1fr; } }
+    .agent-card {
+      background: var(--bg-card); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg); padding: 28px 24px;
+      transition: all 0.3s cubic-bezier(0.16,1,0.3,1); cursor: default; position: relative; overflow: hidden;
+    }
+    .agent-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: var(--gradient-brand); border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .agent-card:hover {
+      background: var(--bg-card-hover); border-color: var(--border-hover);
+      transform: translateY(-4px); box-shadow: var(--glow);
+    }
+    .agent-card:hover::before { opacity: 1; }
+    .agent-icon {
+      width: 44px; height: 44px; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 800; margin-bottom: 16px;
+      border: 1px solid var(--border-subtle);
+      background: var(--gradient-brand);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .agent-name { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .agent-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+    .agent-tag {
+      display: inline-block; margin-top: 12px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--agent-tag-bg); border: 1px solid var(--border-subtle);
+      color: var(--text-tertiary);
+      transition: background 0.3s;
+    }
+
+    /* ========== Features ========== */
+    .features-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+    @media (max-width: 720px) { .features-grid { grid-template-columns: 1fr; } }
+    .feature-card {
+      background: var(--bg-card); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg); padding: 32px; transition: all 0.3s;
+    }
+    .feature-card:hover { border-color: var(--border-hover); box-shadow: var(--glow); }
+    .feature-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--feature-icon-bg); border: 1px solid var(--feature-icon-border);
+      display: flex; align-items: center; justify-content: center; margin-bottom: 16px; font-size: 18px;
+      transition: background 0.3s, border-color 0.3s;
+    }
+    .feature-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 10px; }
+    .feature-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+
+    /* ========== CTA ========== */
+    .cta-section { text-align: center; padding: 80px 0; position: relative; }
+    .cta-section::before {
+      content: ''; position: absolute; top: 50%; left: 50%;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, var(--cta-radial) 0%, transparent 70%);
+      transform: translate(-50%, -50%); pointer-events: none;
+      transition: background 0.3s;
+    }
+    .cta-card {
+      background: var(--cta-card-bg);
+      border: 1px solid var(--cta-card-border); border-radius: var(--radius-xl);
+      padding: 64px 40px; position: relative;
+      transition: background 0.3s, border-color 0.3s;
+    }
+    .cta-card h2 { font-size: clamp(24px, 3vw, 32px); font-weight: 700; margin-bottom: 12px; }
+    .cta-card p { color: var(--text-secondary); margin-bottom: 28px; font-size: 15px; }
+    .cta-card .btn-primary { padding: 14px 36px; font-size: 15px; border-radius: var(--radius-md); }
+
+    /* ========== Footer ========== */
+    footer { border-top: 1px solid var(--border-subtle); padding: 40px 0; }
+    footer .container { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    footer .copy { font-size: 13px; color: var(--text-tertiary); }
+    footer .links { display: flex; gap: 20px; }
+    footer .links a { color: var(--text-tertiary); text-decoration: none; font-size: 13px; transition: color 0.2s; }
+    footer .links a:hover { color: var(--text-secondary); }
+
+    /* ========== Mobile ========== */
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .hero { padding: 120px 0 60px; }
+      .hero-stats { gap: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="url(#lg)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="7" cy="5.5" r="2.5"/>
+          <circle cx="7" cy="18.5" r="2.5"/>
+          <circle cx="17" cy="18.5" r="2.5"/>
+          <path d="M7 8v8"/>
+          <path d="M7 12.5c5 0 10-2 10-7"/>
+          <path d="M17 8v8"/>
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="24" y2="24"><stop stop-color="#7c3aed"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs>
+        </svg>
+        Agents Hub
+      </a>
+      <div class="nav-links">
+        <a href="#agents">Agents</a>
+        <a href="#features">特性</a>
+        <a href="#">文档</a>
+        <a href="https://github.com/trry-hub/agents-hub" target="_blank">GitHub</a>
+      </div>
+      <div class="nav-actions">
+        <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="Switch theme">
+          <span id="themeIcon">🌙</span>
+        </button>
+        <a href="https://github.com/trry-hub/agents-hub" target="_blank" class="btn-ghost">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Star
+        </a>
+        <a href="#" class="btn-primary">安装扩展</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge"><span>⚡</span> v0.1.0 · 早期预览版</div>
+      <h1>把你的编辑器<br>变成<span class="gradient-text">多 Agent 工作台</span></h1>
+      <p>在 VS Code 侧边栏中无缝切换 Claude Code、Codex CLI、Gemini CLI、OpenCode、Goose、Aider，每个 Agent 都有自己的上下文感知编辑器。</p>
+      <div class="hero-actions">
+        <a href="#" class="btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          安装扩展
+        </a>
+        <a href="https://github.com/trry-hub/agents-hub" target="_blank" class="btn-ghost">查看源码 →</a>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stat"><div class="hero-stat-number">6</div><div class="hero-stat-label">内置 Agent</div></div>
+        <div class="hero-stat"><div class="hero-stat-number">1</div><div class="hero-stat-label">统一界面</div></div>
+        <div class="hero-stat"><div class="hero-stat-number">∞</div><div class="hero-stat-label">自定义 Provider</div></div>
+        <div class="hero-stat"><div class="hero-stat-number">🌏</div><div class="hero-stat-label">中英文支持</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Agents -->
+  <section id="agents">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">支持的 Agent</div>
+        <h2 class="section-title">一个面板，全部掌控</h2>
+        <p class="section-desc">每个 Agent 拥有独立的 CLI 配置、模型选择和运行时管理，无需离开 VS Code。</p>
+      </div>
+      <div class="agents-grid">
+        <div class="agent-card">
+          <div class="agent-icon">C</div>
+          <div class="agent-name">Claude Code</div>
+          <div class="agent-desc">Anthropic 官方 CLI，支持长上下文和复杂推理任务，精确 Token 计数。</div>
+          <span class="agent-tag">Anthropic tokens</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-icon">Cx</div>
+          <div class="agent-name">Codex CLI</div>
+          <div class="agent-desc">OpenAI 自动编程助手，面向 Agent 时代的命令行编码体验。</div>
+          <span class="agent-tag">tiktoken</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-icon">G</div>
+          <div class="agent-name">Gemini CLI</div>
+          <div class="agent-desc">Google Gemini 命令行界面，端侧运行，快速响应轻量任务。</div>
+          <span class="agent-tag">Google AI</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-icon">OC</div>
+          <div class="agent-name">OpenCode</div>
+          <div class="agent-desc">基于 Anthropic 的开源编码 Agent，支持后台常驻服务器实现毫秒级响应。</div>
+          <span class="agent-tag">持久会话</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-icon">G</div>
+          <div class="agent-name">Goose</div>
+          <div class="agent-desc">Block 出品的开源 AI Agent，通过 stdin 模式交互，轻量灵活。</div>
+          <span class="agent-tag">stdin 模式</span>
+        </div>
+        <div class="agent-card">
+          <div class="agent-icon">A</div>
+          <div class="agent-name">Aider</div>
+          <div class="agent-desc">AI 结对编程工具，支持 GPT-4 / Claude，终端下的智能代码编辑器。</div>
+          <span class="agent-tag">tiktoken</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">核心特性</div>
+        <h2 class="section-title">为 Agent 原生开发而生</h2>
+        <p class="section-desc">从上下文管理到 Provider 桥接，Agents Hub 让你专注于编码，而非配置。</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🔄</div>
+          <h3>多 Agent 一键切换</h3>
+          <p>在 Claude、Codex、Gemini 等 Agent 之间无缝切换，每个 Provider 拥有独立的模型、模式和权限配置。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧠</div>
+          <h3>上下文感知提示词</h3>
+          <p>自动附加工作区元数据、当前文件内容、选中区域和诊断信息，让 AI 始终拥有完整项目上下文。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">⚙️</div>
+          <h3>CLI 配置管理</h3>
+          <p>预配置的 CLI 配置文件处理命令解析、参数构建和输入模式。支持自定义 API Provider。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔌</div>
+          <h3>Provider 扩展桥接</h3>
+          <p>从侧边栏直接启动配套 VS Code 扩展（OpenCode、Codex、Claude Code、Gemini CLI）。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>精确 Token 计数</h3>
+          <p>内置 Anthropic 精确 Token 计数器和基于 tiktoken 的 OpenAI 计数器，按 Provider 智能切换。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🌐</div>
+          <h3>中英文双语支持</h3>
+          <p>扩展 UI 和 Webview 界面均内置英文和简体中文本地化，全球开发者无障碍使用。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <div class="cta-card">
+        <h2>准备好尝试了吗？</h2>
+        <p>从 VS Code Marketplace 安装，数秒内拥有多 Agent 工作台。</p>
+        <a href="#" class="btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          从 Marketplace 安装
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="copy">© 2026 <a href="https://github.com/trry-hub" style="color:var(--text-secondary);text-decoration:none;">Agents Hub</a>. MIT License.</div>
+      <div class="links">
+        <a href="https://github.com/trry-hub/agents-hub" target="_blank">GitHub</a>
+        <a href="#">文档</a>
+        <a href="#">发布日志</a>
+        <a href="#">隐私</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    (function() {
+      // Initialize theme from localStorage or system preference
+      var saved = localStorage.getItem('agenthub-theme');
+      var theme;
+      if (saved === 'light' || saved === 'dark') {
+        theme = saved;
+      } else {
+        theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+      updateIcon(theme);
+    })();
+
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('agenthub-theme', next);
+      updateIcon(next);
+    }
+
+    function updateIcon(theme) {
+      var icon = document.getElementById('themeIcon');
+      if (icon) icon.textContent = theme === 'dark' ? '🌙' : '☀️';
+    }
+  </script>
+</body>
+</html>

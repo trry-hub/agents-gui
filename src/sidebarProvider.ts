@@ -174,6 +174,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'openCodeNativeCommand':
           await this.handleOpenCodeNativeCommand(message);
           break;
+        case 'deleteOpenCodeSession':
+          await this.handleDeleteOpenCodeSession(message);
+          break;
         case 'openFilePalette':
           await vscode.commands.executeCommand('workbench.action.quickOpen');
           break;
@@ -253,6 +256,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       title: result.title,
     });
     await this.sendContextSummary(undefined, 'opencode');
+  }
+
+  private async handleDeleteOpenCodeSession(message: {
+    openCodeSessionId?: string;
+  }): Promise<void> {
+    const ok = await this.cliManager.deleteOpenCodeSession(message.openCodeSessionId)
+      .catch(() => false);
+    if (ok) {
+      await this.sendContextSummary(undefined, 'opencode');
+    }
   }
 
   async switchProvider(providerId: string): Promise<void> {
@@ -806,7 +819,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.outputBuffers.get(session.id) ?? ''
       );
       this.outputBuffers.set(session.id, normalized.buffer);
-      if (!normalized.text && !normalized.thinking && normalized.status !== 'thinking') {
+      if (!normalized.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
         return;
       }
 
@@ -815,6 +828,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         cliId: session.cliId,
         text: normalized.text,
         thinking: normalized.thinking,
+        activities: normalized.activities,
         status: normalized.status,
         sessionId: session.id,
         openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),

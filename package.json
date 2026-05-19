@@ -5,15 +5,15 @@
   "version": "0.1.0",
   "publisher": "agents-hub",
   "license": "MIT",
-  "icon": "media/icon.svg",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agents-hub/vscode-agents-hub.git"
+    "url": "https://github.com/trry-hub/agents-hub.git"
   },
   "bugs": {
-    "url": "https://github.com/agents-hub/vscode-agents-hub/issues"
+    "url": "https://github.com/trry-hub/agents-hub/issues"
   },
-  "homepage": "https://github.com/agents-hub/vscode-agents-hub",
+  "homepage": "https://github.com/trry-hub/agents-hub",
   "keywords": [
     "ai",
     "assistant",
@@ -46,7 +46,8 @@
     "onCommand:agentsHub.generateTests",
     "onCommand:agentsHub.refactorSelection",
     "onCommand:agentsHub.generateCommitMessage",
-    "onCommand:agentsHub.cancelCommitMessageGeneration"
+    "onCommand:agentsHub.cancelCommitMessageGeneration",
+    "onCommand:agentsHub.setupCommitMessage"
   ],
   "extensionDependencies": [
     "vscode.git"
@@ -122,6 +123,10 @@
         "command": "agentsHub.cancelCommitMessageGeneration",
         "title": "%command.cancelCommitMessageGeneration.title%",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "agentsHub.setupCommitMessage",
+        "title": "%command.setupCommitMessage.title%"
       }
     ],
     "menus": {

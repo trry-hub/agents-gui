@@ -51,8 +51,8 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentsHub.openProviderSettings', async () => {
-      await sidebarProvider.openProviderSettings();
+    vscode.commands.registerCommand('agentsHub.openProviderSettings', async (section = 'agents') => {
+      await sidebarProvider.openProviderSettings(section);
     })
   );
 
@@ -102,6 +102,12 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agentsHub.cancelCommitMessageGeneration', () => {
       commitMessageCommand.cancel();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agentsHub.setupCommitMessage', () => {
+      return vscode.commands.executeCommand('agentsHub.openProviderSettings', 'commitMessage');
     })
   );
 

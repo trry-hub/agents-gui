@@ -1,5 +1,7 @@
 .vscode/**
 .vscode-test/**
+.github/**
+.neuralmemory/**
 .playwright-mcp/**
 .claude/**
 .test-dist/**
@@ -13,3 +15,8 @@ tsconfig.json
 esbuild.mjs
 **/*.map
 *.vsix
+agents-hub-global-logo-settings.png
+findings.md
+index.html
+progress.md
+task_plan.md

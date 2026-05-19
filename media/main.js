@@ -15,10 +15,21 @@
     document.head.appendChild(style);
   })();
 
-  const ORPHAN_ANSI_PATTERN = /(?:^|(?<=\s))\[(?:\??25[hl]|[0-9;]*[ABCDEFGJKSTfimnsu]|[0-9;]*[hl])/g;
+  const ORPHAN_ANSI_PATTERN = /(?:^|(?<=\s))\[(?:\??25[hl]|[0-9;]*[ABCDEFGJKSTfimnsu]|[0-9;]*[hl])(?![A-Za-z0-9_-])/g;
   const CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
   const INTERNAL_PROMPT_START = 'You are an AI coding assistant embedded in VS Code.';
   const INTERNAL_PROMPT_END_MARKER = '- Risks and caveats: call out assumptions, follow-up work, and edge cases.';
+  const INTERNAL_PROMPT_START_MARKERS = [
+    INTERNAL_PROMPT_START,
+    '[search-mode]',
+    'search-mode]',
+    'earch-mode]',
+    '[analyze-mode]',
+    'Recent conversation in this thread:',
+    'IDE context, use only if relevant:',
+    'IDE context:',
+    'Response requirements:',
+  ];
   const MAX_IMAGE_ATTACHMENTS = 8;
   const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
   const TASK_STATUSES = ['preparing', 'running', 'completed', 'failed', 'stopped'];
@@ -27,6 +38,10 @@
   const MESSAGE_BOTTOM_STICKY_THRESHOLD = 48;
   const FILE_CARD_COLLAPSE_LIMIT = 3;
   const FILE_CARD_ICON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 2.8h5.2l2 2v8.4H3.6V2.8h1.6z"/><path d="M10.4 2.8v2h2M8 6.2v4.2M5.9 8.3h4.2"/></svg>';
+  const THINKING_ICON_SVG = '<svg class="message-thinking-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4.25 4.25 0 0 0-2.35 7.79c.45.3.72.74.72 1.21v.25h3.26v-.25c0-.47.27-.91.72-1.21A4.25 4.25 0 0 0 8 1.75Z"/><path d="M6.5 12.25h3M6.9 14h2.2"/></svg>';
+  const THINKING_CHEVRON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>';
+  const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
+  const OPENCODE_OPTION_DIALOG_KINDS = new Set(['sessions', 'models', 'agents']);
 
   const saved = vscode.getState() || {};
   let profiles = [];
@@ -68,6 +83,7 @@
   let pendingThreadByProvider = {};
   let messageStatusTimer = undefined;
   let renderedMessageThreadKey = '';
+  const openMessageDetailKeys = new Set();
   let promptAttachments = [];
   let openCodeDialogKind = '';
   let openCodeDialogQuery = '';
@@ -413,7 +429,7 @@
       return { text: normalized, pending: false };
     }
 
-    if (!normalized.slice(firstContentIndex).startsWith(INTERNAL_PROMPT_START)) {
+    if (!startsWithInternalPromptEcho(normalized, firstContentIndex)) {
       return { text: normalized, pending: false };
     }
 
@@ -423,9 +439,23 @@
     }
 
     return {
-      text: normalized.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length).replace(/^\s+/, ''),
+      text: stripPromptBoundary(normalized.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length)),
       pending: false,
     };
+  }
+
+  function startsWithInternalPromptEcho(text, firstContentIndex) {
+    const candidate = text.slice(firstContentIndex);
+    return INTERNAL_PROMPT_START_MARKERS.some((marker) => candidate.startsWith(marker));
+  }
+
+  function stripPromptBoundary(text) {
+    return String(text || '').replace(/^[\s"'“”]+/, '');
+  }
+
+  function sanitizeThinkingText(text) {
+    const filtered = filterInternalPromptEcho(text);
+    return (filtered.pending ? '' : filtered.text).trim();
   }
 
   function persist() {
@@ -787,7 +817,7 @@
         ...message,
         running: false,
         text: filterInternalPromptEcho(message.text).text,
-        thinking: normalizeMessageText(message.thinking),
+        thinking: sanitizeThinkingText(message.thinking),
       };
     });
   }
@@ -860,6 +890,136 @@
     }
     persist();
     renderAll();
+  }
+
+  function latestThread(threads) {
+    return (threads || [])
+      .slice()
+      .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))[0] || null;
+  }
+
+  function canDeleteActiveThread(cliId = activeId) {
+    if (!cliId || runningByProvider[cliId] || pendingByProvider[cliId]) {
+      return false;
+    }
+
+    const thread = ensureActiveThread(cliId);
+    if (!thread) {
+      return false;
+    }
+
+    return ensureThreadList(cliId).length > 1 ||
+      thread.messages.length > 0 ||
+      Boolean(thread.openCodeSessionId);
+  }
+
+  function requestOpenCodeSessionDelete(openCodeSessionId) {
+    if (!openCodeSessionId || !String(openCodeSessionId).startsWith('ses')) {
+      return;
+    }
+
+    vscode.postMessage({
+      command: 'deleteOpenCodeSession',
+      openCodeSessionId,
+    });
+  }
+
+  function deleteActiveThread(cliId = activeId) {
+    if (!canDeleteActiveThread(cliId)) {
+      return null;
+    }
+
+    const thread = ensureActiveThread(cliId);
+    if (!thread) {
+      return null;
+    }
+
+    const deletedOpenCodeSessionId = cliId === 'opencode' ? thread.openCodeSessionId : '';
+    const threads = ensureThreadList(cliId);
+    const remainingThreads = threads.filter((item) => item.id !== thread.id);
+    const shouldDeleteRemoteOpenCodeSession =
+      Boolean(deletedOpenCodeSessionId) &&
+      !remainingThreads.some((item) => item.openCodeSessionId === deletedOpenCodeSessionId);
+    threads.splice(0, threads.length, ...remainingThreads);
+    delete activeThreadByProvider[cliId];
+
+    const next = latestThread(remainingThreads) || createThread(cliId);
+    if (!threads.includes(next)) {
+      threads.unshift(next);
+    }
+    setActiveThread(cliId, next);
+    if (shouldDeleteRemoteOpenCodeSession) {
+      requestOpenCodeSessionDelete(deletedOpenCodeSessionId);
+    }
+    persist();
+    renderAll();
+    return next;
+  }
+
+  function closeDeleteThreadDialog() {
+    document.querySelector('.session-delete-backdrop')?.remove();
+  }
+
+  function showDeleteThreadDialog(cliId = activeId) {
+    if (!canDeleteActiveThread(cliId)) {
+      return;
+    }
+
+    closeDeleteThreadDialog();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'session-delete-backdrop';
+    backdrop.addEventListener('mousedown', (event) => {
+      if (event.target === backdrop) {
+        closeDeleteThreadDialog();
+      }
+    });
+
+    const dialog = document.createElement('section');
+    dialog.className = 'session-delete-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'sessionDeleteTitle');
+    dialog.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeDeleteThreadDialog();
+      }
+    });
+
+    const title = document.createElement('h2');
+    title.id = 'sessionDeleteTitle';
+    title.textContent = i18n.t('history.deleteConfirmTitle');
+    dialog.appendChild(title);
+
+    const body = document.createElement('p');
+    body.textContent = i18n.t('history.deleteConfirmBody');
+    dialog.appendChild(body);
+
+    const actions = document.createElement('div');
+    actions.className = 'session-delete-actions';
+
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'session-delete-button';
+    cancel.textContent = i18n.t('history.deleteCancel');
+    cancel.addEventListener('click', closeDeleteThreadDialog);
+    actions.appendChild(cancel);
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'session-delete-button is-danger';
+    confirm.textContent = i18n.t('history.deleteAction');
+    confirm.addEventListener('click', () => {
+      closeDeleteThreadDialog();
+      deleteActiveThread(cliId);
+    });
+    actions.appendChild(confirm);
+
+    dialog.appendChild(actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    requestAnimationFrame(() => cancel.focus());
   }
 
   function ensureThread(cliId, threadId) {
@@ -1233,8 +1393,19 @@
 
     if (profilesLoading || availableProfiles.length === 0) {
       providerTabs.innerHTML = '';
+      providerTabs.style.removeProperty('--provider-tabs-expanded-width');
       return;
     }
+
+    const tabWidth = 24;
+    const tabGap = 3;
+    const tabChrome = 4;
+    const collapsedWidth = 28;
+    const expandedWidth = Math.max(
+      collapsedWidth,
+      tabChrome + availableProfiles.length * tabWidth + Math.max(0, availableProfiles.length - 1) * tabGap
+    );
+    providerTabs.style.setProperty('--provider-tabs-expanded-width', `${expandedWidth}px`);
 
     const existingButtons = new Map();
     for (const child of Array.from(providerTabs.children)) {
@@ -2016,10 +2187,8 @@
     }
 
     threadSelect.value = thread.id;
-    threadSelect.disabled = threads.length <= 1 && thread.messages.length === 0;
-    deleteThreadBtn.disabled =
-      Boolean(runningByProvider[activeId] || pendingByProvider[activeId]) ||
-      (threads.length <= 1 && thread.messages.length === 0);
+    threadSelect.disabled = threads.length <= 1;
+    deleteThreadBtn.disabled = !canDeleteActiveThread(activeId);
     newChatBtn.disabled = !activeId;
   }
 
@@ -2107,9 +2276,22 @@
     }
 
     const match = /^\/([^\s]*)\s*([\s\S]*)$/.exec(text);
-    return match
-      ? { query: match[1].toLowerCase(), args: (match[2] || '').trim() }
+    if (!match) {
+      return null;
+    }
+
+    const query = match[1].toLowerCase();
+    return slashInputLooksLikeCommand(query)
+      ? { query, args: (match[2] || '').trim() }
       : null;
+  }
+
+  function slashInputLooksLikeCommand(query) {
+    if (!query) {
+      return true;
+    }
+
+    return !query.includes('/') && /^[a-z0-9_-]+$/.test(query);
   }
 
   function slashCommandMatchesProvider(command, profile) {
@@ -2197,6 +2379,18 @@
       slashPalette.appendChild(button);
     });
 
+    const footer = document.createElement('div');
+    footer.className = 'slash-footer';
+
+    const acceptHint = document.createElement('span');
+    acceptHint.textContent = i18n.t('slash.footer.accept', { command: slashMatches[slashActiveIndex].name });
+    footer.appendChild(acceptHint);
+
+    const commandHint = document.createElement('span');
+    commandHint.textContent = i18n.t('slash.footer.commands');
+    footer.appendChild(commandHint);
+
+    slashPalette.appendChild(footer);
     slashPalette.hidden = false;
   }
 
@@ -3290,6 +3484,42 @@
     return [];
   }
 
+  function openCodeDialogKeyboardOptions(kind) {
+    if (kind === 'models') {
+      return openCodeModelOptionGroups()
+        .flatMap((group) => group.options)
+        .filter((option) => !option.disabled);
+    }
+
+    if (OPENCODE_OPTION_DIALOG_KINDS.has(kind)) {
+      return openCodeDialogOptions(kind).filter((option) => !option.disabled);
+    }
+
+    return [];
+  }
+
+  function initialOpenCodeDialogActiveIndex(kind) {
+    const options = openCodeDialogKeyboardOptions(kind);
+    const selectedIndex = options.findIndex((option) => option.selected);
+    return selectedIndex >= 0 ? selectedIndex : 0;
+  }
+
+  function syncOpenCodeDialogActiveIndex(kind) {
+    const options = openCodeDialogKeyboardOptions(kind);
+    if (options.length === 0) {
+      openCodeDialogActiveIndex = 0;
+      return options;
+    }
+
+    openCodeDialogActiveIndex = Math.min(Math.max(openCodeDialogActiveIndex, 0), options.length - 1);
+    return options;
+  }
+
+  function openCodeDialogActiveOptionId(kind) {
+    const options = syncOpenCodeDialogActiveIndex(kind);
+    return options[openCodeDialogActiveIndex]?.id || '';
+  }
+
   function closeOpenCodeStatusDialog() {
     openCodeDialogKind = '';
     renderOpenCodeStatusDialog();
@@ -3298,7 +3528,7 @@
   function showOpenCodeStatusDialog(kind) {
     openCodeDialogKind = kind;
     openCodeDialogQuery = '';
-    openCodeDialogActiveIndex = 0;
+    openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex(kind);
     renderOpenCodeStatusDialog();
   }
 
@@ -3348,6 +3578,7 @@
     const body = document.createElement('div');
     body.className = 'opencode-dialog-body';
     if (openCodeDialogKind === 'models') {
+      dialog.addEventListener('keydown', handleOpenCodeOptionDialogKeydown);
       renderOpenCodeGroupedOptionDialogBody(body, openCodeDialogKind);
       dialog.appendChild(body);
       backdrop.appendChild(dialog);
@@ -3364,11 +3595,13 @@
       body.querySelector('.opencode-dialog-filter')?.focus();
       return;
     }
-    if (openCodeDialogKind === 'sessions' || openCodeDialogKind === 'models' || openCodeDialogKind === 'agents') {
+    if (OPENCODE_OPTION_DIALOG_KINDS.has(openCodeDialogKind)) {
+      dialog.addEventListener('keydown', handleOpenCodeOptionDialogKeydown);
       renderOpenCodeOptionDialogBody(body, openCodeDialogKind);
       dialog.appendChild(body);
       backdrop.appendChild(dialog);
       document.body.appendChild(backdrop);
+      requestAnimationFrame(focusOpenCodeOptionDialogActiveTarget);
       return;
     }
 
@@ -3401,6 +3634,7 @@
     filter.setAttribute('aria-label', 'Search');
     filter.addEventListener('input', () => {
       openCodeDialogQuery = filter.value;
+      openCodeDialogActiveIndex = 0;
       renderOpenCodeModelGroups(list);
     });
     body.appendChild(filter);
@@ -3582,14 +3816,52 @@
     }
   }
 
+  function handleOpenCodeOptionDialogKeydown(event) {
+    if (!OPENCODE_OPTION_DIALOG_KINDS.has(openCodeDialogKind)) {
+      return;
+    }
+
+    const options = syncOpenCodeDialogActiveIndex(openCodeDialogKind);
+    if (options.length === 0) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      openCodeDialogActiveIndex = (openCodeDialogActiveIndex + delta + options.length) % options.length;
+      renderOpenCodeStatusDialog();
+      requestAnimationFrame(focusOpenCodeOptionDialogActiveTarget);
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const option = options[openCodeDialogActiveIndex];
+      selectOpenCodeDialogOption(openCodeDialogKind, option.id);
+    }
+  }
+
+  function focusOpenCodeOptionDialogActiveTarget() {
+    const filter = document.querySelector(`.opencode-dialog.is-${openCodeDialogKind} .opencode-dialog-filter`);
+    if (filter instanceof HTMLElement) {
+      filter.focus();
+      return;
+    }
+
+    document.querySelector(`.opencode-dialog.is-${openCodeDialogKind} .opencode-dialog-option.is-active`)?.focus();
+  }
+
   function focusOpenCodeMcpActiveOption() {
     document.querySelector('.opencode-dialog.is-mcp .opencode-dialog-option.is-active')?.focus();
   }
 
   function renderOpenCodeModelGroups(parent) {
     parent.innerHTML = '';
+    syncOpenCodeDialogActiveIndex('models');
     const groups = openCodeModelOptionGroups().filter((group) => group.options.length > 0);
     if (groups.length === 0) {
+      openCodeDialogActiveIndex = 0;
       const empty = document.createElement('div');
       empty.className = 'opencode-dialog-row';
       empty.textContent = openCodeDialogEmptyText('models');
@@ -3613,6 +3885,7 @@
 
   function renderOpenCodeOptionDialogBody(body, kind) {
     const options = openCodeDialogOptions(kind);
+    syncOpenCodeDialogActiveIndex(kind);
     if (options.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'opencode-dialog-row';
@@ -3631,12 +3904,14 @@
     button.type = 'button';
     button.className = [
       'opencode-dialog-option',
+      option.id === openCodeDialogActiveOptionId(kind) ? 'is-active' : '',
       option.selected ? 'is-selected' : '',
       option.disabled ? 'is-disabled' : '',
     ].filter(Boolean).join(' ');
     button.dataset.opencodeDialogKind = kind;
     button.dataset.opencodeDialogValue = option.id;
     button.disabled = Boolean(option.disabled);
+    button.tabIndex = option.id === openCodeDialogActiveOptionId(kind) ? 0 : -1;
     button.setAttribute('role', 'menuitemradio');
     button.setAttribute('aria-checked', option.selected ? 'true' : 'false');
     button.addEventListener('click', () => selectOpenCodeDialogOption(kind, option.id));
@@ -3936,6 +4211,7 @@
     const shouldStickToBottom = shouldAutoScrollMessages(messageThreadKey);
     const previousScrollTop = messages.scrollTop;
     const isPending = Boolean(pendingByProvider[activeId]);
+    const activeConversationRunning = Boolean(runningByProvider[activeId] || pendingByProvider[activeId]);
     const selectedProfile = activeProfile();
     messages.innerHTML = '';
 
@@ -3987,9 +4263,11 @@
       hasVisibleRunningMessage = hasVisibleRunningMessage || itemRunning;
       const wrapper = document.createElement('div');
       wrapper.className = `message ${item.role}${itemRunning ? ' is-running' : ''}`;
+      wrapper.dataset.messageIndex = String(index);
 
       const bubble = document.createElement('div');
       bubble.className = 'message-bubble';
+      const baseDetailKey = messageDetailKey(activeId, activeThread?.id, index, 'message');
 
       if (item.meta && item.role !== 'user') {
         const metaText = normalizeMessageText(item.meta);
@@ -4002,17 +4280,36 @@
 
       const body = document.createElement('div');
       body.className = 'message-content';
-      if (item.role === 'assistant' && normalizeMessageText(item.thinking).trim()) {
-        appendMessageThinking(bubble, item.thinking);
+      const hasAssistantThinking = item.role === 'assistant' && Boolean(normalizeMessageText(item.thinking).trim());
+      const hasAssistantActivity = hasOpenCodeActivity(item.activity);
+      const hasInlineAssistantActivity = hasOpenCodeActivityTimeline(item.activityTimeline);
+      if (item.role === 'assistant' && (hasAssistantThinking || hasAssistantActivity)) {
+        appendMessageThinking(bubble, item.thinking, {
+          activity: item.activity,
+          suppressActivityDetails: hasInlineAssistantActivity,
+          running: itemRunning,
+          startedAt: item.startedAt,
+          durationMs: item.durationMs,
+          detailKey: messageDetailKey(activeId, activeThread?.id, index, 'thinking'),
+        });
       }
-      renderMarkdownLite(body, normalizeMessageText(item.text));
+      renderMarkdownWithActivity(
+        body,
+        normalizeMessageText(item.text),
+        item.activity,
+        item.activityTimeline,
+        itemRunning,
+        baseDetailKey
+      );
       bubble.appendChild(body);
 
       if (Array.isArray(item.attachments) && item.attachments.length > 0) {
         appendMessageAttachments(bubble, item.attachments);
       }
 
-      if (shouldShowAssistantCopyButton(conversation, index, itemRunning)) {
+      if (itemRunning) {
+        appendMessageRunningStatus(bubble, item);
+      } else if (shouldShowAssistantCopyButton(conversation, index, activeConversationRunning)) {
         const copyActions = document.createElement('div');
         copyActions.className = 'message-actions';
         const copyButton = createMessageCopyButton();
@@ -4024,17 +4321,6 @@
         }
         copyActions.appendChild(copyButton);
         bubble.appendChild(copyActions);
-      }
-
-      if (itemRunning) {
-        appendMessageStatus(
-          bubble,
-          item.runningNotice ||
-            runningMessageStatusText(
-              item.text ? i18n.t('message.generating') : i18n.t('message.thinking'),
-              item.startedAt
-            )
-        );
       }
 
       wrapper.appendChild(bubble);
@@ -4049,9 +4335,9 @@
     restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
   }
 
-  function shouldShowAssistantCopyButton(conversation, index, itemRunning) {
+  function shouldShowAssistantCopyButton(conversation, index, activeConversationRunning) {
     const item = conversation[index];
-    if (item?.role !== 'assistant' || itemRunning || !normalizeMessageText(item.text).trim()) {
+    if (activeConversationRunning || item?.role !== 'assistant' || !normalizeMessageText(item.text).trim()) {
       return false;
     }
 
@@ -4067,6 +4353,43 @@
     }
 
     return true;
+  }
+
+  function runningMessageText(item) {
+    return item.runningNotice ||
+      runningMessageStatusText(
+        item.text ? i18n.t('message.generating') : i18n.t('message.thinking'),
+        item.startedAt
+      );
+  }
+
+  function appendMessageRunningStatus(container, item) {
+    appendMessageStatus(container, runningMessageText(item), true);
+  }
+
+  function syncMessageRunningStatusElement(container, item, itemRunning) {
+    let status = container.querySelector(':scope > .message-status');
+    if (!itemRunning) {
+      status?.remove();
+      return;
+    }
+
+    const text = runningMessageText(item);
+    if (!status) {
+      appendMessageRunningStatus(container, item);
+      return;
+    }
+
+    status.classList.add('is-running');
+    let label = status.querySelector('.message-status-label');
+    if (!label) {
+      label = document.createElement('span');
+      label.className = 'message-status-label';
+      status.appendChild(label);
+    }
+    if (label.textContent !== text) {
+      label.textContent = text;
+    }
   }
 
   function assistantCopyGroupStart(conversation, index) {
@@ -4196,6 +4519,22 @@
     return `${minutes}m ${seconds}s`;
   }
 
+  function formatDurationMs(durationMs) {
+    const duration = Number(durationMs);
+    if (!Number.isFinite(duration) || duration < 0) {
+      return '';
+    }
+
+    const totalSeconds = Math.max(0, Math.floor(duration / 1000));
+    if (totalSeconds < 60) {
+      return `${totalSeconds}s`;
+    }
+
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}m ${seconds}s`;
+  }
+
   function appendMessageAttachments(container, attachments) {
     const wrap = document.createElement('div');
     wrap.className = 'message-attachments';
@@ -4300,21 +4639,23 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
-    appendMessageStatus(bubble, text);
+    appendMessageStatus(bubble, text, true);
 
     wrapper.appendChild(bubble);
     messages.appendChild(wrapper);
   }
 
-  function appendMessageStatus(container, text) {
+  function appendMessageStatus(container, text, running = false) {
     const status = document.createElement('div');
     status.className = 'message-status';
+    status.classList.toggle('is-running', running);
 
     const spinner = document.createElement('span');
     spinner.className = 'message-spinner';
     status.appendChild(spinner);
 
     const label = document.createElement('span');
+    label.className = 'message-status-label';
     label.textContent = text;
     status.appendChild(label);
 
@@ -4824,13 +5165,26 @@
     return { threadId: thread?.id || '', index: conversation.length - 1 };
   }
 
-  function appendChunkText(current, chunk) {
-    const normalized = normalizeMessageText(chunk);
-    if (!normalized) {
-      return current || '';
+  function mergeStreamText(current, chunk) {
+    const existing = normalizeMessageText(current);
+    const incoming = normalizeMessageText(chunk);
+    if (!incoming) {
+      return existing || '';
+    }
+    if (!existing) {
+      return incoming;
+    }
+    if (incoming === existing) {
+      return existing;
+    }
+    if (incoming.startsWith(existing)) {
+      return incoming;
+    }
+    if (existing.endsWith(incoming) && incoming.length > 32) {
+      return existing;
     }
 
-    return `${current || ''}${normalized}`;
+    return `${existing}${incoming}`;
   }
 
   function ensureStreamTarget(message) {
@@ -4853,6 +5207,13 @@
 
   function updateStream(message) {
     const target = ensureStreamTarget(message);
+    if (Array.isArray(message.activities) && message.activities.length > 0) {
+      updateStreamActivity(message);
+      if (!message.thinking && !normalizeMessageText(message.text).trim()) {
+        return;
+      }
+    }
+
     if (message.thinking) {
       updateStreamThinking(message);
       if (!normalizeMessageText(message.text).trim()) {
@@ -4866,7 +5227,7 @@
     }
     noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
 
-    const buffered = `${target.buffer || item.text || ''}${normalizeMessageText(message.text)}`;
+    const buffered = mergeStreamText(target.buffer || item.text || '', message.text);
     const filtered = filterInternalPromptEcho(buffered);
     target.buffer = filtered.pending ? buffered : filtered.text;
     item.text = filtered.text;
@@ -4879,7 +5240,9 @@
     }
     persist();
     if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
-      renderMessages();
+      if (!renderActiveStreamMessage(target)) {
+        renderMessages();
+      }
     }
   }
 
@@ -4891,10 +5254,40 @@
     }
 
     noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
-    item.thinking = appendChunkText(item.thinking, message.thinking);
+    const existingThinking = target.thinkingBuffer ?? item.thinking ?? '';
+    target.thinkingBuffer = mergeStreamText(existingThinking, message.thinking);
+    const filtered = filterInternalPromptEcho(target.thinkingBuffer);
+    item.thinking = filtered.pending ? '' : sanitizeThinkingText(filtered.text);
+    if (!filtered.pending) {
+      target.thinkingBuffer = item.thinking;
+    }
     persist();
     if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
-      renderMessages();
+      if (!renderActiveStreamMessage(target)) {
+        renderMessages();
+      }
+    }
+  }
+
+  function updateStreamActivity(message) {
+    const target = ensureStreamTarget(message);
+    const item = ensureConversation(target.cliId, target.threadId)[target.index];
+    if (!item) {
+      return;
+    }
+
+    noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
+    item.activity = mergeOpenCodeActivity(item.activity, message.activities);
+    item.activityTimeline = mergeOpenCodeActivityTimeline(
+      item.activityTimeline,
+      message.activities,
+      normalizeMessageText(item.text).length
+    );
+    persist();
+    if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
+      if (!renderActiveStreamMessage(target)) {
+        renderMessages();
+      }
     }
   }
 
@@ -4929,6 +5322,8 @@
       const item = ensureConversation(target.cliId, target.threadId)[target.index];
       if (item) {
         item.running = false;
+        item.durationMs = Math.max(0, Date.now() - Number(item.startedAt || Date.now()));
+        item.thinking = sanitizeThinkingText(target.thinkingBuffer ?? item.thinking);
         delete item.runningNotice;
         if (!normalizeMessageText(item.text).trim()) {
           ensureConversation(target.cliId, target.threadId).splice(target.index, 1);
@@ -4994,26 +5389,601 @@
     return parts.length ? `${i18n.t('context.prefix')}: ${parts.join(', ')}` : undefined;
   }
 
-  function appendMessageThinking(bubble, text) {
-    const normalized = normalizeMessageText(text);
-    if (!normalized.trim()) {
+  function messageDetailKey(cliId, threadId, index, kind, localKey = '') {
+    return [
+      normalizeMessageText(cliId || 'none'),
+      normalizeMessageText(threadId || 'none'),
+      String(Math.max(0, Number(index) || 0)),
+      normalizeMessageText(kind || 'detail'),
+      normalizeMessageText(localKey || ''),
+    ].join(':');
+  }
+
+  function syncMessageDetailOpenState(detail) {
+    const key = detail?.dataset?.messageDetailKey;
+    if (!key) {
       return;
     }
 
-    const thinking = document.createElement('div');
+    if (detail.open) {
+      openMessageDetailKeys.add(key);
+    } else {
+      openMessageDetailKeys.delete(key);
+    }
+  }
+
+  function applyMessageDetailOpenState(detail, key) {
+    if (!detail || !key) {
+      return;
+    }
+
+    detail.dataset.messageDetailKey = key;
+    detail.open = openMessageDetailKeys.has(key);
+    if (!detail.dataset.messageDetailListening) {
+      detail.dataset.messageDetailListening = 'true';
+      detail.addEventListener('toggle', () => syncMessageDetailOpenState(detail));
+    }
+  }
+
+  function renderActiveStreamMessage(target) {
+    if (!target || target.cliId !== activeId || target.threadId !== activeThreadId(activeId)) {
+      return false;
+    }
+
+    const conversation = ensureConversation(target.cliId, target.threadId);
+    const item = conversation[target.index];
+    const wrapper = messages.querySelector(`.message[data-message-index="${target.index}"]`);
+    const bubble = wrapper?.querySelector('.message-bubble');
+    const body = bubble?.querySelector('.message-content');
+    if (!item || !wrapper || !bubble || !body) {
+      return false;
+    }
+
+    const messageThreadKey = `${activeId || 'none'}:${target.threadId || 'none'}`;
+    const shouldStickToBottom = shouldAutoScrollMessages(messageThreadKey);
+    const previousScrollTop = messages.scrollTop;
+    const itemRunning = Boolean(item.running && runningByProvider[activeId]);
+    const hasAssistantThinking = item.role === 'assistant' && Boolean(normalizeMessageText(item.thinking).trim());
+    const hasAssistantActivity = hasOpenCodeActivity(item.activity);
+    const hasInlineAssistantActivity = hasOpenCodeActivityTimeline(item.activityTimeline);
+    const baseDetailKey = messageDetailKey(target.cliId, target.threadId, target.index, 'message');
+
+    wrapper.className = `message ${item.role}${itemRunning ? ' is-running' : ''}`;
+    if (item.role === 'assistant' && (hasAssistantThinking || hasAssistantActivity)) {
+      syncMessageThinkingElement(bubble, item.thinking, {
+        activity: item.activity,
+        suppressActivityDetails: hasInlineAssistantActivity,
+        running: itemRunning,
+        startedAt: item.startedAt,
+        durationMs: item.durationMs,
+        detailKey: messageDetailKey(target.cliId, target.threadId, target.index, 'thinking'),
+      });
+    } else {
+      bubble.querySelector(':scope > .message-thinking')?.remove();
+    }
+
+    body.replaceChildren();
+    renderMarkdownWithActivity(
+      body,
+      normalizeMessageText(item.text),
+      item.activity,
+      item.activityTimeline,
+      itemRunning,
+      baseDetailKey
+    );
+    syncMessageRunningStatusElement(bubble, item, itemRunning);
+    if (itemRunning || Boolean(runningByProvider[activeId] || pendingByProvider[activeId])) {
+      bubble.querySelector(':scope > .message-actions')?.remove();
+    }
+    restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
+    return true;
+  }
+
+  function appendMessageThinking(bubble, text, options = {}) {
+    const thinking = createMessageThinkingElement(text, options);
+    if (thinking) {
+      bubble.appendChild(thinking);
+    }
+  }
+
+  function createMessageThinkingElement(text, options = {}) {
+    const normalized = normalizeMessageText(text);
+    const activity = normalizeOpenCodeActivity(options.activity);
+    if (!normalized.trim() && !hasOpenCodeActivity(activity)) {
+      return undefined;
+    }
+
+    const thinking = document.createElement('details');
     thinking.className = 'message-thinking';
+    syncMessageThinkingElement(thinking, normalized, options);
+    return thinking;
+  }
 
-    const label = document.createElement('div');
-    label.className = 'message-thinking-label';
-    label.textContent = `${i18n.t('message.thinking')}:`;
-    thinking.appendChild(label);
+  function syncMessageThinkingElement(parent, text, options = {}) {
+    const normalized = normalizeMessageText(text);
+    const activity = normalizeOpenCodeActivity(options.activity);
+    let thinking = parent.classList?.contains('message-thinking')
+      ? parent
+      : parent.querySelector(':scope > .message-thinking');
 
-    const body = document.createElement('div');
-    body.className = 'message-thinking-body';
-    body.textContent = normalized;
-    thinking.appendChild(body);
+    if (!thinking) {
+      thinking = document.createElement('details');
+      thinking.className = 'message-thinking';
+      const content = parent.querySelector(':scope > .message-content');
+      parent.insertBefore(thinking, content || null);
+    }
 
-    bubble.appendChild(thinking);
+    thinking.className = 'message-thinking';
+    if (options.detailKey) {
+      applyMessageDetailOpenState(thinking, options.detailKey);
+    }
+
+    let summary = thinking.querySelector(':scope > .message-thinking-summary');
+    if (!summary) {
+      summary = document.createElement('summary');
+      summary.className = 'message-thinking-summary';
+      summary.innerHTML = THINKING_ICON_SVG;
+      const label = document.createElement('span');
+      label.className = 'message-thinking-label';
+      summary.appendChild(label);
+      const chevron = document.createElement('span');
+      chevron.className = 'message-thinking-chevron';
+      chevron.innerHTML = THINKING_CHEVRON_SVG;
+      summary.appendChild(chevron);
+      thinking.appendChild(summary);
+    }
+
+    let label = summary.querySelector('.message-thinking-label');
+    if (!label) {
+      label = document.createElement('span');
+      label.className = 'message-thinking-label';
+      summary.appendChild(label);
+    }
+    label.textContent = openCodeThinkingSummaryText(activity, options.running, options.startedAt, options.durationMs);
+
+    if (!summary.querySelector('.message-thinking-chevron')) {
+      const chevron = document.createElement('span');
+      chevron.className = 'message-thinking-chevron';
+      chevron.innerHTML = THINKING_CHEVRON_SVG;
+      summary.appendChild(chevron);
+    }
+
+    let body = thinking.querySelector(':scope > .message-thinking-body');
+    if (!body) {
+      body = document.createElement('div');
+      body.className = 'message-thinking-body';
+      thinking.appendChild(body);
+    }
+    body.innerHTML = '';
+    const detailKey = options.detailKey || '';
+    if (!options.suppressActivityDetails) {
+      appendOpenCodeActivityDetails(body, activity.entries, detailKey ? `${detailKey}:activity` : '');
+    }
+
+    const thinkingText = sanitizeThinkingText(normalized);
+    if (thinkingText) {
+      const thinkingTextBlock = document.createElement('div');
+      thinkingTextBlock.className = 'message-thinking-detail-text';
+      thinkingTextBlock.textContent = thinkingText;
+      body.appendChild(thinkingTextBlock);
+    }
+  }
+
+  function normalizeOpenCodeActivity(activity) {
+    const source = activity && typeof activity === 'object' ? activity : {};
+    return {
+      ids: uniqueStrings(source.ids).slice(-120),
+      files: uniqueStrings(source.files).slice(-120),
+      fileEvents: Math.max(0, Number(source.fileEvents) || 0),
+      searches: Math.max(0, Number(source.searches) || 0),
+      commands: Math.max(0, Number(source.commands) || 0),
+      tools: Math.max(0, Number(source.tools) || 0),
+      entries: Array.isArray(source.entries)
+        ? source.entries.map(normalizeOpenCodeActivityEntry).filter(Boolean).slice(-40)
+        : [],
+    };
+  }
+
+  function mergeOpenCodeActivity(existing, activities) {
+    const state = normalizeOpenCodeActivity(existing);
+    const seen = new Set(state.ids);
+    for (const activity of Array.isArray(activities) ? activities : []) {
+      const entry = normalizeOpenCodeActivityEntry(activity);
+      if (!entry) {
+        continue;
+      }
+
+      const key = openCodeActivityEntryKey(entry);
+      if (key && seen.has(key)) {
+        const index = state.entries.findIndex((existingEntry) => openCodeActivityEntryKey(existingEntry) === key);
+        if (index >= 0) {
+          state.entries[index] = mergeOpenCodeActivityEntry(state.entries[index], entry);
+        }
+        continue;
+      }
+      if (key) {
+        seen.add(key);
+        state.ids.push(key);
+      }
+
+      if (entry.kind === 'file') {
+        if (entry.target) {
+          state.files = uniqueStrings([...state.files, entry.target]);
+        } else {
+          state.fileEvents += 1;
+        }
+      } else if (entry.kind === 'search') {
+        state.searches += 1;
+      } else if (entry.kind === 'command') {
+        state.commands += 1;
+      } else {
+        state.tools += 1;
+      }
+      state.entries.push(entry);
+    }
+
+    state.ids = state.ids.slice(-120);
+    state.entries = state.entries.slice(-40);
+    return state;
+  }
+
+  function openCodeActivityEntryKey(entry, offset) {
+    const normalized = normalizeOpenCodeActivityEntry(entry);
+    if (!normalized) {
+      return '';
+    }
+
+    const fallback = offset === undefined
+      ? `${normalized.kind}:${normalized.name || ''}:${normalized.target || ''}`
+      : `${normalized.kind}:${normalized.name || ''}:${normalized.target || ''}:${offset}`;
+    return normalizeMessageText(normalized.id || fallback).trim();
+  }
+
+  function mergeOpenCodeActivityEntry(existing, next) {
+    const current = normalizeOpenCodeActivityEntry(existing) || {};
+    const incoming = normalizeOpenCodeActivityEntry(next) || {};
+    return {
+      kind: incoming.kind || current.kind || 'tool',
+      id: incoming.id || current.id || '',
+      name: incoming.name || current.name || '',
+      target: incoming.target || current.target || '',
+      detail: incoming.detail || current.detail || '',
+    };
+  }
+
+  function normalizeOpenCodeActivityEntry(activity) {
+    if (!activity || typeof activity !== 'object') {
+      return undefined;
+    }
+
+    const kind = ['file', 'search', 'command', 'tool'].includes(activity.kind) ? activity.kind : 'tool';
+    return {
+      kind,
+      id: normalizeMessageText(activity.id).trim(),
+      name: normalizeMessageText(activity.name).trim(),
+      target: normalizeMessageText(activity.target).trim(),
+      detail: normalizeMessageText(activity.detail).trim(),
+    };
+  }
+
+  function normalizeOpenCodeActivityTimeline(activityTimeline) {
+    return (Array.isArray(activityTimeline) ? activityTimeline : [])
+      .map((item) => {
+        const entry = normalizeOpenCodeActivityEntry(item);
+        if (!entry) {
+          return undefined;
+        }
+
+        return {
+          ...entry,
+          offset: Math.max(0, Number(item.offset) || 0),
+        };
+      })
+      .filter(Boolean)
+      .slice(-80);
+  }
+
+  function mergeOpenCodeActivityTimeline(existing, activities, offset) {
+    const timeline = normalizeOpenCodeActivityTimeline(existing);
+    const indexByKey = new Map();
+    timeline.forEach((entry, index) => {
+      const key = openCodeActivityEntryKey(entry, entry.offset);
+      if (key) {
+        indexByKey.set(key, index);
+      }
+    });
+    const seen = new Set(indexByKey.keys());
+    const safeOffset = Math.max(0, Number(offset) || 0);
+
+    for (const activity of Array.isArray(activities) ? activities : []) {
+      const entry = normalizeOpenCodeActivityEntry(activity);
+      if (!entry) {
+        continue;
+      }
+
+      const key = openCodeActivityEntryKey(entry, safeOffset);
+      if (key && seen.has(key)) {
+        const index = indexByKey.get(key);
+        if (Number.isInteger(index)) {
+          timeline[index] = {
+            ...mergeOpenCodeActivityEntry(timeline[index], entry),
+            offset: timeline[index].offset,
+          };
+        }
+        continue;
+      }
+      if (key) {
+        seen.add(key);
+        indexByKey.set(key, timeline.length);
+      }
+
+      timeline.push({ ...entry, offset: safeOffset });
+    }
+
+    return timeline.slice(-80);
+  }
+
+  function hasOpenCodeActivity(activity) {
+    const state = normalizeOpenCodeActivity(activity);
+    return openCodeActivityFileCount(state) > 0 || state.searches > 0 || state.commands > 0 || state.tools > 0;
+  }
+
+  function hasOpenCodeActivityTimeline(activityTimeline) {
+    return normalizeOpenCodeActivityTimeline(activityTimeline).length > 0;
+  }
+
+  function openCodeActivityFileCount(activity) {
+    const state = normalizeOpenCodeActivity(activity);
+    return state.files.length + state.fileEvents;
+  }
+
+  function openCodeActivitySummaryText(activity, running, startedAt, durationMs) {
+    const state = normalizeOpenCodeActivity(activity);
+    const parts = [];
+    const fileCount = openCodeActivityFileCount(state);
+    if (fileCount > 0) {
+      parts.push(i18n.t('message.activity.files', {
+        count: String(fileCount),
+        fileLabel: i18n.t(fileCount === 1 ? 'message.activity.file' : 'message.activity.filesLabel'),
+      }));
+    }
+    if (state.searches > 0) {
+      parts.push(i18n.t('message.activity.searches', { count: String(state.searches) }));
+    }
+    if (state.commands > 0) {
+      parts.push(i18n.t('message.activity.commands', { count: String(state.commands) }));
+    }
+    if (state.tools > 0) {
+      parts.push(i18n.t('message.activity.tools', { count: String(state.tools) }));
+    }
+
+    if (parts.length > 0) {
+      return parts.join(' ');
+    }
+
+    if (running) {
+      return runningMessageStatusText(i18n.t('message.activity.thinkingRunning'), startedAt);
+    }
+
+    const elapsed = formatDurationMs(durationMs);
+    return elapsed
+      ? i18n.t('message.statusElapsed', { status: i18n.t('message.activity.thinkingDone'), elapsed })
+      : i18n.t('message.activity.thinking');
+  }
+
+  function openCodeThinkingSummaryText(activity, running, startedAt, durationMs) {
+    const state = normalizeOpenCodeActivity(activity);
+    const hasActivity = hasOpenCodeActivity(state);
+    if (running) {
+      return runningMessageStatusText(i18n.t('message.activity.thinkingRunning'), startedAt);
+    }
+
+    const status = hasActivity
+      ? i18n.t('message.activity.processed')
+      : i18n.t('message.activity.thinkingDone');
+    const elapsed = formatDurationMs(durationMs);
+    if (elapsed) {
+      return i18n.t('message.statusElapsed', { status, elapsed });
+    }
+
+    return status || i18n.t('message.activity.thinking');
+  }
+
+  function openCodeActivityDetailLine(entry) {
+    const target = entry.target || entry.name;
+    if (!target) {
+      return '';
+    }
+
+    const key = entry.kind === 'file'
+      ? 'message.activity.detail.file'
+      : entry.kind === 'search'
+        ? 'message.activity.detail.search'
+        : entry.kind === 'command'
+          ? 'message.activity.detail.command'
+          : 'message.activity.detail.tool';
+    return i18n.t(key, { target });
+  }
+
+  function renderMarkdownWithActivity(container, text, activity, activityTimeline, running, baseDetailKey = '') {
+    const normalized = normalizeMessageText(text);
+    const timeline = normalizeOpenCodeActivityTimeline(activityTimeline);
+    const fallbackTimeline = timeline.length > 0
+      ? []
+      : normalizeOpenCodeActivity(activity).entries.map((entry) => ({ ...entry, offset: 0 }));
+    const groups = groupOpenCodeActivityTimeline(timeline.length > 0 ? timeline : fallbackTimeline, normalized);
+
+    if (groups.length === 0) {
+      renderMarkdownLite(container, normalized);
+      return;
+    }
+
+    let cursor = 0;
+    for (const group of groups) {
+      const offset = Math.max(cursor, Math.min(group.offset, normalized.length));
+      const segment = normalized.slice(cursor, offset);
+      if (segment.trim()) {
+        renderMarkdownLite(container, segment);
+      }
+      appendInlineActivityGroup(
+        container,
+        group.entries,
+        running && group.latest,
+        baseDetailKey ? `${baseDetailKey}:activity:${group.offset}` : ''
+      );
+      cursor = offset;
+    }
+
+    const rest = normalized.slice(cursor);
+    if (rest.trim() || container.childElementCount === 0) {
+      renderMarkdownLite(container, rest);
+    }
+  }
+
+  function groupOpenCodeActivityTimeline(timeline, text) {
+    const groups = [];
+    const byOffset = new Map();
+    const entries = normalizeOpenCodeActivityTimeline(timeline);
+    for (const entry of entries) {
+      const offset = activityInsertionOffset(text, entry.offset);
+      const key = String(offset);
+      if (!byOffset.has(key)) {
+        byOffset.set(key, { offset, entries: [], latest: false });
+      }
+      byOffset.get(key).entries.push(entry);
+    }
+
+    for (const group of byOffset.values()) {
+      groups.push(group);
+    }
+
+    groups.sort((a, b) => a.offset - b.offset);
+    if (groups.length > 0) {
+      groups[groups.length - 1].latest = true;
+    }
+    return groups;
+  }
+
+  function activityInsertionOffset(text, offset) {
+    const normalized = normalizeMessageText(text);
+    const safeOffset = Math.max(0, Math.min(Number(offset) || 0, normalized.length));
+    if (safeOffset === 0 || safeOffset >= normalized.length) {
+      return safeOffset;
+    }
+
+    const paragraphBreak = normalized.indexOf('\n\n', safeOffset);
+    if (paragraphBreak >= 0 && paragraphBreak - safeOffset <= 280) {
+      return paragraphBreak + 2;
+    }
+
+    const lineBreak = normalized.indexOf('\n', safeOffset);
+    if (lineBreak >= 0 && lineBreak - safeOffset <= 180) {
+      return lineBreak + 1;
+    }
+
+    return safeOffset;
+  }
+
+  function appendInlineActivityGroup(container, entries, running, detailKey = '') {
+    const normalizedEntries = normalizeOpenCodeActivityTimeline(entries);
+    if (normalizedEntries.length === 0) {
+      return;
+    }
+
+    const row = document.createElement('details');
+    row.className = `message-activity-inline${running ? ' is-running' : ''}`;
+    if (detailKey) {
+      row.dataset.messageDetailKey = detailKey;
+      applyMessageDetailOpenState(row, detailKey);
+    }
+
+    const summary = document.createElement('summary');
+    summary.className = 'message-activity-summary';
+    summary.innerHTML = ACTIVITY_INLINE_ICON_SVG;
+
+    const label = document.createElement('span');
+    label.className = 'message-activity-text';
+    label.textContent = openCodeActivityEntriesSummaryText(normalizedEntries);
+    summary.appendChild(label);
+
+    const chevron = document.createElement('span');
+    chevron.className = 'message-activity-chevron';
+    chevron.innerHTML = THINKING_CHEVRON_SVG;
+    summary.appendChild(chevron);
+    row.appendChild(summary);
+
+    const hasDetail = normalizedEntries.some((entry) => Boolean(openCodeActivityDetailLine(entry) || entry.detail));
+    if (hasDetail) {
+      const body = document.createElement('div');
+      body.className = 'message-activity-body';
+      appendActivityDetailRows(body, normalizedEntries);
+      row.appendChild(body);
+    }
+    container.appendChild(row);
+  }
+
+  function appendOpenCodeActivityDetails(container, entries, detailKey = '') {
+    const normalizedEntries = normalizeOpenCodeActivityTimeline(entries);
+    if (normalizedEntries.length === 0) {
+      return;
+    }
+
+    appendInlineActivityGroup(container, normalizedEntries, false, detailKey);
+  }
+
+  function appendActivityDetailRows(body, entries) {
+    const normalizedEntries = normalizeOpenCodeActivityTimeline(entries);
+    for (const entry of normalizedEntries) {
+      const detail = openCodeActivityDetailLine(entry);
+      if (detail) {
+        const detailRow = document.createElement('div');
+        detailRow.className = 'message-activity-detail-row';
+        detailRow.textContent = detail;
+        body.appendChild(detailRow);
+      }
+
+      if (entry.detail) {
+        const log = document.createElement('pre');
+        log.className = 'message-activity-log';
+        log.textContent = entry.detail;
+        body.appendChild(log);
+      }
+    }
+  }
+
+  function openCodeActivityEntriesSummaryText(entries) {
+    const state = normalizeOpenCodeActivity({ entries });
+    state.entries.forEach((entry) => {
+      if (entry.kind === 'file' && entry.target) {
+        state.files = uniqueStrings([...state.files, entry.target]);
+      } else if (entry.kind === 'file') {
+        state.fileEvents += 1;
+      } else if (entry.kind === 'search') {
+        state.searches += 1;
+      } else if (entry.kind === 'command') {
+        state.commands += 1;
+      } else {
+        state.tools += 1;
+      }
+    });
+
+    return openCodeActivitySummaryText(state, false);
+  }
+
+  function uniqueStrings(values) {
+    const seen = new Set();
+    const result = [];
+    for (const value of Array.isArray(values) ? values : []) {
+      const normalized = normalizeMessageText(value).trim();
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+
+      seen.add(normalized);
+      result.push(normalized);
+    }
+
+    return result;
   }
 
   function renderMarkdownLite(container, text) {
@@ -6155,7 +7125,7 @@
 
   function sendSelectedAction() {
     const slash = parseSlashInput(input.value);
-    if (slash) {
+    if (slash && slashMatches.length > 0) {
       executeSlashCommand(slashMatches[slashActiveIndex]);
       return;
     }
@@ -6170,28 +7140,12 @@
   });
 
   newChatBtn.addEventListener('click', () => {
+    closeDeleteThreadDialog();
     startNewThread(activeId);
   });
 
   deleteThreadBtn.addEventListener('click', () => {
-    if (!window.confirm(i18n.t('history.deleteConfirm'))) {
-      return;
-    }
-
-    const threadId = activeThreadId(activeId);
-    const threads = ensureThreadList(activeId);
-    const index = threads.findIndex((thread) => thread.id === threadId);
-    if (index >= 0) {
-      threads.splice(index, 1);
-    }
-
-    const next = threads.sort((a, b) => b.updatedAt - a.updatedAt)[0] || createThread(activeId);
-    if (!threads.includes(next)) {
-      threads.push(next);
-    }
-    setActiveThread(activeId, next);
-    persist();
-    renderAll();
+    showDeleteThreadDialog(activeId);
   });
 
   input.addEventListener('input', () => {
@@ -6230,7 +7184,7 @@
         hideSlashPalette();
         return;
       }
-      if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+      if (slashMatches.length > 0 && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
         event.preventDefault();
         executeSlashCommand(slashMatches[slashActiveIndex]);
         return;

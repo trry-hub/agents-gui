@@ -1082,17 +1082,89 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
 
   assert.match(formatterSource, /thinking\?: string;/);
   assert.match(sidebarSource, /thinking: normalized\.thinking/);
   assert.match(sidebarSource, /status: normalized\.status/);
+  assert.match(sidebarSource, /activities: normalized\.activities/);
+  assert.match(script, /function mergeStreamText\(current, chunk\)/);
+  assert.match(script, /incoming\.startsWith\(existing\)/);
+  assert.match(script, /existing\.endsWith\(incoming\) && incoming\.length > 32/);
   assert.match(script, /function updateStreamThinking\(message\)/);
-  assert.match(script, /item\.thinking = appendChunkText\(item\.thinking, message\.thinking\)/);
-  assert.match(script, /appendMessageThinking\(bubble, item\.thinking\)/);
-  assert.match(script, /function appendMessageThinking\(bubble, text\)/);
+  assert.match(script, /function updateStreamActivity\(message\)/);
+  assert.match(script, /function sanitizeThinkingText\(text\)/);
+  assert.match(script, /target\.thinkingBuffer = mergeStreamText\(existingThinking, message\.thinking\);/);
+  assert.match(script, /item\.thinking = filtered\.pending \? '' : sanitizeThinkingText\(filtered\.text\);/);
+  assert.match(script, /const hasAssistantActivity = hasOpenCodeActivity\(item\.activity\);/);
+  assert.match(script, /const hasInlineAssistantActivity = hasOpenCodeActivityTimeline\(item\.activityTimeline\);/);
+  assert.match(script, /appendMessageThinking\(bubble, item\.thinking, \{\s*activity: item\.activity,\s*suppressActivityDetails: hasInlineAssistantActivity,\s*running: itemRunning,\s*startedAt: item\.startedAt,\s*durationMs: item\.durationMs,\s*detailKey: messageDetailKey\(activeId, activeThread\?\.id, index, 'thinking'\),\s*\}\)/s);
+  assert.match(script, /renderMarkdownWithActivity\(\s*body,\s*normalizeMessageText\(item\.text\),\s*item\.activity,\s*item\.activityTimeline,\s*itemRunning,\s*baseDetailKey\s*\)/s);
+  assert.doesNotMatch(script, /renderMarkdownLite\(body, normalizeMessageText\(item\.text\)\);/);
+  assert.match(script, /if \(itemRunning\) \{\s*appendMessageRunningStatus\(bubble, item\);\s*\} else if \(shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)\) \{/s);
+  assert.match(script, /function appendMessageThinking\(bubble, text, options = \{\}\)/);
+  assert.match(script, /function renderMarkdownWithActivity\(container, text, activity, activityTimeline, running, baseDetailKey = ''\)/);
+  assert.match(script, /function mergeOpenCodeActivityTimeline\(existing, activities, offset\)/);
+  assert.match(script, /item\.activityTimeline = mergeOpenCodeActivityTimeline\(\s*item\.activityTimeline,\s*message\.activities,\s*normalizeMessageText\(item\.text\)\.length\s*\)/s);
+  assert.match(script, /appendInlineActivityGroup\(\s*container,\s*group\.entries,\s*running && group\.latest,\s*baseDetailKey \? `\$\{baseDetailKey\}:activity:\$\{group\.offset\}` : ''\s*\);/s);
+  assert.match(script, /const openMessageDetailKeys = new Set\(\);/);
+  assert.match(script, /function messageDetailKey\(cliId, threadId, index, kind, localKey = ''\)/);
+  assert.match(script, /function renderActiveStreamMessage\(target\)/);
+  assert.match(script, /if \(target\.cliId === activeId && target\.threadId === activeThreadId\(activeId\)\) \{\s*if \(!renderActiveStreamMessage\(target\)\) \{\s*renderMessages\(\);\s*\}\s*\}/s);
+  assert.match(script, /const THINKING_ICON_SVG = '<svg /);
+  assert.match(script, /const thinking = document\.createElement\('details'\);/);
+  assert.match(script, /const thinking = document\.createElement\('details'\);\s*thinking\.className = 'message-thinking';\s*syncMessageThinkingElement\(thinking, normalized, options\);/s);
+  assert.doesNotMatch(script, /const thinking = document\.createElement\('details'\);\s*syncMessageThinkingElement\(thinking, normalized, options\);/s);
+  assert.match(script, /applyMessageDetailOpenState\(thinking, options\.detailKey\);/);
+  assert.match(script, /summary\.className = 'message-thinking-summary';/);
+  assert.match(script, /summary\.innerHTML = THINKING_ICON_SVG/);
+  assert.match(script, /label\.textContent = openCodeThinkingSummaryText\(activity, options\.running, options\.startedAt, options\.durationMs\);/);
+  assert.match(script, /chevron\.className = 'message-thinking-chevron';/);
+  assert.match(script, /chevron\.innerHTML = THINKING_CHEVRON_SVG;/);
+  assert.match(script, /item\.durationMs = Math\.max\(0, Date\.now\(\) - Number\(item\.startedAt \|\| Date\.now\(\)\)\);/);
+  assert.match(script, /item\.thinking = sanitizeThinkingText\(target\.thinkingBuffer \?\? item\.thinking\);/);
+  assert.match(script, /const thinkingText = sanitizeThinkingText\(normalized\);/);
+  assert.match(script, /appendOpenCodeActivityDetails\(body, activity\.entries, detailKey \? `\$\{detailKey\}:activity` : ''\);/);
+  assert.match(script, /thinkingTextBlock\.className = 'message-thinking-detail-text';/);
+  assert.doesNotMatch(script, /thinking\.open = true/);
+  assert.doesNotMatch(script, /body\.textContent = openCodeActivityBodyText/);
   assert.match(css, /\.message-thinking\s*\{/);
-  assert.match(css, /\.message-thinking-label\s*\{/);
+  assert.match(css, /\.message-thinking\s*\{\s*[^}]*color:\s*color-mix\(in srgb, var\(--assistant-muted\) 72%, transparent\);/s);
+  assert.match(css, /\.message-thinking-summary\s*\{/);
+  assert.match(css, /\.message-thinking-summary::-webkit-details-marker\s*\{/);
+  assert.doesNotMatch(css, /\.message-thinking-summary::before/);
+  assert.match(css, /\.message-thinking-summary:hover \.message-thinking-label,\s*\.message-thinking\[open\] \.message-thinking-label\s*\{/);
+  assert.match(css, /\.message-thinking-icon\s*\{/);
+  assert.match(css, /\.message-thinking-icon\s*\{\s*[^}]*color:\s*color-mix\(in srgb, var\(--assistant-muted\) 62%, transparent\);/s);
+  assert.match(css, /\.message-thinking-chevron\s*\{/);
+  assert.match(css, /\.message-thinking-chevron\s*\{\s*[^}]*opacity:\s*0;/s);
+  assert.match(css, /\.message-thinking-summary:hover \.message-thinking-chevron,\s*\.message-thinking\[open\] \.message-thinking-chevron\s*\{/);
   assert.match(css, /\.message-thinking-body\s*\{/);
+  assert.match(css, /\.message-activity-inline\s*\{/);
+  assert.match(script, /const row = document\.createElement\('details'\);/);
+  assert.match(script, /row\.dataset\.messageDetailKey = detailKey;/);
+  assert.match(script, /summary\.className = 'message-activity-summary';/);
+  assert.match(script, /body\.className = 'message-activity-body';/);
+  assert.match(script, /appendActivityDetailRows\(body, normalizedEntries\);/);
+  assert.match(script, /function appendActivityDetailRows\(body, entries\)/);
+  assert.match(script, /detail: normalizeMessageText\(activity\.detail\)\.trim\(\)/);
+  assert.match(script, /detailRow\.className = 'message-activity-detail-row';/);
+  assert.match(script, /log\.className = 'message-activity-log';/);
+  assert.match(script, /applyMessageDetailOpenState\(row, detailKey\);/);
+  assert.match(css, /\.message-activity-summary::-webkit-details-marker\s*\{/);
+  assert.match(css, /\.message-activity-body\s*\{/);
+  assert.match(css, /\.message-activity-detail-row\s*\{/);
+  assert.match(css, /\.message-activity-log\s*\{/);
+  assert.match(css, /\.message-thinking-detail-text\s*\{/);
+  assert.match(css, /\.message-activity-inline\.is-running \.message-activity-text\s*\{/);
+  assert.match(css, /@keyframes activityTextShimmer/);
+  assert.doesNotMatch(css, /\.message-thinking-body\s*\{[^}]*border-left:/);
+  assert.match(i18nScript, /'message\.activity\.thinkingDone': 'Thought'/);
+  assert.match(i18nScript, /'message\.activity\.thinkingDone': '已思考'/);
+  assert.match(i18nScript, /'message\.activity\.processed': 'Processed'/);
+  assert.match(i18nScript, /'message\.activity\.processed': '已处理'/);
+  assert.match(i18nScript, /'message\.activity\.files': 'Explored \{count\} \{fileLabel\}'/);
+  assert.match(i18nScript, /'message\.activity\.files': '已探索 \{count\} 个文件'/);
 });
 
 test('webview composer uses compact Code X style controls', () => {
@@ -1279,8 +1351,10 @@ test('webview renders installed provider logo tabs in the header', () => {
   const commands = manifest.contributes.commands;
   const titleActions = manifest.contributes.menus['view/title'] || [];
 
-  assert.match(html, /<div class="provider-tabs" id="providerTabs" role="tablist" aria-label="Provider tabs"/);
-  assert.match(html, /<div class="toolbar-actions"[\s\S]*id="newChatBtn"[\s\S]*id="deleteThreadBtn"[\s\S]*<\/div>\s*<div class="provider-tabs" id="providerTabs"/);
+  assert.match(html, /<div class="toolbar-session">[\s\S]*<div class="provider-tabs" id="providerTabs" role="tablist" aria-label="Provider tabs"/);
+  assert.match(html, /<div class="provider-tabs" id="providerTabs"[\s\S]*<\/div>\s*<label class="thread-select">/);
+  assert.doesNotMatch(html, /<div class="toolbar-session">\s*<div class="brand-mark"/);
+  assert.doesNotMatch(html, /<div class="toolbar-actions"[\s\S]*id="newChatBtn"[\s\S]*id="deleteThreadBtn"[\s\S]*<\/div>\s*<div class="provider-tabs" id="providerTabs"/);
   assert.doesNotMatch(html, /id="refreshBtn"/);
   assert.doesNotMatch(JSON.stringify(commands), /activeProviderIndicator|switchProvider/);
   assert.doesNotMatch(JSON.stringify(titleActions), /activeProviderIndicator|switchProvider/);
@@ -1288,11 +1362,19 @@ test('webview renders installed provider logo tabs in the header', () => {
   assert.match(JSON.stringify(titleActions), /agentsHub\.openProviderSettings/);
   assert.match(css, /\.provider-tabs\s*\{/);
   assert.match(css, /\.provider-tabs\s*\{\s*[^}]*height:\s*24px;/s);
+  assert.match(css, /\.provider-tabs\s*\{\s*[^}]*--provider-tabs-collapsed-width:\s*28px;/s);
+  assert.match(css, /\.provider-tabs\s*\{\s*[^}]*width:\s*var\(--provider-tabs-collapsed-width\);/s);
+  assert.match(css, /\.provider-tabs\s*\{\s*[^}]*border:\s*1px solid color-mix\(in srgb,\s*var\(--assistant-border\) 88%,\s*transparent\);/s);
+  assert.match(css, /\.provider-tabs:hover,\s*\.provider-tabs:focus-within\s*\{/);
+  assert.match(css, /\.provider-tabs:hover,\s*\.provider-tabs:focus-within\s*\{\s*[^}]*width:\s*min\(42vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
   assert.match(css, /\.provider-tab-button\s*\{/);
   assert.match(css, /\.provider-tab-button\s*\{\s*[^}]*--provider-tab-collapsed-width:\s*24px;/s);
   assert.match(css, /\.provider-tab-button\s*\{\s*[^}]*height:\s*20px;/s);
   assert.match(css, /\.provider-tab-button\.is-active\s*\{/);
   assert.match(css, /\.provider-tab-button\.is-active\s*\{\s*[^}]*width:\s*var\(--provider-tab-collapsed-width\);/s);
+  assert.match(css, /\.provider-tabs:not\(:hover\):not\(:focus-within\) \.provider-tab-button:not\(\.is-active\)\s*\{/);
+  assert.match(css, /\.provider-tabs:not\(:hover\):not\(:focus-within\) \.provider-tab-button\.is-active\s*\{\s*[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.provider-tabs:hover \.provider-tab-button,\s*\.provider-tabs:focus-within \.provider-tab-button\s*\{/);
   assert.match(css, /\.provider-tab-logo\s*\{/);
   assert.match(css, /\.provider-tab-logo\s*\{\s*[^}]*width:\s*15px;/s);
   assert.match(css, /\.provider-tab-logo\s*\{\s*[^}]*filter:\s*grayscale\(1\) saturate\(0\.12\);/s);
@@ -1304,9 +1386,13 @@ test('webview renders installed provider logo tabs in the header', () => {
   assert.match(script, /return value\.replace\(\s*\/\^v\/i,\s*''\s*\);/);
   assert.match(script, /function renderProviderTabs\(\)/);
   assert.match(script, /const availableProfiles = visibleInstalledProfiles\(\)/);
+  assert.doesNotMatch(script, /const activeProfile = availableProfiles\.find/);
+  assert.match(script, /for \(const profile of availableProfiles\)/);
+  assert.match(script, /providerTabs\.style\.setProperty\('--provider-tabs-expanded-width'/);
   assert.match(script, /button\.className = 'provider-tab-button'/);
   assert.match(script, /logo\.className = 'provider-tab-logo'/);
   assert.doesNotMatch(script, /version\.className = 'provider-tab-version'/);
+  assert.doesNotMatch(css, /\.provider-tabs:not\(:hover\):not\(:focus-within\) \.provider-tab-button:not\(\.is-active\)\s*\{[^}]*scale\(/s);
   assert.match(script, /providerTabs\.addEventListener\('click'/);
   assert.match(script, /switchActiveProvider\(button\.dataset\.providerId\)/);
   assert.match(sidebarSource, /webviewIcon: this\.getProviderIconUris\(profile\.id\)/);
@@ -1526,7 +1612,8 @@ test('webview composer controls wrap before narrow sidebars clip the send button
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
   assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.prompt-selectors\s*\{[\s\S]*?flex-wrap:\s*wrap;/s);
-  assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.provider-tabs\s*\{[\s\S]*?max-width:\s*min\(58vw,\s*220px\);/s);
+  assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.provider-tabs\s*\{[\s\S]*?max-width:\s*min\(58vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
+  assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.provider-tabs:hover,\s*\.provider-tabs:focus-within\s*\{[\s\S]*?width:\s*min\(58vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*min-width:\s*0;/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.prompt-shell\s*\{\s*[^}]*min-width:\s*0;/s);
@@ -1761,8 +1848,14 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(script, /const meta = document\.createElement\('div'\);/);
   assert.match(script, /meta\.className = 'message-meta';/);
   assert.match(script, /bubble\.appendChild\(meta\);/);
-  assert.match(script, /if \(shouldShowAssistantCopyButton\(conversation, index, itemRunning\)\) \{/);
-  assert.match(script, /function shouldShowAssistantCopyButton\(conversation, index, itemRunning\)/);
+  assert.match(script, /const activeConversationRunning = Boolean\(runningByProvider\[activeId\] \|\| pendingByProvider\[activeId\]\);/);
+  assert.match(script, /if \(itemRunning\) \{\s*appendMessageRunningStatus\(bubble, item\);\s*\} else if \(shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)\) \{/s);
+  assert.match(script, /function shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)/);
+  assert.match(script, /if \(activeConversationRunning \|\| item\?\.role !== 'assistant' \|\| !normalizeMessageText\(item\.text\)\.trim\(\)\) \{/);
+  assert.match(script, /function appendMessageRunningStatus\(container, item\)/);
+  assert.match(script, /function syncMessageRunningStatusElement\(container, item, itemRunning\)/);
+  assert.match(script, /syncMessageRunningStatusElement\(bubble, item, itemRunning\);/);
+  assert.match(script, /if \(itemRunning \|\| Boolean\(runningByProvider\[activeId\] \|\| pendingByProvider\[activeId\]\)\) \{\s*bubble\.querySelector\(':scope > \.message-actions'\)\?\.remove\(\);\s*\}/s);
   assert.match(script, /function assistantCopyGroupPlainText\(conversation, start, end\)/);
   assert.match(script, /const copyActions = document\.createElement\('div'\);/);
   assert.match(script, /copyActions\.className = 'message-actions';/);
@@ -1804,6 +1897,8 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(css, /\.message\.error \.message-bubble\s*\{\s*[^}]*padding:\s*8px 10px 8px 32px;/s);
   assert.match(css, /\.message-status\s*\{\s*[^}]*background:\s*transparent;/s);
   assert.match(css, /\.message-status\s*\{\s*[^}]*border:\s*0;/s);
+  assert.match(css, /\.message-status\.is-running\s*\{/);
+  assert.match(css, /\.message-status\.is-running \.message-status-label\s*\{/);
   assert.match(script, /function syncMessageStatusTimer\(shouldRun\)/);
   assert.match(script, /messageStatusTimer = setInterval\(\(\) => \{\s*renderMessages\(\);[\s\S]*?\}, 1000\);/);
   assert.match(script, /const MESSAGE_BOTTOM_STICKY_THRESHOLD = 48;/);
@@ -1815,7 +1910,7 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.doesNotMatch(script, /syncMessageStatusTimer\(hasVisibleRunningMessage\);\s*messages\.scrollTop = messages\.scrollHeight;/);
   assert.match(script, /function runningMessageStatusText\(stage, startedAt\)/);
   assert.match(script, /i18n\.t\('message\.statusElapsed', \{ status: stage, elapsed \}\)/);
-  assert.match(script, /item\.runningNotice \|\|[\s\S]*item\.text \? i18n\.t\('message\.generating'\) : i18n\.t\('message\.thinking'\),\s*item\.startedAt/s);
+  assert.match(script, /return item\.runningNotice \|\|[\s\S]*item\.text \? i18n\.t\('message\.generating'\) : i18n\.t\('message\.thinking'\),\s*item\.startedAt/s);
   assert.doesNotMatch(script, /typing-dots/);
   assert.match(css, /\.message\.user \.message-bubble\s*\{\s*[^}]*max-width:\s*min\(72%,\s*520px\);/s);
   assert.match(css, /\.message\.user \.message-bubble\s*\{\s*[^}]*padding:\s*7px 11px;/s);
@@ -2000,6 +2095,14 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /openSettingsPage\('apiProviders'\)/);
   assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
   assert.match(script, /function renderOpenCodeGroupedOptionDialogBody\(body, kind\)/);
+  assert.match(script, /const OPENCODE_OPTION_DIALOG_KINDS = new Set\(\['sessions', 'models', 'agents'\]\);/);
+  assert.match(script, /function handleOpenCodeOptionDialogKeydown\(event\)/);
+  assert.match(script, /dialog\.addEventListener\('keydown', handleOpenCodeOptionDialogKeydown\);/);
+  assert.match(script, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
+  assert.match(script, /selectOpenCodeDialogOption\(openCodeDialogKind, option\.id\)/);
+  assert.match(script, /openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex\(kind\);/);
+  assert.match(script, /option\.id === openCodeDialogActiveOptionId\(kind\) \? 'is-active' : ''/);
+  assert.match(script, /openCodeDialogQuery = filter\.value;\s*openCodeDialogActiveIndex = 0;\s*renderOpenCodeModelGroups\(list\);/);
   assert.match(script, /function renderOpenCodeMcpDialogBody\(body\)/);
   assert.match(script, /function openCodeMcpDialogOptions\(\)/);
   assert.match(script, /function toggleOpenCodeMcp\(cliId, name\)/);
@@ -2039,8 +2142,14 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /case 'openCodeNativeCommandResult':/);
   assert.match(script, /function renderSlashPalette/);
   assert.match(script, /function executeSlashCommand/);
+  assert.match(script, /function slashInputLooksLikeCommand\(query\)/);
+  assert.match(script, /if \(slash && slashMatches\.length > 0\) \{/);
+  assert.match(script, /query\.includes\('\/'\)/);
+  assert.match(script, /footer\.className = 'slash-footer';/);
+  assert.match(script, /i18n\.t\('slash\.footer\.accept', \{ command: slashMatches\[slashActiveIndex\]\.name \}\)/);
   assert.match(script, /event\.key === 'ArrowDown'/);
   assert.match(script, /event\.key === 'Tab'/);
+  assert.match(script, /slashMatches\.length > 0 && \(event\.key === 'Tab' \|\| \(event\.key === 'Enter' && !event\.shiftKey\)\)/);
   assert.match(script, /sendBtn\.addEventListener\('click', \(event\) => \{\s*event\.stopPropagation\(\);/s);
   assert.match(script, /parseSlashInput\(input\.value\)/);
   assert.match(script, /send\(command\.action,\s*command\.prompt/);
@@ -2051,7 +2160,10 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(css, /\.slash-palette\s*\{[^}]*font-family:\s*var\(--vscode-editor-font-family/);
   assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*min\(calc\(100% - 28px\),\s*640px\);/);
   assert.match(css, /\.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(160px,\s*240px\) minmax\(0,\s*1fr\);/);
+  assert.match(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*width:\s*min\(620px,\s*calc\(100% - 40px\)\);/);
+  assert.match(css, /body\[data-provider="opencode"\] \.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(238px,\s*260px\) minmax\(0,\s*1fr\);/);
   assert.match(css, /\.slash-command\.is-active\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/);
+  assert.match(css, /\.slash-footer\s*\{/);
   assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*border-radius:\s*7px;/);
   assert.match(css, /\.opencode-dialog-option\s*\{/);
   assert.match(css, /\.opencode-dialog-option\.is-selected\s*\{/);
@@ -2069,6 +2181,8 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(i18nScript, /'slash\.agents\.desc'/);
   assert.match(i18nScript, /'slash\.mcps\.desc'/);
   assert.match(i18nScript, /'slash\.variants\.desc'/);
+  assert.match(i18nScript, /'slash\.footer\.accept'/);
+  assert.match(i18nScript, /'slash\.footer\.commands'/);
   assert.match(i18nScript, /'slash\.connect\.desc'/);
   assert.match(i18nScript, /'slash\.status\.desc'/);
   assert.match(i18nScript, /'slash\.themes\.desc'/);
@@ -2125,7 +2239,7 @@ test('webview reduces decorative motion when requested', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(css, /\.message-spinner,\s*\.cursor\s*\{[^}]*animation:\s*none;/s);
+  assert.match(css, /\.message-spinner,\s*\.cursor,\s*\.message-activity-inline\.is-running \.message-activity-text,\s*\.message-status\.is-running \.message-status-label,\s*\.message-status\.is-running \.message-spinner\s*\{[^}]*animation:\s*none;/s);
 });
 
 test('preview webview streams markdown with real line breaks', () => {
@@ -2216,10 +2330,45 @@ test('webview front-end explains and blocks selection-only actions without selec
   );
 });
 
-test('webview confirms deleting conversation history', () => {
+test('webview confirms deleting conversation history inside the webview', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+
+  assert.match(script, /function showDeleteThreadDialog\(cliId = activeId\)/);
+  assert.match(script, /function closeDeleteThreadDialog\(\)/);
+  assert.match(script, /backdrop\.className = 'session-delete-backdrop';/);
+  assert.match(script, /dialog\.className = 'session-delete-dialog';/);
+  assert.match(script, /deleteActiveThread\(cliId\);/);
+  assert.doesNotMatch(script, /window\.confirm/);
+  assert.match(css, /\.session-delete-backdrop\s*\{/);
+  assert.match(css, /\.session-delete-dialog\s*\{/);
+  assert.match(i18nScript, /'history\.deleteConfirmTitle': 'Delete session\?'/);
+  assert.match(i18nScript, /'history\.deleteConfirmTitle': '删除当前会话？'/);
+});
+
+test('webview deletes the active conversation through a single session cleanup path', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
 
-  assert.match(script, /window\.confirm\(i18n\.t\('history\.deleteConfirm'\)\)/);
+  assert.match(script, /function deleteActiveThread\(cliId = activeId\)/);
+  assert.match(script, /const deletedOpenCodeSessionId = cliId === 'opencode' \? thread\.openCodeSessionId : '';/);
+  assert.match(script, /command: 'deleteOpenCodeSession'/);
+  assert.match(script, /delete activeThreadByProvider\[cliId\];/);
+  assert.match(script, /deleteThreadBtn\.disabled = !canDeleteActiveThread\(activeId\);/);
+  assert.doesNotMatch(script, /const next = threads\.sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)\[0\] \|\| createThread\(activeId\);/);
+});
+
+test('extension deletes the backing OpenCode session when local history is removed', () => {
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+
+  assert.match(sidebarSource, /case 'deleteOpenCodeSession':/);
+  assert.match(sidebarSource, /this\.cliManager\.deleteOpenCodeSession\(message\.openCodeSessionId\)/);
+  assert.match(cliSource, /async deleteOpenCodeSession\(sessionId: string \| undefined\): Promise<boolean>/);
+  assert.match(
+    cliSource,
+    /await this\.requestJson\(this\.openCodeSessionUrl\(serverUrl, sessionId\), \{\s*method: 'DELETE',\s*timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,\s*\}\);/s
+  );
 });
 
 test('webview does not add noisy success system message after every run', () => {
@@ -2284,6 +2433,38 @@ test('normalizeCliOutput condenses OpenCode model errors into a readable message
       'opencode'
     ),
     'Error: Model not found: mimo/mimo-v2-pro. Did you mean: mimo-v2.5-pro?\n'
+  );
+});
+
+test('normalizeCliOutput condenses OpenCode format errors without leaking prompt context', () => {
+  assert.equal(
+    normalizeCliOutput(
+      [
+        '你是谁',
+        '',
+        'Recent conversation in this thread:',
+        'Use this to answer follow-up questions and avoid asking the user to repeat prior details.',
+        '- User: 你是谁',
+        '- Assistant: 我是 Sisyphus。',
+        '',
+        'IDE context, use only if relevant:',
+        'IDE context:',
+        'Workspace: pc',
+        'Workspace root: /Users/t/6bt/project/xiaoyaojing-platform/web/pc',
+        '',
+        'Reply in Chinese (简体中文). Do not mix languages.',
+        '',
+        'Keep the answer concise. Do not inspect the project unless the request needs it.',
+        '',
+        'If the request involves code changes, include a compact delivery checklist:',
+        '- Files changed: list each file path and the exact change.',
+        '- Verification: commands or checks that confirm the change is correct (or explain why verification is not possible).',
+        '- Risks and caveats: call out assumptions, follow-up work, and edge cases.',
+        'Error: Model big-pickle not supported for format anthropic',
+      ].join('\n'),
+      'opencode'
+    ),
+    'Error: Model big-pickle is not supported for format anthropic. Switch to another OpenCode model/provider and retry.\n'
   );
 });
 
@@ -2383,6 +2564,110 @@ test('normalizeCliOutputChunk streams OpenCode thinking details separately from 
       'opencode'
     ),
     { text: '', buffer: '', status: 'thinking', thinking: 'The user is asking' }
+  );
+});
+
+test('normalizeCliOutputChunk maps OpenCode tool parts into activity updates', () => {
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.updated","properties":{"part":{"id":"prt_read","type":"tool","tool":"read","input":{"filePath":"src/sidebarProvider.ts"}}}}\n',
+      'opencode'
+    ),
+    {
+      text: '',
+      buffer: '',
+      status: 'thinking',
+      activities: [
+        {
+          id: 'prt_read',
+          kind: 'file',
+          name: 'read',
+          target: 'src/sidebarProvider.ts',
+        },
+      ],
+    }
+  );
+
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.updated","properties":{"part":{"id":"prt_bash","type":"tool","tool":"bash","input":{"command":"rg thinking media/main.js"}}}}\n',
+      'opencode'
+    ),
+    {
+      text: '',
+      buffer: '',
+      status: 'thinking',
+      activities: [
+        {
+          id: 'prt_bash',
+          kind: 'command',
+          name: 'bash',
+          target: 'rg thinking media/main.js',
+        },
+      ],
+    }
+  );
+
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"message.part.updated","properties":{"part":{"id":"prt_bash_json","type":"tool","tool":"bash","input":"{\\"command\\":\\"node --test tests/promptBuilder.test.mjs\\"}"}}}\n',
+      'opencode'
+    ),
+    {
+      text: '',
+      buffer: '',
+      status: 'thinking',
+      activities: [
+        {
+          id: 'prt_bash_json',
+          kind: 'command',
+          name: 'bash',
+          target: 'node --test tests/promptBuilder.test.mjs',
+        },
+      ],
+    }
+  );
+});
+
+test('OpenCode event stream keeps command details and logs from tool parts', () => {
+  const { CliManager } = loadCliManagerWithVscode();
+  const manager = new CliManager();
+  const block = [
+    'event: message.part.updated',
+    `data: ${JSON.stringify({
+      properties: {
+        part: {
+          id: 'prt_bash_sse',
+          type: 'tool',
+          tool: 'bash',
+          input: '{"command":"npm run build"}',
+          state: {
+            output: 'Build complete.',
+          },
+        },
+      },
+    })}`,
+  ].join('\n');
+
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      manager.renderOpenCodeSseBlock(block, new Map(), new Map()),
+      'opencode'
+    ),
+    {
+      text: '',
+      buffer: '',
+      status: 'thinking',
+      activities: [
+        {
+          id: 'prt_bash_sse',
+          kind: 'command',
+          name: 'bash',
+          target: 'npm run build',
+          detail: 'Build complete.',
+        },
+      ],
+    }
   );
 });
 
@@ -2545,6 +2830,116 @@ test('normalizeCliOutput removes an echoed internal assistant prompt before disp
   assert.equal(normalizeCliOutput(`${prompt}\n\n## 结果\n真实回答`), '## 结果\n真实回答');
 });
 
+test('normalizeCliOutput removes echoed OpenCode prompt wrappers before display', () => {
+  const leakedPrompt = [
+    '[analyze-mode]',
+    'ANALYSIS MODE. Gather context before diving deep:',
+    'CONTEXT GATHERING (parallel):',
+    '',
+    '"你是谁',
+    '',
+    'Recent conversation in this thread:',
+    'Use this to answer follow-up questions and avoid asking the user to repeat prior details.',
+    '- User: 你是谁',
+    '- Assistant: 我是 Sisyphus',
+    '',
+    'IDE context, use only if relevant:',
+    'IDE context:',
+    'Workspace: pc',
+    'Workspace root: /Users/t/6bt/project/xiaoyaojing-platform/web/pc',
+    '',
+    'Reply in Chinese (简体中文). Do not mix languages.',
+    '',
+    'Keep the answer concise. Do not inspect the project unless the request needs it.',
+    '',
+    'If the request involves code changes, include a compact delivery checklist:',
+    '- Files changed: list each file path and the exact change.',
+    '- Verification: commands or checks that confirm the change is correct (or explain why verification is not possible).',
+    '- Risks and caveats: call out assumptions, follow-up work, and edge cases."我是 Sisyphus，来自 OhMyOpenCode 的 AI 代理。',
+  ].join('\n');
+
+  assert.equal(
+    normalizeCliOutput(leakedPrompt, 'opencode'),
+    '我是 Sisyphus，来自 OhMyOpenCode 的 AI 代理。'
+  );
+  assert.equal(
+    normalizeCliOutput('[search-mode] should stay when it is plain response text', 'opencode'),
+    '[search-mode] should stay when it is plain response text'
+  );
+});
+
+test('normalizeCliOutputChunk removes echoed OpenCode prompt wrappers from thinking details', () => {
+  const leakedPrompt = [
+    '[search-mode]',
+    'MAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:',
+    '',
+    '[analyze-mode]',
+    'ANALYSIS MODE. Gather context before diving deep:',
+    '',
+    '"你是谁哦',
+    '',
+    'Recent conversation in this thread:',
+    'Use this to answer follow-up questions and avoid asking the user to repeat prior details.',
+    '',
+    'IDE context, use only if relevant:',
+    'IDE context:',
+    'Workspace: pc',
+    'Workspace root: /Users/t/6bt/project/xiaoyaojing-platform/web/pc',
+    '',
+    'Reply in Chinese (简体中文). Do not mix languages.',
+    '',
+    'Keep the answer concise. Do not inspect the project unless the request needs it.',
+    '',
+    'If the request involves code changes, include a compact delivery checklist:',
+    '- Files changed: list each file path and the exact change.',
+    '- Verification: commands or checks that confirm the change is correct (or explain why verification is not possible).',
+    '- Risks and caveats: call out assumptions, follow-up work, and edge cases.',
+  ].join('\n');
+
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      JSON.stringify({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            type: 'reasoning',
+            text: leakedPrompt,
+          },
+        },
+      }) + '\n',
+      'opencode'
+    ),
+    {
+      text: '',
+      buffer: '',
+      status: 'thinking',
+    }
+  );
+});
+
+test('normalizeCliOutputChunk keeps OpenCode prompt-analysis thinking for collapsed display', () => {
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      JSON.stringify({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            type: 'reasoning',
+            text: 'The user is asking “你是谁” and the message starts with `[analyze-mode]`. Reply in Chinese (简体中文).',
+          },
+        },
+      }) + '\n',
+      'opencode'
+    ),
+    {
+      text: '',
+      buffer: '',
+      status: 'thinking',
+      thinking: 'The user is asking “你是谁” and the message starts with `[analyze-mode]`. Reply in Chinese (简体中文).',
+    }
+  );
+});
+
 test('normalizeCliOutput preserves incomplete prompt chunks for the webview stream buffer', () => {
   assert.equal(
     normalizeCliOutput('You are an AI coding assistant embedded in VS Code.\nProvider: Codex CLI'),
@@ -2670,6 +3065,34 @@ function loadContextCollectorWithVscode(fakeVscode) {
   try {
     delete require.cache[require.resolve('../.test-dist/contextCollector.js')];
     return require('../.test-dist/contextCollector.js');
+  } finally {
+    Module._load = previousLoad;
+  }
+}
+
+function loadCliManagerWithVscode() {
+  const previousLoad = Module._load;
+  Module._load = function load(request, parent, isMain) {
+    if (request === 'vscode') {
+      return {
+        workspace: {
+          workspaceFolders: [],
+        },
+        EventEmitter: class {
+          event() {
+            return { dispose() {} };
+          }
+          fire() {}
+          dispose() {}
+        },
+      };
+    }
+    return previousLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete require.cache[require.resolve('../.test-dist/cliManager.js')];
+    return require('../.test-dist/cliManager.js');
   } finally {
     Module._load = previousLoad;
   }

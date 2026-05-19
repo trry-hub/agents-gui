@@ -672,7 +672,8 @@ export class CliManager {
     prompt: string,
     token: vscode.CancellationToken,
     directory = this.getWorkspaceRoot(),
-    modelId?: string
+    modelId?: string,
+    onPartial?: (text: string) => void
   ): Promise<string> {
     const serverUrl = await this.getOpenCodeServerUrl();
     if (!serverUrl) {
@@ -709,7 +710,7 @@ export class CliManager {
         }
       );
 
-      return await this.waitForOpenCodeServerText(serverUrl, sessionId, directory, token);
+      return await this.waitForOpenCodeServerText(serverUrl, sessionId, directory, token, onPartial);
     } catch (error) {
       await this.abortOpenCodeServerSession(serverUrl, sessionId, directory);
       throw error;
@@ -843,6 +844,23 @@ export class CliManager {
       ok: false,
       message: `Unsupported OpenCode command: ${command}`,
     };
+  }
+
+  async deleteOpenCodeSession(sessionId: string | undefined): Promise<boolean> {
+    if (!sessionId?.startsWith('ses')) {
+      return false;
+    }
+
+    const serverUrl = await this.getOpenCodeServerUrl();
+    if (!serverUrl) {
+      return false;
+    }
+
+    await this.requestJson(this.openCodeSessionUrl(serverUrl, sessionId), {
+      method: 'DELETE',
+      timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,
+    });
+    return true;
   }
 
   private async getOpenCodeServerUrl(): Promise<string | undefined> {
@@ -1026,7 +1044,8 @@ export class CliManager {
     serverUrl: string,
     sessionId: string,
     directory: string,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
+    onPartial?: (text: string) => void
   ): Promise<string> {
     const startedAt = Date.now();
     while (Date.now() - startedAt < OPEN_CODE_PROMPT_TIMEOUT_MS) {
@@ -1050,9 +1069,14 @@ export class CliManager {
       const messages = await this.fetchJson(
         this.openCodeApiUrl(serverUrl, `/session/${encodeURIComponent(sessionId)}/message`, directory)
       );
-      const text = this.extractOpenCodeAssistantText(messages);
-      if (text !== undefined) {
-        return text;
+      const textState = this.extractOpenCodeAssistantTextState(messages);
+      if (textState) {
+        if (textState.text.trim()) {
+          onPartial?.(textState.text);
+        }
+        if (textState.completed) {
+          return textState.text;
+        }
       }
 
       await this.sleep(OPEN_CODE_PROMPT_POLL_INTERVAL_MS);
@@ -1097,6 +1121,13 @@ export class CliManager {
   }
 
   private extractOpenCodeAssistantText(payload: unknown): string | undefined {
+    const state = this.extractOpenCodeAssistantTextState(payload);
+    return state?.completed ? state.text : undefined;
+  }
+
+  private extractOpenCodeAssistantTextState(
+    payload: unknown
+  ): { text: string; completed: boolean } | undefined {
     if (!Array.isArray(payload)) {
       return undefined;
     }
@@ -1113,21 +1144,39 @@ export class CliManager {
         throw new Error(error);
       }
 
+      const completed = this.isOpenCodeAssistantMessageCompleted(info);
       const parts = Array.isArray(record.parts) ? record.parts : [];
       const text = parts
-        .map((part) => this.pickString(this.objectRecord(part).text) ?? '')
+        .map((part) => {
+          const partRecord = this.objectRecord(part);
+          return this.pickString(partRecord.type) === 'text'
+            ? this.pickString(partRecord.text) ?? ''
+            : '';
+        })
         .join('');
-      if (text.trim()) {
-        return text;
+      if (text.trim() && completed) {
+        return { text, completed };
       }
 
-      const time = this.objectRecord(info.time);
-      if (typeof time.completed === 'number') {
-        return '';
+      if (completed) {
+        return { text: '', completed };
       }
+
+      return { text, completed };
     }
 
     return undefined;
+  }
+
+  private isOpenCodeAssistantMessageCompleted(info: Record<string, unknown>): boolean {
+    const time = this.objectRecord(info.time);
+    const status = this.pickString(info.status, info.state, info.phase);
+    return (
+      typeof time.completed === 'number' ||
+      status === 'completed' ||
+      status === 'done' ||
+      status === 'idle'
+    );
   }
 
   private openCodeMessageError(info: Record<string, unknown>): string | undefined {
@@ -1504,6 +1553,15 @@ export class CliManager {
         partTypes.set(partId, partType);
       }
 
+      if (partType === 'tool') {
+        return `${JSON.stringify({
+          type: 'message.part.updated',
+          properties: {
+            part: this.compactOpenCodeToolPart(part, properties, event),
+          },
+        })}\n`;
+      }
+
       if (partType === 'reasoning') {
         return this.renderOpenCodeUpdatedTextDelta(part, partTexts, 'reasoning');
       }
@@ -1529,7 +1587,12 @@ export class CliManager {
     const partType = (partId ? partTypes.get(partId) : undefined) ??
       this.pickString(part.type, properties.partType, event.partType);
     if (partType === 'tool') {
-      return '';
+      return `${JSON.stringify({
+        type: 'message.part.delta',
+        properties: {
+          part: this.compactOpenCodeToolPart(part, properties, event),
+        },
+      })}\n`;
     }
 
     const delta = this.pickString(properties.delta, event.delta, properties.text, event.text);
@@ -1590,6 +1653,104 @@ export class CliManager {
     }
 
     return false;
+  }
+
+  private compactOpenCodeToolPart(
+    part: Record<string, unknown>,
+    properties: Record<string, unknown>,
+    event: Record<string, unknown>
+  ): Record<string, unknown> {
+    const state = this.firstObject(part.state, properties.state, event.state);
+    const input = this.firstObject(
+      part.input,
+      part.args,
+      part.params,
+      state.input,
+      state.args,
+      state.params,
+      properties.input,
+      properties.args,
+      properties.params,
+      event.input,
+      event.args,
+      event.params
+    );
+    const compact: Record<string, unknown> = { type: 'tool' };
+    const id = this.pickString(part.id, properties.partID, event.partID, event.id);
+    const name = this.pickString(
+      part.tool,
+      part.name,
+      part.title,
+      properties.tool,
+      properties.name,
+      event.tool,
+      event.name
+    );
+    const status = this.pickString(state.status, state.state, part.status, properties.status, event.status);
+    const output = this.compactOpenCodeToolText(
+      this.pickString(
+        input.output,
+        input.stdout,
+        input.stderr,
+        input.result,
+        input.error,
+        input.message,
+        state.output,
+        state.stdout,
+        state.stderr,
+        state.result,
+        state.error,
+        state.message,
+        part.output,
+        part.stdout,
+        part.stderr,
+        part.result,
+        part.error,
+        part.message,
+        properties.output,
+        properties.stdout,
+        properties.stderr,
+        properties.result,
+        properties.error,
+        properties.message,
+        event.output,
+        event.stdout,
+        event.stderr,
+        event.result,
+        event.error,
+        event.message
+      )
+    );
+
+    if (id) {
+      compact.id = id;
+    }
+    if (name) {
+      compact.tool = name;
+      compact.name = name;
+    }
+    if (status) {
+      compact.status = status;
+    }
+    if (Object.keys(input).length > 0) {
+      compact.input = input;
+    }
+    if (output) {
+      compact.output = output;
+    }
+
+    return compact;
+  }
+
+  private compactOpenCodeToolText(value: string | undefined): string | undefined {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    return normalized.length > 6000
+      ? `${normalized.slice(0, 6000)}\n...`
+      : normalized;
   }
 
   private renderOpenCodeUpdatedTextDelta(
@@ -1710,9 +1871,33 @@ export class CliManager {
       if (Object.keys(object).length > 0) {
         return object;
       }
+
+      const parsed = this.parseObjectString(value);
+      if (parsed) {
+        return parsed;
+      }
     }
 
     return {};
+  }
+
+  private parseObjectString(value: unknown): Record<string, unknown> | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      const object = this.objectRecord(parsed);
+      return Object.keys(object).length > 0 ? object : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private pickString(...values: unknown[]): string | undefined {

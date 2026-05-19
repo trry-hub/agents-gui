@@ -14,6 +14,7 @@
   "command.refactorSelection.title": "Agents Hub: Refactor Selection",
   "command.generateCommitMessage.title": "Agents Hub: Generate Commit Message",
   "command.cancelCommitMessageGeneration.title": "Agents Hub: Stop Commit Message Generation",
+  "command.setupCommitMessage.title": "Agents Hub: Set Up Git Commit Message",
   "config.title": "Agents Hub",
   "config.defaultProvider.description": "Default AI provider used by editor commands.",
   "config.includeWorkspace.description": "Attach workspace metadata to assistant requests.",

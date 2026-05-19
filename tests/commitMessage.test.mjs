@@ -27,6 +27,10 @@ test('buildCommitMessagePrompt requires staged-only commit messages in Chinese',
 
   assert.match(prompt, /Only use the staged Git diff/);
   assert.match(prompt, /Generate the commit message in Simplified Chinese/);
+  assert.match(prompt, /The first line must be a Conventional Commits subject/);
+  assert.doesNotMatch(prompt, /Always include a scope in parentheses/);
+  assert.match(prompt, /For Simplified Chinese output, the summary after the colon must be Simplified Chinese/);
+  assert.match(prompt, /Do not output analysis, reasoning, rationale, or explanations/);
   assert.match(prompt, /Do not mention unstaged or untracked changes/);
   assert.match(prompt, /diff --git a\/src\/a\.ts b\/src\/a\.ts/);
 });
@@ -52,6 +56,7 @@ test('buildCommitMessagePrompt carries existing SCM input as user draft context'
   assert.match(prompt, /Existing Source Control input/);
   assert.match(prompt, /fix\(env\): clarify env sample/);
   assert.match(prompt, /Use this input as a user-provided draft or intent/);
+  assert.match(prompt, /format or style instruction/);
   assert.match(prompt, /staged diff remains the source of truth/);
 });
 
@@ -69,6 +74,115 @@ test('cleanGeneratedCommitMessage strips markdown fences and explanation', () =>
   );
 
   assert.equal(message, 'feat: 支持 AI 生成提交信息\n\n根据暂存区 diff 生成提交描述。');
+});
+
+test('cleanGeneratedCommitMessage rejects reasoning prose without a conventional subject', () => {
+  const message = cleanGeneratedCommitMessage(
+    [
+      'The user wants me to generate a Git commit message based on the staged diff.',
+      '',
+      'The staged diff only shows trailing blank lines being added to `web/pc/.env.dev`.',
+      '',
+      'Since the change is just whitespace at the end of a config file, this is essentially a formatting change.',
+    ].join('\n')
+  );
+
+  assert.equal(message, '');
+});
+
+test('cleanGeneratedCommitMessage extracts an embedded conventional subject after prose', () => {
+  const message = cleanGeneratedCommitMessage(
+    [
+      'The staged diff shows only trailing blank lines being added to `web/pc/.env.dev`.',
+      '',
+      'I need to generate a concise Conventional Commits message in Simplified Chinese.',
+      '',
+      'Let me generate a simple commit message.chore(pc): 在 .env.dev 末尾添加空行',
+    ].join('\n')
+  );
+
+  assert.equal(message, 'chore(pc): 在 .env.dev 末尾添加空行');
+});
+
+test('cleanGeneratedCommitMessage rewrites English summaries to Chinese fallback for zh locale', () => {
+  const diff = [
+    'diff --git a/.env.dev b/.env.dev',
+    'index 1111111..2222222 100644',
+    '--- a/.env.dev',
+    '+++ b/.env.dev',
+    '@@ -1 +1,3 @@',
+    ' VITE_APP_NAME=agents-hub',
+    '+',
+    '+',
+  ].join('\n');
+
+  const message = cleanGeneratedCommitMessage(
+    [
+      'The staged diff shows only whitespace changes. Let me generate an appropriate commit message.',
+      'chore(env): add trailing newlines to .env.dev',
+    ].join(''),
+    { language: 'zh-CN', diff }
+  );
+
+  assert.equal(message, 'chore(env): 在 .env.dev 末尾添加空行');
+});
+
+test('cleanGeneratedCommitMessage keeps a valid conventional subject when scope is omitted', () => {
+  const diff = [
+    'diff --git a/.env.dev b/.env.dev',
+    'index 1111111..2222222 100644',
+    '--- a/.env.dev',
+    '+++ b/.env.dev',
+    '@@ -1 +1,3 @@',
+    ' VITE_APP_NAME=agents-hub',
+    '+',
+    '+',
+  ].join('\n');
+
+  const message = cleanGeneratedCommitMessage('chore: 在 .env.dev 文件末尾添加空行', {
+    language: 'zh-CN',
+    diff,
+  });
+
+  assert.equal(message, 'chore: 在 .env.dev 文件末尾添加空行');
+});
+
+test('cleanGeneratedCommitMessage does not force scope from non-git diff headers', () => {
+  const diff = [
+    '--- .env.dev',
+    '+++ .env.dev',
+    '@@ -1 +1,2 @@',
+    ' VITE_APP_NAME=agents-hub',
+    '+',
+  ].join('\n');
+
+  const message = cleanGeneratedCommitMessage('chore: 在 .env.dev 文件末尾添加空行', {
+    language: 'zh-CN',
+    diff,
+  });
+
+  assert.equal(message, 'chore: 在 .env.dev 文件末尾添加空行');
+});
+
+test('cleanGeneratedCommitMessage applies emoji style requested by SCM input', () => {
+  const diff = [
+    'diff --git a/.env.dev b/.env.dev',
+    'index 1111111..2222222 100644',
+    '--- a/.env.dev',
+    '+++ b/.env.dev',
+    '@@ -1 +1,3 @@',
+    ' VITE_APP_NAME=agents-hub',
+    '+',
+    '+',
+  ].join('\n');
+
+  const message = cleanGeneratedCommitMessage('chore(env): 在 .env.dev 末尾添加空行', {
+    language: 'zh-CN',
+    diff,
+    inputMessage: '要带上表情图标',
+  });
+
+  assert.equal(message, 'chore(env): 🔧 在 .env.dev 末尾添加空行');
 });
 
 test('truncateCommitDiff keeps staged diff under the configured limit', () => {
@@ -103,8 +217,10 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   assert.ok(!manifest.enabledApiProposals?.includes('contribSourceControlInputBoxMenu'));
   assert.ok(manifest.activationEvents.includes('onCommand:agentsHub.generateCommitMessage'));
   assert.ok(manifest.activationEvents.includes('onCommand:agentsHub.cancelCommitMessageGeneration'));
+  assert.ok(manifest.activationEvents.includes('onCommand:agentsHub.setupCommitMessage'));
   assert.ok(commands.includes('agentsHub.generateCommitMessage'));
   assert.ok(commands.includes('agentsHub.cancelCommitMessageGeneration'));
+  assert.ok(commands.includes('agentsHub.setupCommitMessage'));
   assert.ok(!commands.includes('agentsHub.generateCommitMessage.loading'));
   assert.deepEqual(commitCommand.icon, {
     light: 'media/commit-message-light.svg',
@@ -136,20 +252,40 @@ test('commit message command uses staged git diff and writes to repository input
 
   assert.match(source, /getExtension<GitExtension>\('vscode\.git'\)/);
   assert.match(source, /repository\.state\.indexChanges\.length/);
+  assert.match(source, /repository\.state\.workingTreeChanges\?\./);
   assert.match(source, /repository\.diff\(true\)/);
+  assert.match(source, /handleNoStagedChanges\(repository, locale\)/);
+  assert.match(source, /executeCommand\('git\.stageAll'\)/);
+  assert.match(source, /executeCommand\('workbench\.view\.scm'\)/);
+  assert.match(source, /const streamCommitMessage = \(output: string\) =>/);
+  assert.match(source, /repository\.inputBox\.value = '';/);
+  assert.match(source, /repository\.inputBox\.value = partialMessage;/);
   assert.match(source, /repository\.inputBox\.value = message/);
   assert.match(source, /const inputMessage = repository\.inputBox\.value\.trim\(\)/);
   assert.match(source, /buildCommitMessagePrompt\(\{ diff, language, truncated, inputMessage \}\)/);
+  assert.match(source, /cleanCommitMessageOutput\(output, language, diff, inputMessage, true\)/);
+  assert.match(source, /generateCommitMessageWithCancellation\(\s*profile,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s);
+  assert.match(source, /cleanGeneratedCommitMessage\(output, \{ language, diff, inputMessage \}\)/);
   assert.match(source, /getRepository\(rootUri\)/);
   assert.match(source, /generateCommitMessageWithCancellation/);
   assert.match(source, /profile\.id === 'opencode'/);
   assert.match(
     source,
-    /runOpenCodePromptViaServer\(\s*prompt,\s*token,\s*repositoryRoot,\s*this\.getStoredOpenCodeModelId\(\)\s*\)/s
+    /runOpenCodePromptViaServer\(\s*prompt,\s*token,\s*repositoryRoot,\s*this\.getStoredOpenCodeModelId\(\),\s*onPartial\s*\)/s
   );
+  assert.match(source, /return this\.cleanCommitMessageOutput\(\s*await this\.cliManager\.runOpenCodePromptViaServer/s);
+  assert.match(source, /private cleanCommitMessageOutput\(\s*output: string,\s*language: CommitMessageLanguage,\s*diff: string/s);
+  assert.doesNotMatch(source, /resolveInputValue/);
+  assert.doesNotMatch(source, /existingMessage/);
   assert.doesNotMatch(source, /\['--pure', \.\.\.args\]/);
   assert.match(source, /isProviderErrorOutput\(output\)/);
   assert.match(source, /getConfiguredProvider\(\)/);
+  assert.match(source, /resolveReadyProfile\(locale\)/);
+  assert.match(source, /getInstalledProfiles\(\)/);
+  assert.match(source, /showQuickPick\(providerItems/);
+  assert.match(source, /commitMessage'\)\.update\(\s*'provider'/);
+  assert.match(source, /executeCommand\('agentsHub\.openProviderSettings', 'commitMessage'\)/);
+  assert.match(source, /clipboard\.writeText\(preferred\.installHint\)/);
   assert.match(source, /MODEL_STATE_KEY = 'agentsHub\.modelByProvider'/);
   assert.match(source, /this\.state\?\.get<Record<string, string>>\(MODEL_STATE_KEY/);
   assert.match(source, /setContext', 'agentsHub\.commitMessageGenerating'/);
@@ -157,6 +293,19 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /cancel\(\): void/);
   assert.match(source, /isLikelyCliError\(normalizedStderr\)/);
   assert.doesNotMatch(source, /diff\(false\)/);
+});
+
+test('OpenCode server commit generation waits for completed text parts only', () => {
+  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /onPartial\?: \(text: string\) => void/);
+  assert.match(source, /waitForOpenCodeServerText\(serverUrl, sessionId, directory, token, onPartial\)/);
+  assert.match(source, /const textState = this\.extractOpenCodeAssistantTextState\(messages\);/);
+  assert.match(source, /onPartial\?\.\(textState\.text\);/);
+  assert.match(source, /const completed = this\.isOpenCodeAssistantMessageCompleted\(info\);/);
+  assert.match(source, /this\.pickString\(partRecord\.type\) === 'text'/);
+  assert.match(source, /if \(textState\.completed\) \{/);
+  assert.doesNotMatch(source, /\.map\(\(part\) => this\.pickString\(this\.objectRecord\(part\)\.text\) \?\? ''\)/);
 });
 
 test('sidebar persists the selected model so SCM commit generation can reuse it', () => {
@@ -180,6 +329,8 @@ test('extension registers SCM title generation and cancel commands', () => {
   assert.match(source, /return commitMessageCommand\.run\(rootUri, token\)/);
   assert.match(source, /registerCommand\('agentsHub\.cancelCommitMessageGeneration', \(\) =>/);
   assert.match(source, /commitMessageCommand\.cancel\(\)/);
+  assert.match(source, /registerCommand\('agentsHub\.setupCommitMessage', \(\) =>/);
+  assert.match(source, /executeCommand\('agentsHub\.openProviderSettings', 'commitMessage'\)/);
   assert.doesNotMatch(source, /registerCommand\('agentsHub\.generateCommitMessage\.loading'/);
   assert.doesNotMatch(source, /void commitMessageCommand\.run\(\)/);
 });
