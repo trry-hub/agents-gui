@@ -16,7 +16,4 @@ esbuild.mjs
 **/*.map
 *.vsix
 agents-gui-global-logo-settings.png
-findings.md
 index.html
-progress.md
-task_plan.md
