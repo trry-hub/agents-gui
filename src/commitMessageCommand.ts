@@ -320,13 +320,14 @@ export class CommitMessageCommand {
     const openSourceControl = this.t(locale, 'openSourceControl');
     const hasWorkingTreeChanges = (repository.state.workingTreeChanges?.length ?? 0) > 0;
     if (!hasWorkingTreeChanges) {
-      const choice = await vscode.window.showInformationMessage(
+      void vscode.window.showInformationMessage(
         this.t(locale, 'noStagedChanges'),
         openSourceControl
-      );
-      if (choice === openSourceControl) {
-        await vscode.commands.executeCommand('workbench.view.scm');
-      }
+      ).then(async (choice) => {
+        if (choice === openSourceControl) {
+          await vscode.commands.executeCommand('workbench.view.scm');
+        }
+      });
 
       return false;
     }

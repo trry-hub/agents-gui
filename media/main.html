@@ -96,6 +96,7 @@
               </div>
               <div class="home-agent-list" id="homeAgentList"></div>
               <footer class="settings-section-actions">
+                <span id="homeAgentsSaveStatus" class="settings-save-status" aria-live="polite"></span>
                 <button class="api-secondary-button" id="homeAgentsReset" type="button" data-i18n="homeAgents.showAll"></button>
                 <button class="api-primary-button" id="homeAgentsSave" type="button" data-i18n="apiSettings.save"></button>
               </footer>
@@ -159,7 +160,7 @@
 
                   <footer class="api-settings-footer">
                     <button class="api-danger-button" id="apiProviderDelete" type="button" data-i18n="apiSettings.deleteProvider"></button>
-                    <span></span>
+                    <span id="apiProviderSaveStatus" class="settings-save-status" aria-live="polite"></span>
                     <button class="api-secondary-button" id="apiProviderCancel" type="button" data-i18n="action.dismiss"></button>
                     <button class="api-primary-button" type="submit" data-i18n="apiSettings.save"></button>
                   </footer>
@@ -193,6 +194,7 @@
               </div>
 
               <footer class="settings-section-actions">
+                <span id="commitMessageSaveStatus" class="settings-save-status" aria-live="polite"></span>
                 <button class="api-secondary-button" id="commitMessageReset" type="button" data-i18n="commitSettings.reset"></button>
                 <button class="api-primary-button" id="commitMessageSave" type="button" data-i18n="apiSettings.save"></button>
               </footer>
@@ -326,7 +328,7 @@
 
           <div class="prompt-tools" role="toolbar" aria-label="Quick actions" data-i18n-aria="quick.label">
             <button class="stop-button" id="stopBtn" data-i18n-title="action.stop" aria-label="Stop">
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5h6v6H5z"/></svg>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="6" height="6" rx="1.2"/></svg>
             </button>
             <button class="send-button" id="sendBtn" data-i18n-title="action.send" aria-label="Send">
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V4M4 8l4-4 4 4"/></svg>

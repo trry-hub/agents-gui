@@ -161,13 +161,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.openProviderSettings(message.section);
           break;
         case 'saveHomeAgentSettings':
-          await this.saveHomeAgentSettings(message.settings);
+          await this.saveSettingsWithResult('agents', () => this.saveHomeAgentSettings(message.settings));
           break;
         case 'saveApiProviderSettings':
-          await this.saveApiProviderSettings(message.settings);
+          await this.saveSettingsWithResult('apiProviders', () => this.saveApiProviderSettings(message.settings));
           break;
         case 'saveCommitMessageSettings':
-          await this.saveCommitMessageSettings(message.settings);
+          await this.saveSettingsWithResult('commitMessage', () => this.saveCommitMessageSettings(message.settings));
           break;
         case 'refreshApiProviderSettings':
           await this.sendApiProviderSettings();
@@ -411,6 +411,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       command: 'commitMessageSettings',
       settings: this.getCommitMessageSettings(),
     });
+  }
+
+  private async saveSettingsWithResult(
+    section: 'agents' | 'apiProviders' | 'commitMessage',
+    save: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await save();
+      this.view?.webview.postMessage({
+        command: 'settingsSaveResult',
+        section,
+        ok: true,
+      });
+    } catch (error) {
+      this.view?.webview.postMessage({
+        command: 'settingsSaveResult',
+        section,
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async saveHomeAgentSettings(rawSettings: unknown): Promise<void> {

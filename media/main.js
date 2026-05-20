@@ -42,6 +42,7 @@
   const THINKING_CHEVRON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>';
   const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
   const OPENCODE_OPTION_DIALOG_KINDS = new Set(['sessions', 'models', 'agents']);
+  const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 2200;
 
   const saved = vscode.getState() || {};
   let profiles = [];
@@ -61,6 +62,7 @@
   let apiProviderEnvStatusById = {};
   let editingApiProviderId = '';
   let activeSettingsSection = 'agents';
+  const settingsSaveStatusTimers = {};
   let claudeTerminalBannerDismissed = Boolean(saved.claudeTerminalBannerDismissed);
   let taskBoardDismissed = Boolean(saved.taskBoardDismissed);
   let legacyWorkflowMode = saved.workflowMode || (saved.mode === 'agent' ? 'execute' : undefined);
@@ -77,6 +79,7 @@
   let contextSummary = null;
   let streamTargets = {};
   let taskBySessionId = {};
+  const stoppedSessionIds = new Set();
   let pendingTaskByProvider = {};
   let runningByProvider = {};
   let pendingByProvider = {};
@@ -154,11 +157,13 @@
   const homeAgentList = document.getElementById('homeAgentList');
   const homeAgentsReset = document.getElementById('homeAgentsReset');
   const homeAgentsSave = document.getElementById('homeAgentsSave');
+  const homeAgentsSaveStatus = document.getElementById('homeAgentsSaveStatus');
   const commitMessageProviderSelect = document.getElementById('commitMessageProviderSelect');
   const commitMessageLanguageSelect = document.getElementById('commitMessageLanguageSelect');
   const commitMessageMaxDiffChars = document.getElementById('commitMessageMaxDiffChars');
   const commitMessageReset = document.getElementById('commitMessageReset');
   const commitMessageSave = document.getElementById('commitMessageSave');
+  const commitMessageSaveStatus = document.getElementById('commitMessageSaveStatus');
   const apiProviderList = document.getElementById('apiProviderList');
   const apiProviderAdd = document.getElementById('apiProviderAdd');
   const apiProviderForm = document.getElementById('apiProviderForm');
@@ -173,6 +178,7 @@
   const apiProviderDefaultSelect = document.getElementById('apiProviderDefaultSelect');
   const apiProviderAgentBindings = document.getElementById('apiProviderAgentBindings');
   const apiProviderSettingsError = document.getElementById('apiProviderSettingsError');
+  const apiProviderSaveStatus = document.getElementById('apiProviderSaveStatus');
   const apiProviderDelete = document.getElementById('apiProviderDelete');
   const apiProviderCancel = document.getElementById('apiProviderCancel');
   const SLASH_COMMANDS = [
@@ -1698,8 +1704,63 @@
       ?.focus();
   }
 
+  function settingsSaveStatusElement(section) {
+    switch (section) {
+      case 'agents':
+        return homeAgentsSaveStatus;
+      case 'apiProviders':
+        return apiProviderSaveStatus;
+      case 'commitMessage':
+        return commitMessageSaveStatus;
+      default:
+        return null;
+    }
+  }
+
+  function clearSettingsSaveStatus(section) {
+    const element = settingsSaveStatusElement(section);
+    if (!element) {
+      return;
+    }
+    window.clearTimeout(settingsSaveStatusTimers[section]);
+    settingsSaveStatusTimers[section] = undefined;
+    element.textContent = '';
+    element.classList.remove('is-saving', 'is-success', 'is-error');
+  }
+
+  function setSettingsSaveStatus(section, state, message) {
+    const element = settingsSaveStatusElement(section);
+    if (!element) {
+      return;
+    }
+
+    window.clearTimeout(settingsSaveStatusTimers[section]);
+    settingsSaveStatusTimers[section] = undefined;
+    element.classList.remove('is-saving', 'is-success', 'is-error');
+
+    if (!state) {
+      element.textContent = '';
+      return;
+    }
+
+    const defaultTextByState = {
+      saving: i18n.t('settings.saveStatus.saving'),
+      success: i18n.t('settings.saveStatus.saved'),
+      error: i18n.t('settings.saveStatus.failed'),
+    };
+    element.textContent = message || defaultTextByState[state] || '';
+    element.classList.add(`is-${state}`);
+
+    if (state === 'success') {
+      settingsSaveStatusTimers[section] = window.setTimeout(() => {
+        clearSettingsSaveStatus(section);
+      }, SETTINGS_SAVE_STATUS_TIMEOUT_MS);
+    }
+  }
+
   function saveHomeAgentSettings() {
     homeAgentSettings = collectHomeAgentSettings();
+    setSettingsSaveStatus('agents', 'saving');
     vscode.postMessage({ command: 'saveHomeAgentSettings', settings: homeAgentSettings });
     renderAll();
     renderHomeAgentSettings();
@@ -1733,6 +1794,7 @@
 
   function saveCommitMessageSettings() {
     commitMessageSettings = collectCommitMessageSettings();
+    setSettingsSaveStatus('commitMessage', 'saving');
     vscode.postMessage({ command: 'saveCommitMessageSettings', settings: commitMessageSettings });
     renderCommitMessageSettings();
   }
@@ -1740,6 +1802,7 @@
   function resetCommitMessageSettings() {
     commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
     renderCommitMessageSettings();
+    setSettingsSaveStatus('commitMessage', 'saving');
     vscode.postMessage({ command: 'saveCommitMessageSettings', settings: commitMessageSettings });
   }
 
@@ -2072,6 +2135,7 @@
     }
     apiProviderSettings = next;
     clearApiSettingsError();
+    setSettingsSaveStatus('apiProviders', 'saving');
     vscode.postMessage({ command: 'saveApiProviderSettings', settings: apiProviderSettings });
     renderApiProviderSettings();
   }
@@ -5332,33 +5396,38 @@
     }
   }
 
-  function markSessionEnded(message) {
+  function finishStreamTarget(message, { removeEmpty = true } = {}) {
     const target = streamTargets[message.sessionId];
     if (target) {
       noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
-    }
-    updateTaskStatus(taskBySessionId[message.sessionId], {
-      status: Number(message.exitCode) === 0 ? 'completed' : 'failed',
-    });
-    delete taskBySessionId[message.sessionId];
-    if (target) {
-      const item = ensureConversation(target.cliId, target.threadId)[target.index];
+      const conversation = ensureConversation(target.cliId, target.threadId);
+      const item = conversation[target.index];
       if (item) {
         item.running = false;
         item.durationMs = Math.max(0, Date.now() - Number(item.startedAt || Date.now()));
         item.thinking = sanitizeThinkingText(target.thinkingBuffer ?? item.thinking);
         delete item.runningNotice;
-        if (!normalizeMessageText(item.text).trim()) {
-          ensureConversation(target.cliId, target.threadId).splice(target.index, 1);
+        if (removeEmpty && !normalizeMessageText(item.text).trim()) {
+          conversation.splice(target.index, 1);
         }
       }
       delete streamTargets[message.sessionId];
     }
 
+    return target;
+  }
+
+  function markSessionEnded(message) {
+    const wasStopped = stoppedSessionIds.delete(message.sessionId);
+    const target = finishStreamTarget(message);
+    updateTaskStatus(taskBySessionId[message.sessionId], {
+      status: wasStopped ? 'stopped' : (Number(message.exitCode) === 0 ? 'completed' : 'failed'),
+    });
+    delete taskBySessionId[message.sessionId];
     runningByProvider[message.cliId] = false;
     pendingByProvider[message.cliId] = false;
     delete pendingThreadByProvider[message.cliId];
-    if (Number(message.exitCode) !== 0) {
+    if (Number(message.exitCode) !== 0 && !wasStopped) {
       addMessage(
         message.cliId,
         'system',
@@ -7157,6 +7226,15 @@
     send(action, input.value || quickActionText(action));
   }
 
+  function requestStopActiveProvider() {
+    if (!runningByProvider[activeId]) {
+      return false;
+    }
+
+    vscode.postMessage({ command: 'stop', cliId: activeId });
+    return true;
+  }
+
   sendBtn.addEventListener('click', (event) => {
     event.stopPropagation();
     sendSelectedAction();
@@ -7235,11 +7313,11 @@
   });
 
   stopBtn.addEventListener('click', () => {
-    vscode.postMessage({ command: 'stop', cliId: activeId });
+    requestStopActiveProvider();
   });
 
   codexTerminalStop.addEventListener('click', () => {
-    vscode.postMessage({ command: 'stop', cliId: activeId });
+    requestStopActiveProvider();
   });
 
   codexTerminalOpen.addEventListener('click', () => {
@@ -7374,6 +7452,7 @@
     });
     editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
     clearApiSettingsError();
+    setSettingsSaveStatus('apiProviders', 'saving');
     vscode.postMessage({ command: 'saveApiProviderSettings', settings: apiProviderSettings });
     renderApiProviderSettings();
   });
@@ -7646,6 +7725,10 @@
         closeApiProviderSettings();
         return;
       }
+      if (requestStopActiveProvider()) {
+        event.preventDefault();
+        return;
+      }
       closeComposerMenus();
     }
   });
@@ -7743,6 +7826,19 @@
         }
         renderSettingsPage();
         break;
+      case 'settingsSaveResult': {
+        if (message.ok) {
+          setSettingsSaveStatus(message.section, 'success');
+          break;
+        }
+        const errorMessage = typeof message.message === 'string' ? message.message.trim() : '';
+        setSettingsSaveStatus(
+          message.section,
+          'error',
+          errorMessage ? i18n.t('settings.saveStatus.failedWithMessage', { message: errorMessage }) : undefined
+        );
+        break;
+      }
       case 'homeAgentSettings':
         homeAgentSettings = normalizeHomeAgentSettings(message.settings);
         renderAll();
@@ -7835,12 +7931,10 @@
         runningByProvider[message.cliId] = false;
         pendingByProvider[message.cliId] = false;
         {
-          const target = streamTargets[message.sessionId];
+          stoppedSessionIds.add(message.sessionId);
+          const target = finishStreamTarget(message);
           updateTaskStatus(taskBySessionId[message.sessionId], { status: 'stopped' });
           delete taskBySessionId[message.sessionId];
-          if (target) {
-            delete streamTargets[message.sessionId];
-          }
           delete pendingThreadByProvider[message.cliId];
           addMessage(message.cliId, 'system', i18n.t('message.runStopped'), undefined, false, target?.threadId);
         }

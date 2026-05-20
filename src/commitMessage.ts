@@ -76,8 +76,11 @@ export function buildCommitMessagePrompt(request: CommitMessagePromptRequest): s
     'Rules:',
     '- Output only the commit message. Do not wrap it in Markdown fences.',
     '- The first line must be a Conventional Commits subject: type(optional-scope): summary.',
+    '- Use exactly one of these formats: a single subject line, or a subject line, one blank line, then body.',
     '- Use one concise subject line when possible.',
-    '- Add a short body only when the staged diff contains multiple meaningful changes.',
+    '- Add a body only when the staged diff contains multiple meaningful changes.',
+    '- When adding a body, put exactly one empty line between the subject and the body.',
+    '- Keep the body to at most two short lines; each line must describe a concrete staged change.',
     '- Do not output analysis, reasoning, rationale, or explanations.',
     '- Do not invent issue numbers, branch names, tests, or unstaged behavior.',
     '- If Existing Source Control input is provided, treat it as draft wording or user intent, not as extra change evidence.',
@@ -118,9 +121,11 @@ export function cleanGeneratedCommitMessage(
     .join('\n')
     .trim();
 
-  return applyInputPreferences(
-    enforceCommitMessageLanguage(stripTrailingExplanation(selected), options),
-    options
+  return normalizeCommitMessageFormat(
+    applyInputPreferences(
+      enforceCommitMessageLanguage(stripTrailingExplanation(selected), options),
+      options
+    )
   );
 }
 
@@ -169,6 +174,26 @@ function stripTrailingExplanation(message: string): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function normalizeCommitMessageFormat(message: string): string {
+  const normalized = message
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
+  const lines = normalized.split('\n');
+  const subject = (lines[0] ?? '').trim();
+  const body = lines.slice(1).join('\n').trim();
+
+  if (!subject) {
+    return '';
+  }
+
+  if (!body) {
+    return subject;
+  }
+
+  return [subject, '', body.replace(/\n{3,}/g, '\n\n')].join('\n');
 }
 
 function enforceCommitMessageLanguage(

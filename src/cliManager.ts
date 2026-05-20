@@ -70,7 +70,14 @@ const OPEN_CODE_SERVER_READY_TIMEOUT_MS = 20_000;
 interface OpenCodeEventStream {
   close(): void;
   hasOutput(): boolean;
+  setSessionId(sessionId: string): void;
   sessionId(): string | undefined;
+}
+
+interface OpenCodeErrorStream {
+  close(): void;
+  error(): string | undefined;
+  ready: Promise<void>;
 }
 
 export class CliManager {
@@ -587,8 +594,11 @@ export class CliManager {
     };
 
     proc.stdout?.on('data', (data: Buffer) => {
-      session.openCodeSessionId = this.extractOpenCodeSessionIdFromJsonText(data.toString()) ??
-        session.openCodeSessionId;
+      const detectedOpenCodeSessionId = this.extractOpenCodeSessionIdFromJsonText(data.toString());
+      if (detectedOpenCodeSessionId) {
+        session.openCodeSessionId = detectedOpenCodeSessionId;
+        eventStream?.setSessionId(detectedOpenCodeSessionId);
+      }
       if (eventStream?.hasOutput()) {
         return;
       }
@@ -696,6 +706,9 @@ export class CliManager {
       throw new Error('OpenCode did not return a session.');
     }
 
+    const errorStream = this.openOpenCodeSessionErrorStream(serverUrl, sessionId);
+    await errorStream?.ready;
+
     try {
       const model = parseOpenCodeModelId(modelId);
       await this.requestJson(
@@ -710,10 +723,19 @@ export class CliManager {
         }
       );
 
-      return await this.waitForOpenCodeServerText(serverUrl, sessionId, directory, token, onPartial);
+      return await this.waitForOpenCodeServerText(
+        serverUrl,
+        sessionId,
+        directory,
+        token,
+        onPartial,
+        errorStream
+      );
     } catch (error) {
       await this.abortOpenCodeServerSession(serverUrl, sessionId, directory);
       throw error;
+    } finally {
+      errorStream?.close();
     }
   }
 
@@ -1045,7 +1067,8 @@ export class CliManager {
     sessionId: string,
     directory: string,
     token: vscode.CancellationToken,
-    onPartial?: (text: string) => void
+    onPartial?: (text: string) => void,
+    errorStream?: OpenCodeErrorStream
   ): Promise<string> {
     const startedAt = Date.now();
     while (Date.now() - startedAt < OPEN_CODE_PROMPT_TIMEOUT_MS) {
@@ -1053,17 +1076,19 @@ export class CliManager {
         throw new Error('cancelled');
       }
 
+      const streamedError = errorStream?.error();
+      if (streamedError) {
+        throw new Error(streamedError);
+      }
+
       const status = this.objectRecord(
         this.objectRecord(
           await this.fetchJson(this.openCodeApiUrl(serverUrl, '/session/status', directory))
         )[sessionId]
       );
-      const statusMessage = this.pickString(status.message);
-      if (statusMessage && /quota exhausted/i.test(statusMessage)) {
-        throw new Error('OpenCode provider quota exhausted. Switch model/provider or wait before retrying.');
-      }
-      if (statusMessage && this.pickString(status.type) === 'error') {
-        throw new Error(statusMessage);
+      const statusError = this.openCodeStatusError(status);
+      if (statusError) {
+        throw new Error(statusError);
       }
 
       const messages = await this.fetchJson(
@@ -1082,7 +1107,26 @@ export class CliManager {
       await this.sleep(OPEN_CODE_PROMPT_POLL_INTERVAL_MS);
     }
 
+    const streamedError = errorStream?.error();
+    if (streamedError) {
+      throw new Error(streamedError);
+    }
+
     throw new Error('OpenCode server timed out while generating a commit message.');
+  }
+
+  private openCodeStatusError(status: Record<string, unknown>): string | undefined {
+    const statusMessage = this.pickString(status.message);
+    if (statusMessage) {
+      if (/quota exhausted|rate limit exceeded|FreeUsageLimitError/i.test(statusMessage)) {
+        return this.normalizeOpenCodeProviderError(statusMessage);
+      }
+      if (this.pickString(status.type) === 'error') {
+        return statusMessage;
+      }
+    }
+
+    return this.openCodeErrorMessage(status);
   }
 
   private async waitForOpenCodeServerReady(
@@ -1180,9 +1224,7 @@ export class CliManager {
   }
 
   private openCodeMessageError(info: Record<string, unknown>): string | undefined {
-    const error = this.objectRecord(info.error);
-    const data = this.objectRecord(error.data);
-    return this.pickString(data.message, error.message);
+    return this.openCodeErrorMessage(info);
   }
 
   private async executeOpenCodeRevertCommand(
@@ -1254,10 +1296,36 @@ export class CliManager {
   ): OpenCodeEventStream | undefined {
     let closed = false;
     let outputSeen = false;
-    let openCodeSessionId: string | undefined;
+    let targetSessionId: string | undefined;
     let request: http.ClientRequest | undefined;
-    const partTypes = new Map<string, string>();
-    const partTexts = new Map<string, string>();
+    const renderStateBySession = new Map<string, {
+      partTypes: Map<string, string>;
+      partTexts: Map<string, string>;
+    }>();
+    const pendingBySession = new Map<string, string[]>();
+    const renderStateForSession = (sessionId: string) => {
+      let state = renderStateBySession.get(sessionId);
+      if (!state) {
+        state = {
+          partTypes: new Map<string, string>(),
+          partTexts: new Map<string, string>(),
+        };
+        renderStateBySession.set(sessionId, state);
+      }
+
+      return state;
+    };
+    const emitRendered = (rendered: string) => {
+      outputSeen = outputSeen || this.isRenderedOpenCodeTextOutput(rendered);
+      output.fire(rendered);
+    };
+    const flushPending = (sessionId: string) => {
+      const pending = pendingBySession.get(sessionId) ?? [];
+      pendingBySession.clear();
+      for (const rendered of pending) {
+        emitRendered(rendered);
+      }
+    };
 
     try {
       const eventUrl = new URL('/event', serverUrl);
@@ -1275,11 +1343,22 @@ export class CliManager {
             while (boundary >= 0) {
               const block = buffer.slice(0, boundary);
               buffer = buffer.slice(boundary + 2);
-              openCodeSessionId = this.extractOpenCodeSessionIdFromSseBlock(block) ?? openCodeSessionId;
-              const rendered = this.renderOpenCodeSseBlock(block, partTypes, partTexts);
+              const blockSessionId = this.extractOpenCodeSessionIdFromSseBlock(block);
+              if (!blockSessionId || (targetSessionId && blockSessionId !== targetSessionId)) {
+                boundary = buffer.indexOf('\n\n');
+                continue;
+              }
+
+              const state = renderStateForSession(blockSessionId);
+              const rendered = this.renderOpenCodeSseBlock(block, state.partTypes, state.partTexts);
               if (rendered) {
-                outputSeen = outputSeen || this.isRenderedOpenCodeTextOutput(rendered);
-                output.fire(rendered);
+                if (targetSessionId) {
+                  emitRendered(rendered);
+                } else {
+                  const pending = pendingBySession.get(blockSessionId) ?? [];
+                  pending.push(rendered);
+                  pendingBySession.set(blockSessionId, pending);
+                }
               }
               boundary = buffer.indexOf('\n\n');
             }
@@ -1304,7 +1383,87 @@ export class CliManager {
         request?.destroy();
       },
       hasOutput: () => outputSeen,
-      sessionId: () => openCodeSessionId,
+      setSessionId: (sessionId: string) => {
+        if (!sessionId.startsWith('ses')) {
+          return;
+        }
+
+        if (targetSessionId && targetSessionId !== sessionId) {
+          return;
+        }
+
+        targetSessionId = sessionId;
+        flushPending(sessionId);
+      },
+      sessionId: () => targetSessionId,
+    };
+  }
+
+  private openOpenCodeSessionErrorStream(
+    serverUrl: string,
+    sessionId: string
+  ): OpenCodeErrorStream | undefined {
+    let closed = false;
+    let lastError: string | undefined;
+    let request: http.ClientRequest | undefined;
+    let resolveReady: () => void = () => {};
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const readyTimer = setTimeout(resolveReady, 1000);
+    const markReady = () => {
+      clearTimeout(readyTimer);
+      resolveReady();
+    };
+
+    try {
+      const eventUrl = new URL('/event', serverUrl);
+      const client = eventUrl.protocol === 'https:' ? https : http;
+      request = client.get(
+        eventUrl,
+        { headers: { Accept: 'text/event-stream' } },
+        (response) => {
+          markReady();
+          response.setEncoding('utf8');
+          let buffer = '';
+
+          response.on('data', (chunk: string) => {
+            buffer += chunk.replace(/\r\n/g, '\n');
+            let boundary = buffer.indexOf('\n\n');
+            while (boundary >= 0) {
+              const block = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              const event = this.parseOpenCodeSseBlock(block);
+              if (event && this.openCodeEventBelongsToSession(event, sessionId)) {
+                const eventError = this.openCodeEventErrorMessage(event);
+                if (eventError) {
+                  lastError = this.normalizeOpenCodeProviderError(eventError);
+                }
+              }
+              boundary = buffer.indexOf('\n\n');
+            }
+          });
+        }
+      );
+
+      request.on('error', markReady);
+    } catch {
+      clearTimeout(readyTimer);
+      return undefined;
+    }
+
+    return {
+      close: () => {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+        clearTimeout(readyTimer);
+        request?.destroy();
+      },
+      error: () => lastError,
+      ready,
     };
   }
 
@@ -1828,6 +1987,52 @@ export class CliManager {
       event.sessionID
     );
     return sessionId?.startsWith('ses') ? sessionId : undefined;
+  }
+
+  private openCodeEventBelongsToSession(
+    event: Record<string, unknown>,
+    sessionId: string
+  ): boolean {
+    const properties = this.objectRecord(event.properties);
+    const data = this.objectRecord(event.data);
+    const info = this.objectRecord(properties.info || data.info || event.info);
+    const eventSessionId = this.pickString(
+      properties.sessionID,
+      data.sessionID,
+      info.sessionID,
+      event.sessionID
+    );
+    return eventSessionId === sessionId;
+  }
+
+  private openCodeEventErrorMessage(event: Record<string, unknown>): string | undefined {
+    const type = this.pickString(event.type);
+    const properties = this.objectRecord(event.properties);
+    const data = this.objectRecord(event.data);
+
+    if (type === 'message.updated') {
+      return this.openCodeErrorMessage(this.firstObject(properties.info, data.info, event.info));
+    }
+
+    if (type === 'error' || type === 'session.error') {
+      return this.openCodeErrorMessage(this.firstObject(properties.error, data.error, event.error, event));
+    }
+
+    return undefined;
+  }
+
+  private openCodeErrorMessage(errorOwner: Record<string, unknown>): string | undefined {
+    const error = this.firstObject(errorOwner.error, errorOwner);
+    const data = this.firstObject(error.data);
+    return this.pickString(data.message, error.message);
+  }
+
+  private normalizeOpenCodeProviderError(message: string): string {
+    if (/FreeUsageLimitError|rate limit exceeded|quota exhausted/i.test(message)) {
+      return 'OpenCode provider rate limit exceeded. Switch model/provider or wait before retrying.';
+    }
+
+    return message;
   }
 
   private extractOpenCodeSessionIdFromJsonText(text: string): string | undefined {

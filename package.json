@@ -145,13 +145,8 @@
       "scm/title": [
         {
           "command": "agents-gui.generateCommitMessage",
-          "when": "scmProvider == git && !agents-gui.commitMessageGenerating",
+          "when": "scmProvider == git",
           "group": "navigation@-100"
-        },
-        {
-          "command": "agents-gui.cancelCommitMessageGeneration",
-          "when": "scmProvider == git && agents-gui.commitMessageGenerating",
-          "group": "navigation@-101"
         }
       ],
       "editor/context": [

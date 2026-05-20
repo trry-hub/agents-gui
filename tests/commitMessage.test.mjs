@@ -28,6 +28,8 @@ test('buildCommitMessagePrompt requires staged-only commit messages in Chinese',
   assert.match(prompt, /Only use the staged Git diff/);
   assert.match(prompt, /Generate the commit message in Simplified Chinese/);
   assert.match(prompt, /The first line must be a Conventional Commits subject/);
+  assert.match(prompt, /Use exactly one of these formats/);
+  assert.match(prompt, /subject line, one blank line, then body/);
   assert.doesNotMatch(prompt, /Always include a scope in parentheses/);
   assert.match(prompt, /For Simplified Chinese output, the summary after the colon must be Simplified Chinese/);
   assert.match(prompt, /Do not output analysis, reasoning, rationale, or explanations/);
@@ -74,6 +76,26 @@ test('cleanGeneratedCommitMessage strips markdown fences and explanation', () =>
   );
 
   assert.equal(message, 'feat: 支持 AI 生成提交信息\n\n根据暂存区 diff 生成提交描述。');
+});
+
+test('cleanGeneratedCommitMessage inserts a blank line before the body', () => {
+  const message = cleanGeneratedCommitMessage(
+    [
+      'fix(vscode): 完善设置保存反馈并修复提交信息生成交互',
+      '为首页 Agent、API 供应商和提交信息设置增加保存中、成功、失败状态提示。',
+      '修复 OpenCode 会话串流、限额错误处理和停止态清理。',
+    ].join('\n')
+  );
+
+  assert.equal(
+    message,
+    [
+      'fix(vscode): 完善设置保存反馈并修复提交信息生成交互',
+      '',
+      '为首页 Agent、API 供应商和提交信息设置增加保存中、成功、失败状态提示。',
+      '修复 OpenCode 会话串流、限额错误处理和停止态清理。',
+    ].join('\n')
+  );
 });
 
 test('cleanGeneratedCommitMessage rejects reasoning prose without a conventional subject', () => {
@@ -201,11 +223,7 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   const scmTitleActions = manifest.contributes.menus['scm/title'] ?? [];
   const scmIdleAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.generateCommitMessage'
-      && item.when === 'scmProvider == git && !agents-gui.commitMessageGenerating'
-  );
-  const scmGeneratingLogoAction = scmTitleActions.find(
-    (item) => item.command === 'agents-gui.generateCommitMessage'
-      && item.when === 'scmProvider == git && agents-gui.commitMessageGenerating'
+      && item.when === 'scmProvider == git'
   );
   const scmCancelAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.cancelCommitMessageGeneration'
@@ -230,9 +248,8 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   assert.ok(!scmInputBoxCommands.includes('agents-gui.generateCommitMessage'));
   assert.equal(scmIdleAction.group, 'navigation@-100');
   assert.ok(!scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading'));
-  assert.equal(scmCancelAction.when, 'scmProvider == git && agents-gui.commitMessageGenerating');
-  assert.equal(scmCancelAction.group, 'navigation@-101');
-  assert.equal(scmGeneratingLogoAction, undefined);
+  assert.equal(scmCancelAction, undefined);
+  assert.ok(!scmTitleActions.some((item) => /agents-gui\.commitMessageGenerating/.test(item.when || '')));
   assert.deepEqual(properties['agents-gui.commitMessage.provider'].enum, [
     'default',
     'claude',
@@ -255,6 +272,7 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /repository\.state\.workingTreeChanges\?\./);
   assert.match(source, /repository\.diff\(true\)/);
   assert.match(source, /handleNoStagedChanges\(repository, locale\)/);
+  assert.match(source, /void vscode\.window\.showInformationMessage\(\s*this\.t\(locale, 'noStagedChanges'\),\s*openSourceControl\s*\)\.then\(async \(choice\) =>/s);
   assert.match(source, /executeCommand\('git\.stageAll'\)/);
   assert.match(source, /executeCommand\('workbench\.view\.scm'\)/);
   assert.match(source, /const streamCommitMessage = \(output: string\) =>/);
@@ -299,7 +317,7 @@ test('OpenCode server commit generation waits for completed text parts only', ()
   const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
 
   assert.match(source, /onPartial\?: \(text: string\) => void/);
-  assert.match(source, /waitForOpenCodeServerText\(serverUrl, sessionId, directory, token, onPartial\)/);
+  assert.match(source, /waitForOpenCodeServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*errorStream\s*\)/s);
   assert.match(source, /const textState = this\.extractOpenCodeAssistantTextState\(messages\);/);
   assert.match(source, /onPartial\?\.\(textState\.text\);/);
   assert.match(source, /const completed = this\.isOpenCodeAssistantMessageCompleted\(info\);/);

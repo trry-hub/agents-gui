@@ -548,6 +548,13 @@ select {
   stroke-linejoin: round;
 }
 
+.stop-button svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  stroke: none;
+}
+
 .tool-button:hover,
 .quick-button:hover,
 .attach-button:hover {
@@ -1051,8 +1058,36 @@ body.is-api-settings-open .composer {
 
 .settings-section-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.settings-save-status {
+  min-height: 18px;
+  max-width: min(220px, 100%);
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground, var(--assistant-muted));
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-save-status:empty {
+  display: none;
+}
+
+.settings-save-status.is-saving {
+  color: var(--vscode-descriptionForeground, var(--assistant-muted));
+}
+
+.settings-save-status.is-success {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+.settings-save-status.is-error {
+  color: var(--vscode-errorForeground, #f85149);
 }
 
 .commit-settings-grid {
@@ -1285,6 +1320,10 @@ body.is-api-settings-open .composer {
   gap: 8px;
   align-items: center;
   padding-top: 2px;
+}
+
+.api-settings-footer .settings-save-status {
+  justify-self: end;
 }
 
 .api-primary-button {
@@ -4164,9 +4203,8 @@ body[data-provider="opencode"] .stop-button {
 }
 
 body[data-provider="opencode"] .stop-button svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2;
+  width: 11px;
+  height: 11px;
 }
 
 body[data-provider="opencode"] .send-button {
@@ -4997,7 +5035,7 @@ textarea:disabled {
   display: none;
   color: var(--vscode-errorForeground, #c00);
   background: color-mix(in srgb, var(--assistant-panel) 64%, transparent);
-  border-color: color-mix(in srgb, var(--vscode-errorForeground, #c00) 24%, var(--assistant-border));
+  border-color: transparent;
 }
 
 .stop-button.is-visible {

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -537,7 +539,10 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /new URL\('\/event', serverUrl\)/);
   assert.match(source, /new URL\('\/mcp', serverUrl\)/);
   assert.match(source, /normalizeOpenCodeMcpStatus/);
-  assert.match(source, /const partTexts = new Map<string, string>\(\)/);
+  assert.match(source, /const renderStateBySession = new Map/);
+  assert.match(source, /const pendingBySession = new Map<string, string\[\]>\(\)/);
+  assert.match(source, /renderStateForSession\(blockSessionId\)/);
+  assert.match(source, /eventStream\?\.setSessionId\(detectedOpenCodeSessionId\)/);
   assert.match(source, /message\.part\.updated/);
   assert.match(source, /message\.part\.delta/);
   assert.match(source, /line\.startsWith\('event:'\)/);
@@ -553,7 +558,8 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /sessionId\(\): string \| undefined/);
   assert.match(source, /extractOpenCodeSessionIdFromSseBlock/);
   assert.match(source, /extractOpenCodeSessionIdFromJsonText/);
-  assert.match(source, /session\.openCodeSessionId = this\.extractOpenCodeSessionIdFromJsonText/);
+  assert.match(source, /const detectedOpenCodeSessionId = this\.extractOpenCodeSessionIdFromJsonText/);
+  assert.match(source, /session\.openCodeSessionId = detectedOpenCodeSessionId/);
   assert.match(source, /executeOpenCodeNativeCommand/);
   assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/share'\)/);
   assert.match(source, /method: 'DELETE'/);
@@ -1473,6 +1479,9 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(html, /id="commitMessageMaxDiffChars"/);
   assert.match(html, /id="apiProviderSettingsPage"/);
   assert.doesNotMatch(html, /aria-modal="true"/);
+  assert.match(html, /id="homeAgentsSaveStatus"[^>]*aria-live="polite"/);
+  assert.match(html, /id="apiProviderSaveStatus"[^>]*aria-live="polite"/);
+  assert.match(html, /id="commitMessageSaveStatus"[^>]*aria-live="polite"/);
   assert.match(html, /id="apiProviderApiKey"[^>]*type="password"/);
   assert.match(html, /id="apiProviderApiKeyEnv"/);
   assert.match(script, /const apiProviderApiKey = document\.getElementById\('apiProviderApiKey'\)/);
@@ -1483,13 +1492,24 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /function renderHomeAgentSettings\(\)/);
   assert.match(script, /function renderCommitMessageSettings\(\)/);
   assert.match(script, /function saveCommitMessageSettings\(\)/);
+  assert.match(script, /function setSettingsSaveStatus\(section,\s*state,\s*message\)/);
+  assert.match(script, /case 'settingsSaveResult':/);
+  assert.match(script, /setSettingsSaveStatus\('agents',\s*'saving'\)/);
+  assert.match(script, /setSettingsSaveStatus\('apiProviders',\s*'saving'\)/);
+  assert.match(script, /setSettingsSaveStatus\('commitMessage',\s*'saving'\)/);
   assert.match(script, /function moveHomeAgent\(/);
   assert.match(script, /data-home-agent-move/);
   assert.match(script, /agentOrder/);
   assert.match(sidebarSource, /config\.get<string\[]>\('agentOrder', \[]\)/);
   assert.match(sidebarSource, /config\.update\('agentOrder', settings\.agentOrder/);
   assert.match(sidebarSource, /saveCommitMessageSettings/);
+  assert.match(sidebarSource, /command:\s*'settingsSaveResult'/);
+  assert.match(sidebarSource, /section,\s*ok:\s*true/);
+  assert.match(sidebarSource, /section,\s*ok:\s*false/);
   assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /\.settings-save-status\s*\{/);
+  assert.match(css, /\.settings-save-status\.is-success\s*\{/);
+  assert.match(css, /\.settings-save-status\.is-error\s*\{/);
   assert.match(script, /switch \(activeSettingsSection\)/);
   assert.match(css, /\.api-settings-panel\s*\{\s*[^}]*container-type:\s*inline-size;/s);
   assert.match(css, /\.settings-nav-item\s*\{\s*[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\);/s);
@@ -1653,10 +1673,15 @@ test('webview uses one primary composer action slot for send and stop', () => {
   assert.match(script, /sendBtn\.hidden = running;/);
   assert.match(script, /stopBtn\.classList\.toggle\('is-visible', running\);/);
   assert.match(script, /sendBtn\.classList\.toggle\('is-hidden', running\);/);
+  assert.match(script, /function requestStopActiveProvider\(\) \{/);
+  assert.match(script, /if \(!runningByProvider\[activeId\]\) \{/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'stop', cliId: activeId \}\);/);
   assert.match(css, /\.prompt-tools\s*\{\s*[^}]*flex:\s*0 0 28px;/s);
   assert.match(css, /\.prompt-tools\s*\{\s*[^}]*width:\s*30px;/s);
   assert.match(css, /\.prompt-tools\s*\{\s*[^}]*display:\s*grid;/s);
   assert.match(css, /\.send-button\.is-hidden\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /\.stop-button svg\s*\{\s*[^}]*fill:\s*currentColor;/s);
+  assert.match(css, /\.stop-button svg\s*\{\s*[^}]*stroke:\s*none;/s);
 });
 
 test('webview refreshes context after a concrete provider is active', () => {
@@ -1751,6 +1776,7 @@ test('webview closes composer menus when clicking outside or pressing escape', (
   assert.match(script, /closeComposerMenus\(menus\.includes\(currentMenu\) \? currentMenu : undefined\);/);
   assert.match(script, /window\.addEventListener\('keydown', \(event\) => \{/);
   assert.match(script, /event\.key === 'Escape'/);
+  assert.match(script, /if \(requestStopActiveProvider\(\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/s);
 });
 
 test('webview removes multi-agent compare planning', () => {
@@ -1788,7 +1814,7 @@ test('webview keeps the visual task board disabled while single-agent flows stab
   assert.match(script, /taskBySessionId\[message\.sessionId\]/);
   assert.match(script, /renderTaskBoard\(\);\s*renderThreadSelect\(\);/);
   assert.match(script, /status: 'preparing'/);
-  assert.match(script, /status: Number\(message\.exitCode\) === 0 \? 'completed' : 'failed'/);
+  assert.match(script, /status: wasStopped \? 'stopped' : \(Number\(message\.exitCode\) === 0 \? 'completed' : 'failed'\)/);
 });
 
 test('webview provider status keeps transient running text out of the composer', () => {
@@ -2061,6 +2087,17 @@ test('webview does not persist transient running message state', () => {
   assert.match(script, /delete item\.runningNotice;/);
   assert.match(providerSource, /normalized\.status !== 'thinking'/);
   assert.match(script, /persist\(\);\s*renderAll\(\);/);
+});
+
+test('webview does not revive stopped assistant placeholders when a later request starts', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.match(script, /const stoppedSessionIds = new Set\(\);/);
+  assert.match(script, /function finishStreamTarget\(message, \{ removeEmpty = true \} = \{\}\)/);
+  assert.match(script, /item\.running = false;/);
+  assert.match(script, /stoppedSessionIds\.add\(message\.sessionId\);/);
+  assert.match(script, /const wasStopped = stoppedSessionIds\.delete\(message\.sessionId\);/);
+  assert.match(script, /Number\(message\.exitCode\) !== 0 && !wasStopped/);
 });
 
 test('webview form controls opt out of browser autocomplete noise', () => {
@@ -2730,6 +2767,59 @@ test('OpenCode event stream keeps command details and logs from tool parts', () 
   );
 });
 
+test('OpenCode event stream only emits output for the owned session', async () => {
+  const { CliManager } = loadCliManagerWithVscode();
+  const manager = new CliManager();
+  const outputs = [];
+  const originalGet = http.get;
+  const response = new EventEmitter();
+  response.setEncoding = () => {};
+  const request = new EventEmitter();
+  request.destroy = () => {};
+  http.get = (_url, _options, callback) => {
+    callback(response);
+    queueMicrotask(() => {
+      response.emit('data', openCodeSse('message.part.delta', {
+        type: 'message.part.delta',
+        sessionID: 'ses_other',
+        partID: 'prt_other',
+        field: 'text',
+        delta: 'You are generating a Git commit message.',
+      }));
+      response.emit('data', openCodeSse('message.part.delta', {
+        type: 'message.part.delta',
+        sessionID: 'ses_target',
+        partID: 'prt_target',
+        field: 'text',
+        delta: 'visible reply',
+      }));
+    });
+    return request;
+  };
+
+  const stream = manager.openOpenCodeEventStream('http://127.0.0.1:17017', {
+    fire(value) {
+      outputs.push(value);
+    },
+  });
+
+  try {
+    await sleep(20);
+    assert.deepEqual(outputs, []);
+
+    stream.setSessionId('ses_target');
+    await sleep(20);
+
+    assert.equal(stream.hasOutput(), true);
+    assert.deepEqual(outputs, [
+      '{"type":"message.part.delta","sessionID":"ses_target","partID":"prt_target","field":"text","delta":"visible reply","properties":{"delta":"visible reply"}}\n',
+    ]);
+  } finally {
+    stream.close();
+    http.get = originalGet;
+  }
+});
+
 test('normalizeCliOutputChunk handles OpenCode run JSON text events', () => {
   assert.deepEqual(
     normalizeCliOutputChunk(
@@ -2842,6 +2932,17 @@ test('cli manager can run OpenCode prompts through the server API and detect ret
   assert.match(source, /quota exhausted/i);
   assert.match(source, /abortOpenCodeServerSession/);
   assert.match(source, /extractOpenCodeAssistantText/);
+});
+
+test('OpenCode server commit generation listens for current-session provider errors', () => {
+  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /interface OpenCodeErrorStream/);
+  assert.match(source, /openOpenCodeSessionErrorStream\(serverUrl, sessionId\)/);
+  assert.match(source, /await errorStream\?\.ready/);
+  assert.match(source, /errorStream\?\.error\(\)/);
+  assert.match(source, /FreeUsageLimitError/);
+  assert.match(source, /rate limit exceeded/i);
 });
 
 test('normalizeCliOutput condenses Codex JSON errors into a readable message', () => {
@@ -3127,6 +3228,14 @@ function loadContextCollectorWithVscode(fakeVscode) {
   } finally {
     Module._load = previousLoad;
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function openCodeSse(event, payload) {
+  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 }
 
 function loadCliManagerWithVscode() {
