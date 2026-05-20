@@ -2899,22 +2899,19 @@ textarea:focus {
 }
 
 .message-spinner {
-  width: 8px;
-  height: 8px;
-  border: 1px solid color-mix(in srgb, var(--assistant-muted) 34%, transparent);
-  border-top-color: var(--assistant-muted);
+  width: 10px;
+  height: 10px;
+  border: 1.4px solid color-mix(in srgb, var(--assistant-muted) 26%, transparent);
+  border-top-color: color-mix(in srgb, var(--vscode-foreground) 78%, transparent);
   border-radius: 50%;
-  animation: message-spin 1s linear infinite;
+  animation: message-spin 820ms linear infinite;
   flex: 0 0 auto;
 }
 
 .message-status.is-running .message-spinner {
-  width: 6px;
-  height: 6px;
-  border: 0;
-  background: color-mix(in srgb, var(--assistant-accent) 78%, var(--assistant-muted) 22%);
-  opacity: 0.76;
-  animation: dot-pulse 1.1s ease-in-out infinite;
+  border-color: color-mix(in srgb, var(--assistant-muted) 24%, transparent);
+  border-top-color: color-mix(in srgb, var(--vscode-foreground) 82%, transparent);
+  opacity: 0.82;
 }
 
 .cursor {

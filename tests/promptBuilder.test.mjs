@@ -2267,6 +2267,16 @@ test('webview reduces decorative motion when requested', () => {
   assert.match(css, /\.message-spinner,\s*\.cursor,\s*\.message-activity-inline\.is-running \.message-activity-text,\s*\.message-status\.is-running \.message-status-label,\s*\.message-status\.is-running \.message-spinner\s*\{[^}]*animation:\s*none;/s);
 });
 
+test('webview uses a ring spinner for running message status', () => {
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const runningSpinnerRule = css.match(/\.message-status\.is-running \.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
+
+  assert.match(css, /\.message-spinner\s*\{[^}]*border:\s*1\.4px solid/s);
+  assert.match(runningSpinnerRule, /border-top-color:/);
+  assert.doesNotMatch(runningSpinnerRule, /background:/);
+  assert.doesNotMatch(runningSpinnerRule, /dot-pulse/);
+});
+
 test('preview webview streams markdown with real line breaks', () => {
   const script = readFileSync(new URL('../scripts/preview-webview.mjs', import.meta.url), 'utf8');
 
