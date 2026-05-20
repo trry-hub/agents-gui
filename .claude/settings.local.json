@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__context7__resolve-library-id",
+      "WebFetch(domain:code.visualstudio.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(git init *)",
+      "Bash(gh auth *)",
+      "Bash(brew install *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh repo *)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:aider.chat)",
+      "WebFetch(domain:docs.cursor.com)",
+      "WebFetch(domain:cursor.com)",
+      "WebFetch(domain:block.github.io)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:goose-docs.ai)",
+      "Bash(git reset *)",
+      "Bash(git push *)",
+      "WebFetch(domain:icon-sets.iconify.design)",
+      "mcp__fetch__fetch",
+      "Bash(curl -s \"https://api.iconify.design/lucide/clipboard-copy.svg?width=16&height=16&color=currentColor\")",
+      "Bash(curl -s \"https://api.iconify.design/lucide/clipboard-check.svg?width=16&height=16&color=currentColor\")",
+      "mcp__neural-memory__nmem_recall",
+      "mcp__neural-memory__nmem_recap",
+      "Bash(npm test *)",
+      "Bash(node --test --test-name-pattern=\"buildAssistantPrompt\" tests/promptBuilder.test.mjs)"
+    ]
+  }
+}
