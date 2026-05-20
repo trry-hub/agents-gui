@@ -3,31 +3,32 @@
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=agents-gui.agents-gui)
 [![CI](https://github.com/trry-hub/agents-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/trry-hub/agents-gui/actions/workflows/ci.yml)
 
-**Agents GUI** is a VS Code extension that turns your editor into a multi-agent workbench. It brings together multiple AI coding assistants — Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider — under a single sidebar interface with context-aware prompts, CLI profile management, and API provider bridging.
+**Agents GUI** 是一个面向 VS Code 的多 Agent 工作台。它把 Claude Code、Codex CLI、Gemini CLI、OpenCode、Goose 和 Aider 等外部编码 Agent 汇聚到同一个侧边栏里，并提供上下文感知提示词、CLI 配置管理、自定义 API 供应商桥接和原生 Git 提交信息生成能力。
 
-> ⚠️ **Early Release (v0.0.1).** The core extension logic and webview UI are complete. Expect rapid iteration as we validate the workbench model.
-
----
-
-## Features
-
-- **Multi-Agent Sidebar** — Switch between installed CLI agents without leaving your editor. Each agent gets its own composer with provider-native controls (model, mode, runtime, permissions).
-- **Context-Aware Prompts** — Automatically attach workspace metadata, active file contents, editor selection, and diagnostics. Fine-tune how much context is included per request.
-- **CLI Profile System** — Pre-configured profiles for Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider. Each profile handles command resolution, argument building, input modes, and background server lifecycle.
-- **Background Server Support** — Agents that support persistent sessions (e.g. OpenCode) can keep a background server running for low-latency follow-up prompts.
-- **Action Commands** — Right-click in the editor to explain selection, review the current file, generate tests, or refactor code — all routed through your active provider.
-- **Custom API Providers** — Define your own API endpoints and map them to CLI agents. API keys are referenced via environment variables, never stored in settings.
-- **Localization** — Built-in English and Simplified Chinese localizations for both the extension UI and the webview.
-- **Provider Extension Bridges** — Open companion VS Code extensions (OpenCode, Codex, Claude Code, Gemini CLI) directly from the sidebar.
-- **Token Counting** — Exact token counting for Anthropic models and tiktoken-based counting for OpenAI models, with per-provider fallback.
+> **早期版本 v0.0.1。** 核心扩展逻辑和 Webview UI 已可用，后续会围绕真实工作流持续迭代。
 
 ---
 
-## Requirements
+## 功能特性
+
+- **多 Agent 侧边栏**：在 VS Code 内直接切换已安装的 CLI Agent，每个 Agent 都保留自己的模型、模式、运行时和权限控制。
+- **上下文感知提示词**：自动附加工作区信息、当前文件、选区和诊断信息，并可在设置中控制上下文大小。
+- **CLI 配置系统**：内置 Claude Code、Codex CLI、Gemini CLI、OpenCode、Goose 和 Aider 的执行配置，处理命令查找、参数构造、输入模式和后台服务生命周期。
+- **后台服务支持**：OpenCode 等支持持久会话的 Agent 可以保持后台服务运行，降低连续对话延迟。
+- **编辑器动作命令**：在编辑器右键菜单中解释选区、审查当前文件、生成测试或重构代码，并自动路由到当前 Agent。
+- **Git 提交信息生成**：在 VS Code 源代码管理视图中，根据暂存区 diff 生成符合 Conventional Commits 的提交信息。
+- **自定义 API 供应商**：可配置自己的 API 地址、模型和密钥，并按 Agent 映射使用；密钥可通过 VS Code 设置同步或环境变量管理。
+- **中英文界面**：扩展命令、设置项和 Webview 均支持简体中文与英文。
+- **供应商扩展桥接**：可从侧边栏直接打开 OpenCode、Codex、Claude Code、Gemini CLI 等配套 VS Code 扩展。
+- **Token 统计**：支持 Anthropic tokenizer 和 OpenAI cl100k 统计，并提供按供应商回退的估算能力。
+
+---
+
+## 使用要求
 
 - **VS Code** 1.85+
-- **Node.js** 18+ (for CLI agents)
-- At least one supported CLI agent installed:
+- **Node.js** 18+
+- 至少安装一个受支持的 CLI Agent：
   - [OpenCode](https://github.com/sst/opencode)
   - [Codex CLI](https://github.com/openai/codex)
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
@@ -37,98 +38,114 @@
 
 ---
 
-## Getting Started
+## 快速开始
 
-1. **Install the extension** from the VS Code Marketplace.
-2. **Install at least one CLI agent** (see Requirements above).
-3. **Open the Agents GUI sidebar** — click the AI icon in the activity bar, or run `Agents GUI: Open Panel`.
-4. **Select a provider** from the dropdown in the sidebar header, then start typing your request.
+1. 从 VS Code Marketplace 安装 **Agents GUI**。
+2. 安装至少一个 CLI Agent，例如 OpenCode 或 Codex CLI。
+3. 点击活动栏里的 Agents GUI 图标，或运行命令 `Agents GUI：打开面板`。
+4. 在侧边栏顶部选择 Agent，然后输入任务开始使用。
 
-> The extension defaults to **OpenCode** if no provider is selected. You can change this in `agents-gui.defaultProvider`.
-
----
-
-## Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `agents-gui.defaultProvider` | `"opencode"` | Default AI provider for editor commands |
-| `agents-gui.context.includeWorkspace` | `true` | Attach workspace metadata |
-| `agents-gui.context.includeCurrentFile` | `true` | Attach the active editor file |
-| `agents-gui.context.includeSelection` | `true` | Attach the current editor selection |
-| `agents-gui.context.includeDiagnostics` | `true` | Attach diagnostics for the active file |
-| `agents-gui.context.maxFileChars` | `12000` | Max characters for file context |
-| `agents-gui.context.maxSelectionChars` | `8000` | Max characters for selection context |
-| `agents-gui.context.maxDiagnostics` | `12` | Max diagnostics to include |
-| `agents-gui.apiProviders.customProviders` | `[]` | Custom API provider definitions |
-| `agents-gui.apiProviders.defaultProviderId` | `""` | Global default custom API provider |
-| `agents-gui.apiProviders.agentProviderByCliId` | `{}` | Per-agent custom API provider overrides |
-| `agents-gui.home.visibleAgentIds` | `[]` | Visible agents on the home header |
-| `agents-gui.home.agentOrder` | `[]` | Display order of agents in the header |
+扩展默认使用 **OpenCode**。你可以在设置项 `agents-gui.defaultProvider` 中修改默认 Agent。
 
 ---
 
-## Development
+## Git 提交信息生成
+
+Agents GUI 会接入 VS Code 原生源代码管理视图：
+
+1. 先用 `git add` 把需要提交的文件加入暂存区。
+2. 在源代码管理标题栏点击 Agents GUI 提交信息图标。
+3. 扩展会只读取暂存区 diff，并结合输入框里已有的草稿提示生成提交信息。
+4. 生成结果会流式写入提交信息输入框，完成后可直接提交。
+
+提交信息默认遵循 VS Code 显示语言。中文界面下会默认生成中文提交信息，也可通过 `agents-gui.commitMessage.language` 手动切换。
+
+---
+
+## 常用配置
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `agents-gui.defaultProvider` | `"opencode"` | 编辑器命令默认使用的 AI 提供方 |
+| `agents-gui.context.includeWorkspace` | `true` | 是否附加工作区元数据 |
+| `agents-gui.context.includeCurrentFile` | `true` | 是否附加当前活动文件 |
+| `agents-gui.context.includeSelection` | `true` | 是否附加当前编辑器选区 |
+| `agents-gui.context.includeDiagnostics` | `true` | 是否附加当前文件诊断 |
+| `agents-gui.context.maxFileChars` | `12000` | 当前文件上下文最大字符数 |
+| `agents-gui.context.maxSelectionChars` | `8000` | 选区上下文最大字符数 |
+| `agents-gui.context.maxDiagnostics` | `12` | 附加诊断的最大数量 |
+| `agents-gui.apiProviders.customProviders` | `[]` | 自定义 API 供应商配置 |
+| `agents-gui.apiProviders.defaultProviderId` | `""` | 全局默认自定义 API 供应商 |
+| `agents-gui.apiProviders.agentProviderByCliId` | `{}` | 每个 Agent 的自定义 API 供应商覆盖配置 |
+| `agents-gui.home.visibleAgentIds` | `[]` | 首页标题区展示的 Agent |
+| `agents-gui.home.agentOrder` | `[]` | 首页标题区 Agent 展示顺序 |
+| `agents-gui.commitMessage.provider` | `"default"` | Git 提交信息生成使用的 AI 提供方 |
+| `agents-gui.commitMessage.language` | `"auto"` | Git 提交信息语言，默认跟随 VS Code |
+| `agents-gui.commitMessage.maxDiffChars` | `60000` | 生成提交信息时附加的暂存区 diff 最大字符数 |
+
+---
+
+## 开发
 
 ```bash
-# Install dependencies
+# 安装依赖
 npm install
 
-# Build the extension
+# 构建扩展
 npm run build
 
-# Watch mode
+# 监听模式
 npm run watch
 
-# Run tests
+# 运行测试
 npm test
 
-# Package for VS Code Marketplace
+# 打包 VSIX
 npm run package
 ```
 
-### Project Structure
+### 项目结构
 
-```
+```text
 src/
-├── extension.ts          # Extension activation & command registration
-├── sidebarProvider.ts    # Webview provider & message handling
-├── cliManager.ts         # CLI process lifecycle management
-├── cliProfiles.ts        # Pre-configured agent profiles
-├── cliPathResolver.ts    # CLI binary discovery & shell integration
-├── apiProviders.ts       # Custom API provider runtime
-├── contextCollector.ts   # IDE context gathering
-├── promptBuilder.ts      # Context-aware prompt construction
-├── outputFormatter.ts    # CLI output normalization
-├── tokenCounter.ts       # Token counting (Anthropic + OpenAI)
-├── localization.ts       # Runtime locale resolution
-├── opencodeAgents.ts     # OpenCode agent discovery
-├── actionGuards.ts       # Action preconditions
-├── providerExtensions.ts # VS Code extension bridges
-└── assistantTypes.ts     # Shared type definitions
+├── extension.ts          # 扩展激活与命令注册
+├── sidebarProvider.ts    # Webview Provider 与消息处理
+├── cliManager.ts         # CLI 进程生命周期管理
+├── cliProfiles.ts        # 内置 Agent 配置
+├── cliPathResolver.ts    # CLI 命令查找与 Shell 集成
+├── apiProviders.ts       # 自定义 API 供应商运行时
+├── contextCollector.ts   # IDE 上下文收集
+├── promptBuilder.ts      # 上下文感知提示词构建
+├── outputFormatter.ts    # CLI 输出归一化
+├── tokenCounter.ts       # Token 统计
+├── localization.ts       # 运行时多语言
+├── opencodeAgents.ts     # OpenCode Agent 发现
+├── actionGuards.ts       # 动作前置条件
+├── providerExtensions.ts # VS Code 扩展桥接
+└── assistantTypes.ts     # 共享类型定义
 media/
-├── main.html             # Webview layout
-├── main.js               # Webview logic
-├── main.css              # Webview styles
-├── i18n.js               # Webview localization
-└── icon.svg              # Extension icon
+├── main.html             # Webview 布局
+├── main.js               # Webview 逻辑
+├── main.css              # Webview 样式
+├── i18n.js               # Webview 多语言
+└── icon.svg              # 扩展图标
 ```
 
 ---
 
-## Supported CLI Agents Overview
+## 支持的 CLI Agent
 
-| Agent | Profile ID | Input Mode | Background Server | Token Counter |
-|-------|-----------|------------|-------------------|---------------|
-| OpenCode | `opencode` | argument | ✅ (port range 46100+) | Anthropic tokens |
-| Codex CLI | `codex` | argument | ❌ | tiktoken (cl100k) |
-| Claude Code | `claude` | argument | ❌ | Anthropic tokens |
-| Gemini CLI | `gemini` | argument | ❌ | — |
-| Goose | `goose` | stdin | ❌ | — |
-| Aider | `aider` | argument | ❌ | tiktoken (cl100k) |
+| Agent | 配置 ID | 输入模式 | 后台服务 | Token 统计 |
+|-------|--------|----------|----------|------------|
+| OpenCode | `opencode` | argument | 支持，端口范围 46100+ | Anthropic tokens |
+| Codex CLI | `codex` | argument | 不支持 | tiktoken cl100k |
+| Claude Code | `claude` | argument | 不支持 | Anthropic tokens |
+| Gemini CLI | `gemini` | argument | 不支持 | 暂无 |
+| Goose | `goose` | stdin | 不支持 | 暂无 |
+| Aider | `aider` | argument | 不支持 | tiktoken cl100k |
 
 ---
 
-## License
+## 许可证
 
 MIT

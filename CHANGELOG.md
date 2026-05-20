@@ -1,16 +1,16 @@
-# Changelog
+# 更新日志
 
 ## 0.0.1 (2026-05-20)
 
-- Initial release.
-- Multi-agent sidebar with provider switching (OpenCode, Codex CLI, Claude Code, Gemini CLI, Goose, Aider).
-- Context-aware prompt building with workspace, file, selection, and diagnostics.
-- CLI profile system with background server support for persistent sessions.
-- Editor action commands: explain, review, test generation, refactoring.
-- Custom API provider definitions with env-var-based secrets.
-- Native Source Control command for AI-generated Git commit messages from staged changes.
-- Token counting (Anthropic tiktoken + OpenAI cl100k).
-- English & Simplified Chinese localization.
-- Provider extension bridges for OpenCode, Codex, Claude Code, and Gemini CLI.
-- Webview hot-reload in development mode.
-- Packaged extension activation includes the tiktoken wasm runtime asset.
+- 首个公开版本。
+- 提供多 Agent 侧边栏，支持 OpenCode、Codex CLI、Claude Code、Gemini CLI、Goose 和 Aider。
+- 支持附加工作区、当前文件、选区和诊断信息的上下文感知提示词。
+- 提供 CLI 配置系统，并为支持持久会话的 Agent 提供后台服务能力。
+- 提供编辑器动作命令：解释、审查、生成测试和重构。
+- 支持自定义 API 供应商配置，并可使用环境变量或 VS Code 设置同步密钥。
+- 在 VS Code 源代码管理视图中，根据暂存区变更生成 Git 提交信息。
+- 支持 Anthropic tokenizer 与 OpenAI cl100k 的 Token 统计。
+- 支持英文和简体中文界面。
+- 支持 OpenCode、Codex、Claude Code 和 Gemini CLI 的 VS Code 扩展桥接。
+- 开发模式支持 Webview 热更新。
+- 打包产物已包含 tiktoken wasm 运行时资源。
