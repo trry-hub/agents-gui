@@ -1,19 +1,19 @@
 {
-  "name": "agents-hub",
+  "name": "agent-hub",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.1.0",
-  "publisher": "agents-hub",
+  "version": "0.0.1",
+  "publisher": "agent-hub",
   "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/trry-hub/agents-hub.git"
+    "url": "https://github.com/trry-hub/agent-hub.git"
   },
   "bugs": {
-    "url": "https://github.com/trry-hub/agents-hub/issues"
+    "url": "https://github.com/trry-hub/agent-hub/issues"
   },
-  "homepage": "https://github.com/trry-hub/agents-hub",
+  "homepage": "https://github.com/trry-hub/agent-hub",
   "keywords": [
     "ai",
     "assistant",
@@ -35,19 +35,19 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:agentsHub.sidebar",
-    "onCommand:agentsHub.openPanel",
-    "onCommand:agentsHub.reloadWindow",
-    "onCommand:agentsHub.refreshProviders",
-    "onCommand:agentsHub.openProviderSettings",
-    "onCommand:agentsHub.stopAll",
-    "onCommand:agentsHub.explainSelection",
-    "onCommand:agentsHub.reviewFile",
-    "onCommand:agentsHub.generateTests",
-    "onCommand:agentsHub.refactorSelection",
-    "onCommand:agentsHub.generateCommitMessage",
-    "onCommand:agentsHub.cancelCommitMessageGeneration",
-    "onCommand:agentsHub.setupCommitMessage"
+    "onView:agent-hub.sidebar",
+    "onCommand:agent-hub.openPanel",
+    "onCommand:agent-hub.reloadWindow",
+    "onCommand:agent-hub.refreshProviders",
+    "onCommand:agent-hub.openProviderSettings",
+    "onCommand:agent-hub.stopAll",
+    "onCommand:agent-hub.explainSelection",
+    "onCommand:agent-hub.reviewFile",
+    "onCommand:agent-hub.generateTests",
+    "onCommand:agent-hub.refactorSelection",
+    "onCommand:agent-hub.generateCommitMessage",
+    "onCommand:agent-hub.cancelCommitMessageGeneration",
+    "onCommand:agent-hub.setupCommitMessage"
   ],
   "extensionDependencies": [
     "vscode.git"
@@ -57,16 +57,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "agentsHub",
+          "id": "agent-hub",
           "title": "%viewContainer.title%",
           "icon": "media/icon.svg"
         }
       ]
     },
     "views": {
-      "agentsHub": [
+      "agent-hub": [
         {
-          "id": "agentsHub.sidebar",
+          "id": "agent-hub.sidebar",
           "name": "%view.sidebar.name%",
           "type": "webview"
         }
@@ -74,45 +74,45 @@
     },
     "commands": [
       {
-        "command": "agentsHub.openPanel",
+        "command": "agent-hub.openPanel",
         "title": "%command.openPanel.title%"
       },
       {
-        "command": "agentsHub.reloadWindow",
+        "command": "agent-hub.reloadWindow",
         "title": "%command.reloadWindow.title%"
       },
       {
-        "command": "agentsHub.refreshProviders",
+        "command": "agent-hub.refreshProviders",
         "title": "%command.refreshProviders.title%",
         "icon": "$(refresh)"
       },
       {
-        "command": "agentsHub.openProviderSettings",
+        "command": "agent-hub.openProviderSettings",
         "title": "%command.openProviderSettings.title%",
         "icon": "$(settings-gear)"
       },
       {
-        "command": "agentsHub.stopAll",
+        "command": "agent-hub.stopAll",
         "title": "%command.stopAll.title%"
       },
       {
-        "command": "agentsHub.explainSelection",
+        "command": "agent-hub.explainSelection",
         "title": "%command.explainSelection.title%"
       },
       {
-        "command": "agentsHub.reviewFile",
+        "command": "agent-hub.reviewFile",
         "title": "%command.reviewFile.title%"
       },
       {
-        "command": "agentsHub.generateTests",
+        "command": "agent-hub.generateTests",
         "title": "%command.generateTests.title%"
       },
       {
-        "command": "agentsHub.refactorSelection",
+        "command": "agent-hub.refactorSelection",
         "title": "%command.refactorSelection.title%"
       },
       {
-        "command": "agentsHub.generateCommitMessage",
+        "command": "agent-hub.generateCommitMessage",
         "title": "%command.generateCommitMessage.title%",
         "icon": {
           "light": "media/commit-message-light.svg",
@@ -120,57 +120,57 @@
         }
       },
       {
-        "command": "agentsHub.cancelCommitMessageGeneration",
+        "command": "agent-hub.cancelCommitMessageGeneration",
         "title": "%command.cancelCommitMessageGeneration.title%",
         "icon": "$(debug-stop)"
       },
       {
-        "command": "agentsHub.setupCommitMessage",
+        "command": "agent-hub.setupCommitMessage",
         "title": "%command.setupCommitMessage.title%"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "agentsHub.refreshProviders",
-          "when": "view == agentsHub.sidebar",
+          "command": "agent-hub.refreshProviders",
+          "when": "view == agent-hub.sidebar",
           "group": "navigation@1"
         },
         {
-          "command": "agentsHub.openProviderSettings",
-          "when": "view == agentsHub.sidebar",
+          "command": "agent-hub.openProviderSettings",
+          "when": "view == agent-hub.sidebar",
           "group": "navigation@2"
         }
       ],
       "scm/title": [
         {
-          "command": "agentsHub.generateCommitMessage",
-          "when": "scmProvider == git && !agentsHub.commitMessageGenerating",
+          "command": "agent-hub.generateCommitMessage",
+          "when": "scmProvider == git && !agent-hub.commitMessageGenerating",
           "group": "navigation@-100"
         },
         {
-          "command": "agentsHub.cancelCommitMessageGeneration",
-          "when": "scmProvider == git && agentsHub.commitMessageGenerating",
+          "command": "agent-hub.cancelCommitMessageGeneration",
+          "when": "scmProvider == git && agent-hub.commitMessageGenerating",
           "group": "navigation@-101"
         }
       ],
       "editor/context": [
         {
-          "command": "agentsHub.explainSelection",
+          "command": "agent-hub.explainSelection",
           "when": "editorHasSelection",
           "group": "navigation@10"
         },
         {
-          "command": "agentsHub.refactorSelection",
+          "command": "agent-hub.refactorSelection",
           "when": "editorHasSelection",
           "group": "navigation@11"
         },
         {
-          "command": "agentsHub.reviewFile",
+          "command": "agent-hub.reviewFile",
           "group": "navigation@12"
         },
         {
-          "command": "agentsHub.generateTests",
+          "command": "agent-hub.generateTests",
           "group": "navigation@13"
         }
       ]
@@ -178,7 +178,7 @@
     "configuration": {
       "title": "%config.title%",
       "properties": {
-        "agentsHub.defaultProvider": {
+        "agent-hub.defaultProvider": {
           "type": "string",
           "default": "opencode",
           "enum": [
@@ -191,45 +191,45 @@
           ],
           "description": "%config.defaultProvider.description%"
         },
-        "agentsHub.context.includeWorkspace": {
+        "agent-hub.context.includeWorkspace": {
           "type": "boolean",
           "default": true,
           "description": "%config.includeWorkspace.description%"
         },
-        "agentsHub.context.includeCurrentFile": {
+        "agent-hub.context.includeCurrentFile": {
           "type": "boolean",
           "default": true,
           "description": "%config.includeCurrentFile.description%"
         },
-        "agentsHub.context.includeSelection": {
+        "agent-hub.context.includeSelection": {
           "type": "boolean",
           "default": true,
           "description": "%config.includeSelection.description%"
         },
-        "agentsHub.context.includeDiagnostics": {
+        "agent-hub.context.includeDiagnostics": {
           "type": "boolean",
           "default": true,
           "description": "%config.includeDiagnostics.description%"
         },
-        "agentsHub.context.maxFileChars": {
+        "agent-hub.context.maxFileChars": {
           "type": "number",
           "default": 12000,
           "minimum": 1000,
           "description": "%config.maxFileChars.description%"
         },
-        "agentsHub.context.maxSelectionChars": {
+        "agent-hub.context.maxSelectionChars": {
           "type": "number",
           "default": 8000,
           "minimum": 1000,
           "description": "%config.maxSelectionChars.description%"
         },
-        "agentsHub.context.maxDiagnostics": {
+        "agent-hub.context.maxDiagnostics": {
           "type": "number",
           "default": 12,
           "minimum": 0,
           "description": "%config.maxDiagnostics.description%"
         },
-        "agentsHub.home.visibleAgentIds": {
+        "agent-hub.home.visibleAgentIds": {
           "type": "array",
           "default": [],
           "description": "%config.home.visibleAgentIds.description%",
@@ -245,7 +245,7 @@
             ]
           }
         },
-        "agentsHub.home.agentOrder": {
+        "agent-hub.home.agentOrder": {
           "type": "array",
           "default": [],
           "description": "%config.home.agentOrder.description%",
@@ -261,7 +261,7 @@
             ]
           }
         },
-        "agentsHub.apiProviders.customProviders": {
+        "agent-hub.apiProviders.customProviders": {
           "type": "array",
           "default": [],
           "description": "%config.apiProviders.customProviders.description%",
@@ -280,6 +280,10 @@
               },
               "baseUrl": {
                 "type": "string"
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "%config.apiProviders.customProviders.apiKey.description%"
               },
               "apiKeyEnv": {
                 "type": "string"
@@ -300,12 +304,12 @@
             }
           }
         },
-        "agentsHub.apiProviders.defaultProviderId": {
+        "agent-hub.apiProviders.defaultProviderId": {
           "type": "string",
           "default": "",
           "description": "%config.apiProviders.defaultProviderId.description%"
         },
-        "agentsHub.apiProviders.agentProviderByCliId": {
+        "agent-hub.apiProviders.agentProviderByCliId": {
           "type": "object",
           "default": {},
           "description": "%config.apiProviders.agentProviderByCliId.description%",
@@ -313,7 +317,7 @@
             "type": "string"
           }
         },
-        "agentsHub.commitMessage.provider": {
+        "agent-hub.commitMessage.provider": {
           "type": "string",
           "default": "default",
           "enum": [
@@ -327,7 +331,7 @@
           ],
           "description": "%config.commitMessage.provider.description%"
         },
-        "agentsHub.commitMessage.language": {
+        "agent-hub.commitMessage.language": {
           "type": "string",
           "default": "auto",
           "enum": [
@@ -337,7 +341,7 @@
           ],
           "description": "%config.commitMessage.language.description%"
         },
-        "agentsHub.commitMessage.maxDiffChars": {
+        "agent-hub.commitMessage.maxDiffChars": {
           "type": "number",
           "default": 60000,
           "minimum": 1000,

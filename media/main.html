@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="__CSP__">
-  <title>Agents Hub</title>
+  <title>Agent Hub</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="__MAIN_CSS_URI__">
 </head>
 <body data-locale="__LOCALE__">
   <svg class="brand-symbols" aria-hidden="true">
-    <symbol id="agentsHubLogo" viewBox="0 0 24 24">
+    <symbol id="agent-hub-logo" viewBox="0 0 24 24">
       <circle cx="6" cy="8" r="3"/>
       <circle cx="18" cy="8" r="3"/>
       <circle cx="12" cy="18" r="3"/>
@@ -53,9 +53,9 @@
           <button class="api-settings-back tool-button" id="apiProviderSettingsClose" type="button" data-i18n-title="apiSettings.back" data-i18n-aria="apiSettings.back" aria-label="Back">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4"/></svg>
           </button>
-          <div class="brand-mark settings-brand-mark" aria-label="Agents Hub" title="Agents Hub">
+          <div class="brand-mark settings-brand-mark" aria-label="Agent Hub" title="Agent Hub">
             <svg class="brand-logo" viewBox="0 0 24 24" aria-hidden="true">
-              <use href="#agentsHubLogo"></use>
+              <use href="#agent-hub-logo"></use>
             </svg>
           </div>
           <div>
@@ -120,6 +120,10 @@
                     <label class="api-field">
                       <span data-i18n="apiSettings.apiKeyEnv"></span>
                       <input id="apiProviderApiKeyEnv" autocomplete="off" spellcheck="false">
+                    </label>
+                    <label class="api-field">
+                      <span data-i18n="apiSettings.apiKey"></span>
+                      <input id="apiProviderApiKey" type="password" autocomplete="off" spellcheck="false">
                     </label>
                     <label class="api-field">
                       <span data-i18n="apiSettings.model"></span>

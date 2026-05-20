@@ -2,6 +2,7 @@ export interface CustomApiProviderConfig {
   id: string;
   name: string;
   baseUrl: string;
+  apiKey: string;
   apiKeyEnv: string;
   model: string;
   extraEnv: Record<string, string>;
@@ -81,7 +82,9 @@ export function resolveApiProviderRuntime(
   }
 
   const warnings: ApiProviderRuntimeWarning[] = [];
-  if (provider.apiKeyEnv) {
+  if (provider.apiKey) {
+    env.AGENTS_HUB_API_KEY = provider.apiKey;
+  } else if (provider.apiKeyEnv) {
     const apiKey = sourceEnv[provider.apiKeyEnv];
     if (apiKey) {
       env.AGENTS_HUB_API_KEY = apiKey;
@@ -105,9 +108,14 @@ export function resolveApiProviderRuntime(
       provider.id,
       provider.baseUrl,
       provider.model,
+      provider.apiKey ? 'configured-key' : '',
       provider.apiKeyEnv,
       stableRecordKey(provider.extraEnv),
-      provider.apiKeyEnv ? String(Boolean(sourceEnv[provider.apiKeyEnv])) : '',
+      provider.apiKey
+        ? 'true'
+        : provider.apiKeyEnv
+          ? String(Boolean(sourceEnv[provider.apiKeyEnv]))
+          : '',
     ].join('|'),
   };
 }
@@ -146,6 +154,7 @@ function normalizeProviders(value: unknown): CustomApiProviderConfig[] {
       id,
       name,
       baseUrl: stringValue(item.baseUrl),
+      apiKey: stringValue(item.apiKey),
       apiKeyEnv: envNameValue(item.apiKeyEnv),
       model: stringValue(item.model),
       extraEnv: normalizeExtraEnv(item.extraEnv),

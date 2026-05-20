@@ -71,7 +71,7 @@ interface GitExtension {
 type RuntimeLocale = 'en' | 'zh-CN';
 
 const DEFAULT_CLI_ID = 'opencode';
-const MODEL_STATE_KEY = 'agentsHub.modelByProvider';
+const MODEL_STATE_KEY = 'agent-hub.modelByProvider';
 const COMMIT_MESSAGE_TIMEOUT_MS = 120_000;
 
 const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
@@ -156,7 +156,7 @@ export class CommitMessageCommand {
     let wroteGeneratedMessage = false;
 
     try {
-      await vscode.commands.executeCommand('setContext', 'agentsHub.commitMessageGenerating', true);
+      await vscode.commands.executeCommand('setContext', 'agent-hub.commitMessageGenerating', true);
       const repository = await this.pickRepository(locale, resolveRepositoryRootUri(rootUri));
       if (!repository) {
         return;
@@ -236,7 +236,7 @@ export class CommitMessageCommand {
       }
       cancellation.dispose();
       this.isGenerating = false;
-      await vscode.commands.executeCommand('setContext', 'agentsHub.commitMessageGenerating', false);
+      await vscode.commands.executeCommand('setContext', 'agent-hub.commitMessageGenerating', false);
     }
   }
 
@@ -381,7 +381,7 @@ export class CommitMessageCommand {
         return undefined;
       }
 
-      await vscode.workspace.getConfiguration('agentsHub.commitMessage').update(
+      await vscode.workspace.getConfiguration('agent-hub.commitMessage').update(
         'provider',
         picked.profile.id,
         vscode.ConfigurationTarget.Global
@@ -422,7 +422,7 @@ export class CommitMessageCommand {
   }
 
   private async openCommitMessageSettings(): Promise<void> {
-    await vscode.commands.executeCommand('agentsHub.openProviderSettings', 'commitMessage');
+    await vscode.commands.executeCommand('agent-hub.openProviderSettings', 'commitMessage');
   }
 
   private async generateCommitMessage(
@@ -593,20 +593,20 @@ export class CommitMessageCommand {
 
   private getConfiguredProvider(): string {
     const commitProvider = vscode.workspace
-      .getConfiguration('agentsHub.commitMessage')
+      .getConfiguration('agent-hub.commitMessage')
       .get<string>('provider', 'default');
     if (commitProvider && commitProvider !== 'default') {
       return commitProvider;
     }
 
     return vscode.workspace
-      .getConfiguration('agentsHub')
+      .getConfiguration('agent-hub')
       .get<string>('defaultProvider', DEFAULT_CLI_ID);
   }
 
   private getConfiguredLanguage(): CommitMessageLanguageSetting {
     return vscode.workspace
-      .getConfiguration('agentsHub.commitMessage')
+      .getConfiguration('agent-hub.commitMessage')
       .get<CommitMessageLanguageSetting>('language', 'auto');
   }
 
@@ -618,12 +618,12 @@ export class CommitMessageCommand {
 
   private getMaxDiffChars(): number {
     return vscode.workspace
-      .getConfiguration('agentsHub.commitMessage')
+      .getConfiguration('agent-hub.commitMessage')
       .get<number>('maxDiffChars', 60_000);
   }
 
   private getApiProviderSettings(): ApiProviderSettings {
-    const config = vscode.workspace.getConfiguration('agentsHub.apiProviders');
+    const config = vscode.workspace.getConfiguration('agent-hub.apiProviders');
     return sanitizeApiProviderSettings({
       customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
       defaultProviderId: config.get<string>('defaultProviderId', ''),

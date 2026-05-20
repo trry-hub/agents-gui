@@ -457,7 +457,7 @@ export const CLI_PROFILES: CliProfile[] = [
     ],
     defaultAgentMode: 'configured',
     env: {
-      OPENCODE_DB: '{tmp}/agents-hub-opencode-{cwdHash}.db',
+      OPENCODE_DB: '{tmp}/agent-hub-opencode-{cwdHash}.db',
       OMO_DISABLE_POSTHOG: '1',
       OMO_SEND_ANONYMOUS_TELEMETRY: '0',
     },

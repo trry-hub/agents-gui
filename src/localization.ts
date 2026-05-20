@@ -8,7 +8,9 @@ type RuntimeMessageKey =
   | 'notification.stoppedAll'
   | 'notification.installCommandCopied'
   | 'notification.messageCopied'
+  | 'warning.starting'
   | 'error.unknownProvider'
+  | 'error.activationFailed'
   | 'error.startFailed'
   | 'error.sendFailed'
   | 'error.missingSelection'
@@ -21,12 +23,14 @@ type RuntimeMessageKey =
 
 const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>> = {
   en: {
-    'statusBar.text': '$(sparkle) Agents Hub',
-    'statusBar.tooltip': 'Open Agents Hub',
+    'statusBar.text': '$(sparkle) Agent Hub',
+    'statusBar.tooltip': 'Open Agent Hub',
     'notification.stoppedAll': 'All AI CLI processes stopped.',
     'notification.installCommandCopied': 'Installation command copied to clipboard.',
     'notification.messageCopied': 'Message copied to clipboard.',
+    'warning.starting': 'Agent Hub is still starting. Try again in a moment.',
     'error.unknownProvider': 'Unknown provider: {provider}',
+    'error.activationFailed': 'Agent Hub failed to activate: {message}',
     'error.startFailed': 'Failed to start {provider}',
     'error.sendFailed': 'Failed to send input to CLI process',
     'error.missingSelection': 'Select code in the editor before running this action.',
@@ -40,12 +44,14 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'providerExtension.openFailed': 'Failed to open {extension}.',
   },
   'zh-CN': {
-    'statusBar.text': '$(sparkle) Agents Hub',
-    'statusBar.tooltip': '打开 Agents Hub',
+    'statusBar.text': '$(sparkle) Agent Hub',
+    'statusBar.tooltip': '打开 Agent Hub',
     'notification.stoppedAll': '已停止所有 AI CLI 进程。',
     'notification.installCommandCopied': '安装命令已复制到剪贴板。',
     'notification.messageCopied': '消息已复制到剪贴板。',
+    'warning.starting': 'Agent Hub 正在启动，请稍后再试。',
     'error.unknownProvider': '未知提供方：{provider}',
+    'error.activationFailed': 'Agent Hub 激活失败：{message}',
     'error.startFailed': '启动 {provider} 失败',
     'error.sendFailed': '无法向 CLI 进程发送输入',
     'error.missingSelection': '请先在编辑器中选中代码，再运行这个动作。',

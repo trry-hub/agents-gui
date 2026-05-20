@@ -83,6 +83,7 @@
   let pendingThreadByProvider = {};
   let messageStatusTimer = undefined;
   let renderedMessageThreadKey = '';
+  let persistUserSelectionTimer = undefined;
   const openMessageDetailKeys = new Set();
   let promptAttachments = [];
   let openCodeDialogKind = '';
@@ -163,6 +164,7 @@
   const apiProviderForm = document.getElementById('apiProviderForm');
   const apiProviderName = document.getElementById('apiProviderName');
   const apiProviderBaseUrl = document.getElementById('apiProviderBaseUrl');
+  const apiProviderApiKey = document.getElementById('apiProviderApiKey');
   const apiProviderApiKeyEnv = document.getElementById('apiProviderApiKeyEnv');
   const apiProviderModel = document.getElementById('apiProviderModel');
   const apiProviderEnabled = document.getElementById('apiProviderEnabled');
@@ -476,6 +478,7 @@
       activeThreadByProvider,
       contextOptions,
     });
+    schedulePersistUserSelection();
   }
 
   function persistedSelectionMap(value) {
@@ -490,16 +493,31 @@
     );
   }
 
-  function persistUserSelection() {
-    if (!activeId) {
-      return;
+  function schedulePersistUserSelection() {
+    if (persistUserSelectionTimer) {
+      clearTimeout(persistUserSelectionTimer);
     }
+    persistUserSelectionTimer = setTimeout(() => {
+      persistUserSelectionTimer = undefined;
+      persistUserSelection();
+    }, 150);
+  }
 
+  function persistUserSelection() {
     vscode.postMessage({
       command: 'saveSelectionState',
       activeProviderId: activeId,
       activeAgentModeByProvider,
       activeModelByProvider,
+      recentModelByProvider,
+      favoriteModelByProvider,
+      disabledMcpByProvider,
+      customModelByProvider,
+      activeRuntimeByProvider,
+      activePermissionByProvider,
+      contextOptions,
+      claudeTerminalBannerDismissed,
+      taskBoardDismissed,
     });
   }
 
@@ -1734,6 +1752,7 @@
             id: sanitizeApiProviderId(provider.id || provider.name || `provider-${index + 1}`),
             name: String(provider.name || `Custom Provider ${index + 1}`).trim(),
             baseUrl: String(provider.baseUrl || '').trim(),
+            apiKey: String(provider.apiKey || ''),
             apiKeyEnv: sanitizeEnvName(provider.apiKeyEnv || ''),
             model: String(provider.model || '').trim(),
             extraEnv: normalizeExtraEnv(provider.extraEnv),
@@ -1797,6 +1816,7 @@
       id: id || `custom-${Date.now()}`,
       name: '',
       baseUrl: '',
+      apiKey: '',
       apiKeyEnv: '',
       model: '',
       extraEnv: {},
@@ -1855,7 +1875,7 @@
   function renderApiProviderForm() {
     const provider = currentApiProvider();
     const disabled = !provider;
-    [apiProviderName, apiProviderBaseUrl, apiProviderApiKeyEnv, apiProviderModel].forEach((field) => {
+    [apiProviderName, apiProviderBaseUrl, apiProviderApiKey, apiProviderApiKeyEnv, apiProviderModel].forEach((field) => {
       if (field) {
         field.disabled = disabled;
       }
@@ -1870,6 +1890,7 @@
     if (!provider) {
       if (apiProviderName) apiProviderName.value = '';
       if (apiProviderBaseUrl) apiProviderBaseUrl.value = '';
+      if (apiProviderApiKey) apiProviderApiKey.value = '';
       if (apiProviderApiKeyEnv) apiProviderApiKeyEnv.value = '';
       if (apiProviderModel) apiProviderModel.value = '';
       if (apiProviderEnabled) apiProviderEnabled.checked = true;
@@ -1880,6 +1901,7 @@
     editingApiProviderId = provider.id;
     if (apiProviderName) apiProviderName.value = provider.name;
     if (apiProviderBaseUrl) apiProviderBaseUrl.value = provider.baseUrl;
+    if (apiProviderApiKey) apiProviderApiKey.value = provider.apiKey;
     if (apiProviderApiKeyEnv) apiProviderApiKeyEnv.value = provider.apiKeyEnv;
     if (apiProviderModel) apiProviderModel.value = provider.model;
     if (apiProviderEnabled) apiProviderEnabled.checked = provider.enabled;
@@ -1988,6 +2010,7 @@
       ...provider,
       name,
       baseUrl: apiProviderBaseUrl?.value.trim() || '',
+      apiKey: apiProviderApiKey?.value.trim() || '',
       apiKeyEnv: sanitizeEnvName(apiProviderApiKeyEnv?.value || ''),
       model: apiProviderModel?.value.trim() || '',
       enabled: Boolean(apiProviderEnabled?.checked),
@@ -7642,12 +7665,42 @@
           const availableProfiles = visibleInstalledProfiles();
           const storedAgentModes = persistedSelectionMap(message.activeAgentModeByProvider);
           const storedModels = persistedSelectionMap(message.activeModelByProvider);
+          const storedRecentModels = persistedSelectionMap(message.recentModelByProvider);
+          const storedFavoriteModels = persistedSelectionMap(message.favoriteModelByProvider);
+          const storedCustomModels = persistedSelectionMap(message.customModelByProvider);
+          const storedRuntimes = persistedSelectionMap(message.activeRuntimeByProvider);
+          const storedPermissions = persistedSelectionMap(message.activePermissionByProvider);
           activeAgentModeByProvider = hasAppliedPersistentSelection
             ? { ...storedAgentModes, ...activeAgentModeByProvider }
             : { ...activeAgentModeByProvider, ...storedAgentModes };
           activeModelByProvider = hasAppliedPersistentSelection
             ? { ...storedModels, ...activeModelByProvider }
             : { ...activeModelByProvider, ...storedModels };
+          recentModelByProvider = hasAppliedPersistentSelection
+            ? { ...storedRecentModels, ...recentModelByProvider }
+            : { ...recentModelByProvider, ...storedRecentModels };
+          favoriteModelByProvider = hasAppliedPersistentSelection
+            ? { ...storedFavoriteModels, ...favoriteModelByProvider }
+            : { ...favoriteModelByProvider, ...storedFavoriteModels };
+          disabledMcpByProvider = hasAppliedPersistentSelection
+            ? { ...(message.disabledMcpByProvider || {}), ...disabledMcpByProvider }
+            : { ...disabledMcpByProvider, ...(message.disabledMcpByProvider || {}) };
+          customModelByProvider = hasAppliedPersistentSelection
+            ? { ...storedCustomModels, ...customModelByProvider }
+            : { ...customModelByProvider, ...storedCustomModels };
+          activeRuntimeByProvider = hasAppliedPersistentSelection
+            ? { ...storedRuntimes, ...activeRuntimeByProvider }
+            : { ...activeRuntimeByProvider, ...storedRuntimes };
+          activePermissionByProvider = hasAppliedPersistentSelection
+            ? { ...storedPermissions, ...activePermissionByProvider }
+            : { ...activePermissionByProvider, ...storedPermissions };
+          if (!hasAppliedPersistentSelection && message.contextOptions) {
+            contextOptions = { ...contextOptions, ...message.contextOptions };
+          }
+          if (!hasAppliedPersistentSelection) {
+            claudeTerminalBannerDismissed = Boolean(message.claudeTerminalBannerDismissed);
+            taskBoardDismissed = Boolean(message.taskBoardDismissed);
+          }
           const storedProviderProfile = availableProfiles.find(
             (profile) => profile.id === message.activeProviderId
           );

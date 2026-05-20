@@ -269,7 +269,7 @@ export class CliManager {
         ]),
         OPENCODE_DB: path.join(
           os.tmpdir(),
-          `agents-hub-opencode-debug-config-${stableHash(cwd).toString(16)}-${process.pid}.db`
+          `agent-hub-opencode-debug-config-${stableHash(cwd).toString(16)}-${process.pid}.db`
         ),
         OMO_DISABLE_POSTHOG: '1',
         OMO_SEND_ANONYMOUS_TELEMETRY: '0',
@@ -329,7 +329,7 @@ export class CliManager {
         ]),
         OPENCODE_DB: path.join(
           os.tmpdir(),
-          `agents-hub-opencode-agent-list-${stableHash(cwd).toString(16)}-${process.pid}.db`
+          `agent-hub-opencode-agent-list-${stableHash(cwd).toString(16)}-${process.pid}.db`
         ),
         OMO_DISABLE_POSTHOG: '1',
         OMO_SEND_ANONYMOUS_TELEMETRY: '0',
@@ -400,7 +400,7 @@ export class CliManager {
           ]),
           OPENCODE_DB: path.join(
             os.tmpdir(),
-            `agents-hub-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
+            `agent-hub-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
           ),
           OMO_DISABLE_POSTHOG: '1',
           OMO_SEND_ANONYMOUS_TELEMETRY: '0',

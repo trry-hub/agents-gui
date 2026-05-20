@@ -48,6 +48,20 @@ import {
   runtimeT,
 } from './localization';
 import { getProviderExtensionBridge } from './providerExtensions';
+import {
+  AGENT_MODE_STATE_KEY,
+  CLAUDE_TERMINAL_BANNER_STATE_KEY,
+  CONTEXT_OPTIONS_STATE_KEY,
+  CUSTOM_MODEL_STATE_KEY,
+  DISABLED_MCP_STATE_KEY,
+  FAVORITE_MODEL_STATE_KEY,
+  LAST_PROVIDER_STATE_KEY,
+  MODEL_STATE_KEY,
+  PERMISSION_STATE_KEY,
+  RECENT_MODEL_STATE_KEY,
+  RUNTIME_STATE_KEY,
+  TASK_BOARD_DISMISSED_STATE_KEY,
+} from './syncedState';
 
 const PROVIDER_ICON_PATHS = {
   claude: { light: 'media/provider-icons/claude.svg', dark: 'media/provider-icons/claude.svg' },
@@ -84,12 +98,8 @@ const DEFAULT_COMMIT_MESSAGE_LANGUAGE: CommitMessageSettings['language'] = 'auto
 const DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS = 60_000;
 const NO_OUTPUT_NOTICE_MS = 45_000;
 const OPENCODE_STATUS_REFRESH_DELAYS_MS = [1_500, 3_000, 6_000, 10_000, 15_000];
-const LAST_PROVIDER_STATE_KEY = 'agentsHub.lastProviderId';
-const AGENT_MODE_STATE_KEY = 'agentsHub.agentModeByProvider';
-const MODEL_STATE_KEY = 'agentsHub.modelByProvider';
-
 export class SidebarProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'agentsHub.sidebar';
+  public static readonly viewType = 'agent-hub.sidebar';
 
   private view?: vscode.WebviewView;
   private activeSessions = new Map<string, Session>();
@@ -117,7 +127,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.contextCollector = options.contextCollector ?? new AssistantContextCollector();
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
     this.state = options.state;
-    this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-hub');
+    this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agent-hub');
     this.registerDevelopmentWebviewWatcher();
   }
 
@@ -193,7 +203,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.saveSelectionState(message);
           break;
         case 'reloadWindow':
-          await vscode.commands.executeCommand('agentsHub.reloadWindow');
+          await vscode.commands.executeCommand('agent-hub.reloadWindow');
           break;
       }
     });
@@ -222,7 +232,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
 
     this.pendingRequests.push(request);
-    await vscode.commands.executeCommand('agentsHub.sidebar.focus');
+    await vscode.commands.executeCommand('agent-hub.sidebar.focus');
 
     if (this.view) {
       await this.flushPendingRequests();
@@ -285,7 +295,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     await this.state?.update(LAST_PROVIDER_STATE_KEY, providerId);
-    await vscode.commands.executeCommand('setContext', 'agentsHub.activeProvider', providerId);
+    await vscode.commands.executeCommand('setContext', 'agent-hub.activeProvider', providerId);
 
     if (this.view) {
       this.view.show(true);
@@ -293,7 +303,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    await vscode.commands.executeCommand('agentsHub.sidebar.focus');
+    await vscode.commands.executeCommand('agent-hub.sidebar.focus');
     await this.postSwitchProviderMessage(providerId);
   }
 
@@ -306,7 +316,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async openProviderSettings(section = 'agents'): Promise<void> {
-    await vscode.commands.executeCommand('agentsHub.sidebar.focus');
+    await vscode.commands.executeCommand('agent-hub.sidebar.focus');
     this.view?.show(true);
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
@@ -358,6 +368,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       activeProviderId: storedProviderId,
       activeAgentModeByProvider: this.getStoredAgentModeState(),
       activeModelByProvider: this.getStoredModelState(),
+      recentModelByProvider: this.getStoredStringRecord(RECENT_MODEL_STATE_KEY),
+      favoriteModelByProvider: this.getStoredStringRecord(FAVORITE_MODEL_STATE_KEY),
+      disabledMcpByProvider: this.getStoredStringArrayRecord(DISABLED_MCP_STATE_KEY),
+      customModelByProvider: this.getStoredStringRecord(CUSTOM_MODEL_STATE_KEY),
+      activeRuntimeByProvider: this.getStoredStringRecord(RUNTIME_STATE_KEY),
+      activePermissionByProvider: this.getStoredStringRecord(PERMISSION_STATE_KEY),
+      contextOptions: this.getStoredContextOptions(),
+      claudeTerminalBannerDismissed: this.state?.get<boolean>(CLAUDE_TERMINAL_BANNER_STATE_KEY, false),
+      taskBoardDismissed: this.state?.get<boolean>(TASK_BOARD_DISMISSED_STATE_KEY, false),
     });
   }
 
@@ -396,7 +415,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async saveHomeAgentSettings(rawSettings: unknown): Promise<void> {
     const settings = this.normalizeHomeAgentSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agentsHub.home');
+    const config = vscode.workspace.getConfiguration('agent-hub.home');
     await config.update('visibleAgentIds', settings.visibleAgentIds, vscode.ConfigurationTarget.Global);
     await config.update('agentOrder', settings.agentOrder, vscode.ConfigurationTarget.Global);
     await this.sendHomeAgentSettings();
@@ -405,7 +424,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async saveApiProviderSettings(rawSettings: unknown): Promise<void> {
     const settings = sanitizeApiProviderSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agentsHub.apiProviders');
+    const config = vscode.workspace.getConfiguration('agent-hub.apiProviders');
 
     await Promise.all([
       config.update('customProviders', settings.customProviders, vscode.ConfigurationTarget.Global),
@@ -422,7 +441,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
     const settings = this.normalizeCommitMessageSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agentsHub.commitMessage');
+    const config = vscode.workspace.getConfiguration('agent-hub.commitMessage');
 
     await Promise.all([
       config.update('provider', settings.provider, vscode.ConfigurationTarget.Global),
@@ -434,7 +453,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getApiProviderSettings(): ApiProviderSettings {
-    const config = vscode.workspace.getConfiguration('agentsHub.apiProviders');
+    const config = vscode.workspace.getConfiguration('agent-hub.apiProviders');
     return sanitizeApiProviderSettings({
       customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
       defaultProviderId: config.get<string>('defaultProviderId', ''),
@@ -443,7 +462,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getHomeAgentSettings(): HomeAgentSettings {
-    const config = vscode.workspace.getConfiguration('agentsHub.home');
+    const config = vscode.workspace.getConfiguration('agent-hub.home');
     return this.normalizeHomeAgentSettings({
       visibleAgentIds: config.get<string[]>('visibleAgentIds', []),
       agentOrder: config.get<string[]>('agentOrder', []),
@@ -451,7 +470,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getCommitMessageSettings(): CommitMessageSettings {
-    const config = vscode.workspace.getConfiguration('agentsHub.commitMessage');
+    const config = vscode.workspace.getConfiguration('agent-hub.commitMessage');
     return this.normalizeCommitMessageSettings({
       provider: config.get<string>('provider', DEFAULT_COMMIT_MESSAGE_PROVIDER),
       language: config.get<string>('language', DEFAULT_COMMIT_MESSAGE_LANGUAGE),
@@ -518,11 +537,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
 
     await Promise.all([
-      vscode.commands.executeCommand('setContext', 'agentsHub.activeProvider', activeProviderId),
+      vscode.commands.executeCommand('setContext', 'agent-hub.activeProvider', activeProviderId),
       ...CLI_PROFILES.map((profile) => (
         vscode.commands.executeCommand(
           'setContext',
-          `agentsHub.provider.${profile.id}.installed`,
+          `agent-hub.provider.${profile.id}.installed`,
           installedProviderIds.has(profile.id)
         )
       )),
@@ -1030,11 +1049,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       activeProviderId?: unknown;
       activeAgentModeByProvider?: unknown;
       activeModelByProvider?: unknown;
+      recentModelByProvider?: unknown;
+      favoriteModelByProvider?: unknown;
+      disabledMcpByProvider?: unknown;
+      customModelByProvider?: unknown;
+      activeRuntimeByProvider?: unknown;
+      activePermissionByProvider?: unknown;
+      contextOptions?: unknown;
+      claudeTerminalBannerDismissed?: unknown;
+      taskBoardDismissed?: unknown;
     };
     const providerId = typeof payload.activeProviderId === 'string' ? payload.activeProviderId : '';
     if (providerId && getCliProfile(providerId)) {
       await this.state.update(LAST_PROVIDER_STATE_KEY, providerId);
-      await vscode.commands.executeCommand('setContext', 'agentsHub.activeProvider', providerId);
+      await vscode.commands.executeCommand('setContext', 'agent-hub.activeProvider', providerId);
     }
 
     await this.state.update(
@@ -1045,6 +1073,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       MODEL_STATE_KEY,
       this.normalizeModelState(payload.activeModelByProvider)
     );
+    await this.state.update(RECENT_MODEL_STATE_KEY, normalizeStringRecord(payload.recentModelByProvider));
+    await this.state.update(FAVORITE_MODEL_STATE_KEY, normalizeStringRecord(payload.favoriteModelByProvider));
+    await this.state.update(DISABLED_MCP_STATE_KEY, normalizeStringArrayRecord(payload.disabledMcpByProvider));
+    await this.state.update(CUSTOM_MODEL_STATE_KEY, normalizeStringRecord(payload.customModelByProvider));
+    await this.state.update(RUNTIME_STATE_KEY, normalizeStringRecord(payload.activeRuntimeByProvider));
+    await this.state.update(PERMISSION_STATE_KEY, normalizeStringRecord(payload.activePermissionByProvider));
+    await this.state.update(CONTEXT_OPTIONS_STATE_KEY, normalizeContextOptions(payload.contextOptions));
+    await this.state.update(CLAUDE_TERMINAL_BANNER_STATE_KEY, payload.claudeTerminalBannerDismissed === true);
+    await this.state.update(TASK_BOARD_DISMISSED_STATE_KEY, payload.taskBoardDismissed === true);
   }
 
   private normalizeAgentModeState(value: unknown): Record<string, string> {
@@ -1068,6 +1105,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private getStoredModelState(): Record<string, string> {
     return this.normalizeModelState(this.state?.get<Record<string, string>>(MODEL_STATE_KEY, {}));
+  }
+
+  private getStoredStringRecord(key: string): Record<string, string> {
+    return normalizeStringRecord(this.state?.get<Record<string, string>>(key, {}));
+  }
+
+  private getStoredStringArrayRecord(key: string): Record<string, string[]> {
+    return normalizeStringArrayRecord(this.state?.get<Record<string, string[]>>(key, {}));
+  }
+
+  private getStoredContextOptions(): Partial<AssistantContextOptions> {
+    return normalizeContextOptions(this.state?.get<Partial<AssistantContextOptions>>(CONTEXT_OPTIONS_STATE_KEY, {}));
   }
 
   private normalizeModelState(value: unknown): Record<string, string> {
@@ -1095,7 +1144,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private getDefaultCliId(): string {
     const configured = vscode.workspace
-      .getConfiguration('agentsHub')
+      .getConfiguration('agent-hub')
       .get<string>('defaultProvider', DEFAULT_CLI_ID);
 
     if (configured && getCliProfile(configured)) {
@@ -1108,7 +1157,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private resolveContextOptions(
     overrides: Partial<AssistantContextOptions> = {}
   ): AssistantContextOptions {
-    const config = vscode.workspace.getConfiguration('agentsHub.context');
+    const config = vscode.workspace.getConfiguration('agent-hub.context');
     return {
       includeWorkspace: config.get<boolean>('includeWorkspace', true),
       includeCurrentFile: config.get<boolean>('includeCurrentFile', true),
@@ -1131,7 +1180,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getContextLimits() {
-    const config = vscode.workspace.getConfiguration('agentsHub.context');
+    const config = vscode.workspace.getConfiguration('agent-hub.context');
     return {
       maxFileChars: config.get<number>('maxFileChars', 12000),
       maxSelectionChars: config.get<number>('maxSelectionChars', 8000),
@@ -1353,6 +1402,49 @@ function isImageAttachmentInput(value: unknown): value is AssistantImageAttachme
     Number(input.size) > 0 &&
     Number(input.size) <= MAX_IMAGE_ATTACHMENT_BYTES
   );
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (typeof key === 'string' && typeof rawValue === 'string') {
+      result[key] = rawValue;
+    }
+  }
+  return result;
+}
+
+function normalizeStringArrayRecord(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const result: Record<string, string[]> = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (typeof key === 'string' && Array.isArray(rawValue)) {
+      result[key] = rawValue.filter((item): item is string => typeof item === 'string');
+    }
+  }
+  return result;
+}
+
+function normalizeContextOptions(value: unknown): Partial<AssistantContextOptions> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const record = value as Record<string, unknown>;
+  const result: Partial<AssistantContextOptions> = {};
+  for (const key of ['includeWorkspace', 'includeCurrentFile', 'includeSelection', 'includeDiagnostics'] as const) {
+    if (typeof record[key] === 'boolean') {
+      result[key] = record[key];
+    }
+  }
+  return result;
 }
 
 function decodeImageDataUrl(

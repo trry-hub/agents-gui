@@ -59,8 +59,8 @@ test('buildAssistantPrompt includes provider agent mode, action, user request, a
     message: 'What does this do?',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/repo/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/repo/agent-hub',
       },
       activeFile: {
         relativePath: 'src/example.ts',
@@ -103,8 +103,8 @@ test('buildAssistantPrompt requires delivery checklist for OpenCode freeform pro
     message: '我想重构这个登录流程。',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/repo/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/repo/agent-hub',
       },
       diagnostics: [],
     },
@@ -127,8 +127,8 @@ test('buildAssistantPrompt gives provider agent mode stronger implementation ins
     message: 'Find risky issues.',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/repo/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/repo/agent-hub',
       },
       diagnostics: [
         {
@@ -161,8 +161,8 @@ test('review prompt tells the agent not to replace missing file context with a w
     message: 'Review the current file.',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/repo/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/repo/agent-hub',
       },
       diagnostics: [],
     },
@@ -188,7 +188,7 @@ test('buildAssistantPrompt includes pasted image attachment file paths', () => {
         name: 'error-screen.png',
         mimeType: 'image/png',
         size: 2048,
-        path: '/tmp/agents-hub/error-screen.png',
+        path: '/tmp/agent-hub/error-screen.png',
       },
     ],
     context: {
@@ -197,7 +197,7 @@ test('buildAssistantPrompt includes pasted image attachment file paths', () => {
   });
 
   assert.match(prompt, /Attached images:/);
-  assert.match(prompt, /error-screen\.png \(image\/png, 2 KB\): \/tmp\/agents-hub\/error-screen\.png/);
+  assert.match(prompt, /error-screen\.png \(image\/png, 2 KB\): \/tmp\/agent-hub\/error-screen\.png/);
   assert.match(prompt, /Use these local image paths when the selected provider can inspect image files/);
 });
 
@@ -235,8 +235,8 @@ test('buildAssistantPrompt gives OpenCode workspace context even without an acti
     message: '这个项目是什么',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/Users/t/6bt/myproject/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/Users/t/6bt/myproject/agent-hub',
       },
       diagnostics: [],
     },
@@ -244,8 +244,8 @@ test('buildAssistantPrompt gives OpenCode workspace context even without an acti
 
   assert.match(prompt, /^这个项目是什么/);
   assert.match(prompt, /IDE context, use only if relevant:/);
-  assert.match(prompt, /Workspace: agents-hub/);
-  assert.match(prompt, /Workspace root: \/Users\/t\/6bt\/myproject\/agents-hub/);
+  assert.match(prompt, /Workspace: agent-hub/);
+  assert.match(prompt, /Workspace root: \/Users\/t\/6bt\/myproject\/agent-hub/);
   assert.doesNotMatch(prompt, /Provider agent\/mode/);
   assert.doesNotMatch(prompt, /No IDE context was attached/);
 });
@@ -290,8 +290,8 @@ test('buildAssistantPrompt gives OpenCode freeform only compact context when con
     message: '解释一下这里',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/repo/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/repo/agent-hub',
       },
       activeFile: {
         relativePath: 'src/example.ts',
@@ -336,7 +336,7 @@ test('opencode profile uses run command with prompt as argument', () => {
   ]);
   assert.equal(profile.backgroundServer?.url, 'http://127.0.0.1:{port}');
   assert.deepEqual(profile.backgroundServer?.portRange, { start: 46100, size: 200 });
-  assert.equal(profile.env?.OPENCODE_DB, '{tmp}/agents-hub-opencode-{cwdHash}.db');
+  assert.equal(profile.env?.OPENCODE_DB, '{tmp}/agent-hub-opencode-{cwdHash}.db');
   assert.equal(profile.env?.OMO_DISABLE_POSTHOG, '1');
   assert.equal(profile.env?.OMO_SEND_ANONYMOUS_TELEMETRY, '0');
   assert.equal(profile.inputMode, 'argument');
@@ -753,16 +753,17 @@ test('extension contributes reload window command for debugging', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const commands = manifest.contributes.commands.map((command) => command.command);
 
-  assert.ok(manifest.activationEvents.includes('onCommand:agentsHub.reloadWindow'));
-  assert.ok(commands.includes('agentsHub.reloadWindow'));
+  assert.ok(manifest.activationEvents.includes('onCommand:agent-hub.reloadWindow'));
+  assert.ok(commands.includes('agent-hub.reloadWindow'));
 });
 
 test('extension defaults to OpenCode as the active provider', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
   const previewSource = readFileSync(new URL('../scripts/preview-webview.mjs', import.meta.url), 'utf8');
-  const defaultProvider = manifest.contributes.configuration.properties['agentsHub.defaultProvider'];
+  const defaultProvider = manifest.contributes.configuration.properties['agent-hub.defaultProvider'];
 
   assert.equal(defaultProvider.default, 'opencode');
   assert.ok(defaultProvider.enum.includes('opencode'));
@@ -771,8 +772,10 @@ test('extension defaults to OpenCode as the active provider', () => {
   assert.match(sidebarSource, /getCliProfile\(DEFAULT_CLI_ID\)\?\.id/);
   assert.match(previewSource, /defaultProviderId: 'opencode'/);
   assert.match(extensionSource, /state:\s*context\.globalState/);
-  assert.match(sidebarSource, /LAST_PROVIDER_STATE_KEY = 'agentsHub\.lastProviderId'/);
-  assert.match(sidebarSource, /AGENT_MODE_STATE_KEY = 'agentsHub\.agentModeByProvider'/);
+  assert.match(syncedStateSource, /LAST_PROVIDER_STATE_KEY = 'agent-hub\.lastProviderId'/);
+  assert.match(syncedStateSource, /AGENT_MODE_STATE_KEY = 'agent-hub\.agentModeByProvider'/);
+  assert.match(sidebarSource, /LAST_PROVIDER_STATE_KEY,\n/);
+  assert.match(sidebarSource, /AGENT_MODE_STATE_KEY,\n/);
   assert.match(sidebarSource, /const storedProviderId = this\.getStoredProviderId\(profiles\)/);
   assert.match(sidebarSource, /activeProviderId: storedProviderId/);
   assert.match(sidebarSource, /activeAgentModeByProvider: this\.getStoredAgentModeState\(\)/);
@@ -790,7 +793,6 @@ test('workspace debug config starts the extension host with the watch task', () 
   assert.equal(configuration.preLaunchTask, 'npm: watch');
   assert.deepEqual(configuration.args, [
     '--extensionDevelopmentPath=${workspaceFolder}',
-    '--enable-proposed-api=agents-hub.agents-hub',
   ]);
   assert.ok(watchTask);
   assert.equal(watchTask.script, 'watch');
@@ -798,7 +800,7 @@ test('workspace debug config starts the extension host with the watch task', () 
   assert.equal(watchTask.problemMatcher.background.endsPattern, 'Watching for changes...');
 });
 
-test('product document positions Agents Hub beyond a provider launcher', () => {
+test('product document positions Agent Hub beyond a provider launcher', () => {
   const doc = readFileSync(new URL('../docs/product/agents-workbench.md', import.meta.url), 'utf8');
 
   assert.match(doc, /multi-agent workbench/i);
@@ -896,7 +898,7 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.match(script, /button\.classList\.add\('suggestion-button--primary'\)/);
   assert.match(sidebarSource, /case 'openSettings':/);
   assert.match(sidebarSource, /case 'copyInstallCommand':/);
-  assert.match(extensionSource, /agentsHub\.openSettings/);
+  assert.match(extensionSource, /agent-hub\.openSettings/);
   assert.match(i18nScript, /'empty\.configureProviders': 'Open provider settings'/);
   assert.match(i18nScript, /'empty\.configureProviders': '前往设置配置提供方'/);
   assert.match(i18nScript, /'empty\.copyInstall': 'Copy install command'/);
@@ -1358,8 +1360,8 @@ test('webview renders installed provider logo tabs in the header', () => {
   assert.doesNotMatch(html, /id="refreshBtn"/);
   assert.doesNotMatch(JSON.stringify(commands), /activeProviderIndicator|switchProvider/);
   assert.doesNotMatch(JSON.stringify(titleActions), /activeProviderIndicator|switchProvider/);
-  assert.match(JSON.stringify(titleActions), /agentsHub\.refreshProviders/);
-  assert.match(JSON.stringify(titleActions), /agentsHub\.openProviderSettings/);
+  assert.match(JSON.stringify(titleActions), /agent-hub\.refreshProviders/);
+  assert.match(JSON.stringify(titleActions), /agent-hub\.openProviderSettings/);
   assert.match(css, /\.provider-tabs\s*\{/);
   assert.match(css, /\.provider-tabs\s*\{\s*[^}]*height:\s*24px;/s);
   assert.match(css, /\.provider-tabs\s*\{\s*[^}]*--provider-tabs-collapsed-width:\s*28px;/s);
@@ -1443,17 +1445,21 @@ test('manifest exposes title actions and custom API provider settings', () => {
   const titleActions = JSON.stringify(manifest.contributes.menus['view/title']);
   const properties = manifest.contributes.configuration.properties;
 
-  assert.match(commands, /agentsHub\.refreshProviders/);
-  assert.match(commands, /agentsHub\.openProviderSettings/);
-  assert.match(titleActions, /view == agentsHub\.sidebar/);
-  assert.match(titleActions, /agentsHub\.refreshProviders/);
-  assert.match(titleActions, /agentsHub\.openProviderSettings/);
-  assert.ok(properties['agentsHub.apiProviders.customProviders']);
-  assert.ok(properties['agentsHub.apiProviders.defaultProviderId']);
-  assert.ok(properties['agentsHub.apiProviders.agentProviderByCliId']);
-  assert.ok(properties['agentsHub.home.visibleAgentIds']);
-  assert.ok(properties['agentsHub.home.agentOrder']);
-  assert.ok(properties['agentsHub.commitMessage.provider']);
+  assert.match(commands, /agent-hub\.refreshProviders/);
+  assert.match(commands, /agent-hub\.openProviderSettings/);
+  assert.match(titleActions, /view == agent-hub\.sidebar/);
+  assert.match(titleActions, /agent-hub\.refreshProviders/);
+  assert.match(titleActions, /agent-hub\.openProviderSettings/);
+  assert.ok(properties['agent-hub.apiProviders.customProviders']);
+  assert.ok(properties['agent-hub.apiProviders.defaultProviderId']);
+  assert.ok(properties['agent-hub.apiProviders.agentProviderByCliId']);
+  assert.equal(
+    properties['agent-hub.apiProviders.customProviders'].items.properties.apiKey.type,
+    'string'
+  );
+  assert.ok(properties['agent-hub.home.visibleAgentIds']);
+  assert.ok(properties['agent-hub.home.agentOrder']);
+  assert.ok(properties['agent-hub.commitMessage.provider']);
   assert.match(html, /id="settingsNavAgents"/);
   assert.match(html, /id="settingsNavApiProviders"/);
   assert.match(html, /id="settingsNavCommitMessage"/);
@@ -1467,8 +1473,11 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(html, /id="commitMessageMaxDiffChars"/);
   assert.match(html, /id="apiProviderSettingsPage"/);
   assert.doesNotMatch(html, /aria-modal="true"/);
+  assert.match(html, /id="apiProviderApiKey"[^>]*type="password"/);
   assert.match(html, /id="apiProviderApiKeyEnv"/);
-  assert.doesNotMatch(html, /id="apiProviderApiKey"/);
+  assert.match(script, /const apiProviderApiKey = document\.getElementById\('apiProviderApiKey'\)/);
+  assert.match(script, /apiKey: String\(provider\.apiKey \|\| ''\)/);
+  assert.match(script, /apiKey: apiProviderApiKey\?\.value\.trim\(\) \|\| ''/);
   assert.match(script, /function visibleInstalledProfiles\(\)/);
   assert.match(script, /function orderedInstalledProfiles\(\)/);
   assert.match(script, /function renderHomeAgentSettings\(\)/);
@@ -1497,14 +1506,14 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /openProviderSettings/);
 });
 
-test('custom API provider settings sanitize secrets and resolve agent bindings', () => {
+test('custom API provider settings can sync explicit keys without leaking them', () => {
   const settings = sanitizeApiProviderSettings({
     customProviders: [
       {
         id: 'Open Router',
         name: 'OpenRouter',
         baseUrl: 'https://openrouter.ai/api/v1',
-        apiKey: 'sk-should-not-save',
+        apiKey: 'sk-should-sync',
         apiKeyEnv: 'OPENROUTER_API_KEY',
         model: 'anthropic/claude-sonnet',
         extraEnv: {
@@ -1529,8 +1538,8 @@ test('custom API provider settings sanitize secrets and resolve agent bindings',
   });
 
   assert.equal(settings.customProviders[0].id, 'open-router');
+  assert.equal(settings.customProviders[0].apiKey, 'sk-should-sync');
   assert.equal(settings.customProviders[0].apiKeyEnv, 'OPENROUTER_API_KEY');
-  assert.equal(settings.customProviders[0].apiKey, undefined);
   assert.equal(settings.customProviders[0].extraEnv.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
   assert.equal(settings.customProviders[0].extraEnv.badname, 'ignored');
   assert.equal(settings.defaultProviderId, 'open-router');
@@ -1543,12 +1552,28 @@ test('custom API provider settings sanitize secrets and resolve agent bindings',
   });
   assert.equal(runtime.env.AGENTS_HUB_API_BASE_URL, 'https://openrouter.ai/api/v1');
   assert.equal(runtime.env.AGENTS_HUB_API_MODEL, 'anthropic/claude-sonnet');
-  assert.equal(runtime.env.AGENTS_HUB_API_KEY, 'actual-secret');
+  assert.equal(runtime.env.AGENTS_HUB_API_KEY, 'sk-should-sync');
   assert.equal(runtime.env.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
+  assert.equal(runtime.selectionKey.includes('sk-should-sync'), false);
   assert.equal(runtime.selectionKey.includes('actual-secret'), false);
+  assert.equal(runtime.warnings.length, 0);
 
-  const missing = resolveApiProviderRuntime(settings, 'claude', {});
-  assert.equal(missing.provider.name, 'OpenRouter');
+  const fallback = sanitizeApiProviderSettings({
+    customProviders: [{
+      id: 'fallback',
+      name: 'Fallback',
+      apiKeyEnv: 'OPENROUTER_API_KEY',
+      enabled: true,
+    }],
+    defaultProviderId: 'fallback',
+  });
+  assert.equal(
+    resolveApiProviderRuntime(fallback, 'opencode', { OPENROUTER_API_KEY: 'actual-secret' }).env.AGENTS_HUB_API_KEY,
+    'actual-secret'
+  );
+
+  const missing = resolveApiProviderRuntime(fallback, 'opencode', {});
+  assert.equal(missing.provider.name, 'Fallback');
   assert.equal(missing.env.AGENTS_HUB_API_KEY, undefined);
   assert.equal(missing.warnings[0].code, 'missingApiKeyEnv');
 });
@@ -2264,21 +2289,45 @@ test('webview disables freeform send until the prompt has text', () => {
 test('agent mode select is persisted per provider', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
+  const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
 
   assert.match(script, /activeAgentModeByProvider/);
   assert.match(script, /activeModelByProvider/);
+  assert.match(script, /recentModelByProvider/);
+  assert.match(script, /favoriteModelByProvider/);
+  assert.match(script, /disabledMcpByProvider/);
+  assert.match(script, /customModelByProvider/);
   assert.match(script, /activeRuntimeByProvider/);
   assert.match(script, /activePermissionByProvider/);
+  assert.match(script, /contextOptions/);
   assert.match(script, /let hasAppliedPersistentSelection = false;/);
   assert.match(script, /function persistUserSelection\(\)/);
+  assert.match(script, /function schedulePersistUserSelection\(\)/);
   assert.match(script, /command: 'saveSelectionState'/);
   assert.match(script, /activeProviderId: activeId/);
+  assert.match(script, /recentModelByProvider,/);
+  assert.match(script, /favoriteModelByProvider,/);
+  assert.match(script, /disabledMcpByProvider,/);
+  assert.match(script, /customModelByProvider,/);
+  assert.match(script, /activeRuntimeByProvider,/);
+  assert.match(script, /activePermissionByProvider,/);
+  assert.match(script, /contextOptions,/);
   assert.match(script, /persistedSelectionMap\(message\.activeAgentModeByProvider\)/);
+  assert.match(script, /persistedSelectionMap\(message\.activeRuntimeByProvider\)/);
   assert.match(script, /message\.activeProviderId/);
   assert.match(sidebarSource, /case 'saveSelectionState':/);
   assert.match(sidebarSource, /private async saveSelectionState\(message: unknown\)/);
   assert.match(sidebarSource, /this\.state\.update\(LAST_PROVIDER_STATE_KEY, providerId\)/);
   assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
+  assert.match(sidebarSource, /this\.state\.update\(RUNTIME_STATE_KEY,/);
+  assert.match(sidebarSource, /this\.state\.update\(PERMISSION_STATE_KEY,/);
+  assert.match(sidebarSource, /this\.state\.update\(CONTEXT_OPTIONS_STATE_KEY,/);
+  assert.match(extensionSource, /context\.globalState\.setKeysForSync\(SYNCED_GLOBAL_STATE_KEYS\)/);
+  assert.match(syncedStateSource, /LAST_PROVIDER_STATE_KEY = 'agent-hub\.lastProviderId'/);
+  assert.match(syncedStateSource, /DISABLED_MCP_STATE_KEY = 'agent-hub\.disabledMcpByProvider'/);
+  assert.match(syncedStateSource, /CONTEXT_OPTIONS_STATE_KEY = 'agent-hub\.contextOptions'/);
+  assert.match(syncedStateSource, /SYNCED_GLOBAL_STATE_KEYS = \[/);
   assert.match(script, /agentModeSelect\.addEventListener\('change'/);
   assert.match(script, /modelSelect\.addEventListener\('change'/);
   assert.match(script, /modelOptionList\?\.addEventListener\('click'/);
@@ -2819,8 +2868,8 @@ test('normalizeCliOutput removes an echoed internal assistant prompt before disp
     message: '解释选中的代码。',
     context: {
       workspace: {
-        name: 'agents-hub',
-        rootPath: '/repo/agents-hub',
+        name: 'agent-hub',
+        rootPath: '/repo/agent-hub',
       },
       diagnostics: [],
     },
@@ -2988,12 +3037,12 @@ test('editor explain action prefers provider read-only mode', () => {
 
 test('context collector keeps the last active editor when the sidebar has focus', async () => {
   const workspaceFolder = {
-    name: 'agents-hub',
-    uri: { fsPath: '/repo/agents-hub' },
+    name: 'agent-hub',
+    uri: { fsPath: '/repo/agent-hub' },
   };
   const editor = {
     document: {
-      uri: { fsPath: '/repo/agents-hub/src/current.ts' },
+      uri: { fsPath: '/repo/agent-hub/src/current.ts' },
       languageId: 'typescript',
       lineCount: 1,
       getText: () => 'export const current = true;',
@@ -3016,7 +3065,7 @@ test('context collector keeps the last active editor when the sidebar has focus'
     includeDiagnostics: true,
   });
 
-  assert.equal(snapshot.workspace?.name, 'agents-hub');
+  assert.equal(snapshot.workspace?.name, 'agent-hub');
   assert.equal(snapshot.activeFile?.relativePath, 'src/current.ts');
   assert.equal(snapshot.activeFile?.text, 'export const current = true;');
 });
