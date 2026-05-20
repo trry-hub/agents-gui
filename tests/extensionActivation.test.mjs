@@ -25,7 +25,7 @@ test('view title commands are registered before the sidebar provider is construc
   const providerIndex = extensionSource.indexOf('new SidebarProvider');
   assert.notEqual(providerIndex, -1, 'expected SidebarProvider construction in src/extension.ts');
 
-  for (const command of ['agent-hub.refreshProviders', 'agent-hub.openProviderSettings']) {
+  for (const command of ['agents-gui.refreshProviders', 'agents-gui.openProviderSettings']) {
     const commandIndex = extensionSource.indexOf(`registerCommand('${command}'`);
     assert.notEqual(commandIndex, -1, `expected ${command} registration in src/extension.ts`);
     assert.ok(

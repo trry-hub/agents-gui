@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
 
-test('agent-hub uses the three-node mark as the global logo', () => {
+test('agents-gui uses the three-node mark as the global logo', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
@@ -13,7 +13,7 @@ test('agent-hub uses the three-node mark as the global logo', () => {
   assert.ok(existsSync(new URL('../media/icon.png', import.meta.url)));
   assert.ok(existsSync(new URL('../media/icon.svg', import.meta.url)));
   assert.deepEqual(
-    manifest.contributes.commands.find((command) => command.command === 'agent-hub.generateCommitMessage')?.icon,
+    manifest.contributes.commands.find((command) => command.command === 'agents-gui.generateCommitMessage')?.icon,
     {
       light: 'media/commit-message-light.svg',
       dark: 'media/commit-message-dark.svg',
@@ -21,9 +21,9 @@ test('agent-hub uses the three-node mark as the global logo', () => {
   );
   assert.ok(existsSync(new URL('../media/commit-message-light.svg', import.meta.url)));
   assert.ok(existsSync(new URL('../media/commit-message-dark.svg', import.meta.url)));
-  assert.match(html, /<symbol id="agent-hub-logo"/);
+  assert.match(html, /<symbol id="agents-gui-logo"/);
   assert.doesNotMatch(html, /<div class="toolbar-session">\s*<div class="brand-mark"/);
-  assert.match(html, /<div class="brand-mark settings-brand-mark"[^>]*aria-label="Agent Hub"/);
+  assert.match(html, /<div class="brand-mark settings-brand-mark"[^>]*aria-label="Agents GUI"/);
   assert.match(css, /\.brand-mark\s*\{/);
   assert.match(css, /\.brand-logo\s*\{/);
   assert.match(css, /--assistant-foreground:\s*color-mix\(in srgb, var\(--vscode-foreground, #1f1f1f\) 82%, var\(--assistant-muted\)\);/);
@@ -34,9 +34,9 @@ test('agent-hub uses the three-node mark as the global logo', () => {
   assert.match(css, /\.message-content\s*\{\s*[^}]*color:\s*var\(--assistant-foreground\);/s);
 });
 
-test('SCM title command uses the Agent Hub mark as a toolbar-sized icon', () => {
+test('SCM title command uses the Agents GUI mark as a toolbar-sized icon', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const commitCommand = manifest.contributes.commands.find((command) => command.command === 'agent-hub.generateCommitMessage');
+  const commitCommand = manifest.contributes.commands.find((command) => command.command === 'agents-gui.generateCommitMessage');
   const lightIcon = readFileSync(new URL('../media/commit-message-light.svg', import.meta.url), 'utf8');
   const darkIcon = readFileSync(new URL('../media/commit-message-dark.svg', import.meta.url), 'utf8');
 

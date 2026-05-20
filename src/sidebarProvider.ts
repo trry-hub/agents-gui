@@ -99,7 +99,7 @@ const DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS = 60_000;
 const NO_OUTPUT_NOTICE_MS = 45_000;
 const OPENCODE_STATUS_REFRESH_DELAYS_MS = [1_500, 3_000, 6_000, 10_000, 15_000];
 export class SidebarProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'agent-hub.sidebar';
+  public static readonly viewType = 'agents-gui.sidebar';
 
   private view?: vscode.WebviewView;
   private activeSessions = new Map<string, Session>();
@@ -127,7 +127,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.contextCollector = options.contextCollector ?? new AssistantContextCollector();
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
     this.state = options.state;
-    this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agent-hub');
+    this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui');
     this.registerDevelopmentWebviewWatcher();
   }
 
@@ -203,7 +203,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.saveSelectionState(message);
           break;
         case 'reloadWindow':
-          await vscode.commands.executeCommand('agent-hub.reloadWindow');
+          await vscode.commands.executeCommand('agents-gui.reloadWindow');
           break;
       }
     });
@@ -232,7 +232,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
 
     this.pendingRequests.push(request);
-    await vscode.commands.executeCommand('agent-hub.sidebar.focus');
+    await vscode.commands.executeCommand('agents-gui.sidebar.focus');
 
     if (this.view) {
       await this.flushPendingRequests();
@@ -295,7 +295,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     await this.state?.update(LAST_PROVIDER_STATE_KEY, providerId);
-    await vscode.commands.executeCommand('setContext', 'agent-hub.activeProvider', providerId);
+    await vscode.commands.executeCommand('setContext', 'agents-gui.activeProvider', providerId);
 
     if (this.view) {
       this.view.show(true);
@@ -303,7 +303,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    await vscode.commands.executeCommand('agent-hub.sidebar.focus');
+    await vscode.commands.executeCommand('agents-gui.sidebar.focus');
     await this.postSwitchProviderMessage(providerId);
   }
 
@@ -316,7 +316,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async openProviderSettings(section = 'agents'): Promise<void> {
-    await vscode.commands.executeCommand('agent-hub.sidebar.focus');
+    await vscode.commands.executeCommand('agents-gui.sidebar.focus');
     this.view?.show(true);
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
@@ -415,7 +415,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async saveHomeAgentSettings(rawSettings: unknown): Promise<void> {
     const settings = this.normalizeHomeAgentSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agent-hub.home');
+    const config = vscode.workspace.getConfiguration('agents-gui.home');
     await config.update('visibleAgentIds', settings.visibleAgentIds, vscode.ConfigurationTarget.Global);
     await config.update('agentOrder', settings.agentOrder, vscode.ConfigurationTarget.Global);
     await this.sendHomeAgentSettings();
@@ -424,7 +424,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async saveApiProviderSettings(rawSettings: unknown): Promise<void> {
     const settings = sanitizeApiProviderSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agent-hub.apiProviders');
+    const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
 
     await Promise.all([
       config.update('customProviders', settings.customProviders, vscode.ConfigurationTarget.Global),
@@ -441,7 +441,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
     const settings = this.normalizeCommitMessageSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agent-hub.commitMessage');
+    const config = vscode.workspace.getConfiguration('agents-gui.commitMessage');
 
     await Promise.all([
       config.update('provider', settings.provider, vscode.ConfigurationTarget.Global),
@@ -453,7 +453,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getApiProviderSettings(): ApiProviderSettings {
-    const config = vscode.workspace.getConfiguration('agent-hub.apiProviders');
+    const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
     return sanitizeApiProviderSettings({
       customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
       defaultProviderId: config.get<string>('defaultProviderId', ''),
@@ -462,7 +462,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getHomeAgentSettings(): HomeAgentSettings {
-    const config = vscode.workspace.getConfiguration('agent-hub.home');
+    const config = vscode.workspace.getConfiguration('agents-gui.home');
     return this.normalizeHomeAgentSettings({
       visibleAgentIds: config.get<string[]>('visibleAgentIds', []),
       agentOrder: config.get<string[]>('agentOrder', []),
@@ -470,7 +470,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getCommitMessageSettings(): CommitMessageSettings {
-    const config = vscode.workspace.getConfiguration('agent-hub.commitMessage');
+    const config = vscode.workspace.getConfiguration('agents-gui.commitMessage');
     return this.normalizeCommitMessageSettings({
       provider: config.get<string>('provider', DEFAULT_COMMIT_MESSAGE_PROVIDER),
       language: config.get<string>('language', DEFAULT_COMMIT_MESSAGE_LANGUAGE),
@@ -537,11 +537,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     );
 
     await Promise.all([
-      vscode.commands.executeCommand('setContext', 'agent-hub.activeProvider', activeProviderId),
+      vscode.commands.executeCommand('setContext', 'agents-gui.activeProvider', activeProviderId),
       ...CLI_PROFILES.map((profile) => (
         vscode.commands.executeCommand(
           'setContext',
-          `agent-hub.provider.${profile.id}.installed`,
+          `agents-gui.provider.${profile.id}.installed`,
           installedProviderIds.has(profile.id)
         )
       )),
@@ -1062,7 +1062,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const providerId = typeof payload.activeProviderId === 'string' ? payload.activeProviderId : '';
     if (providerId && getCliProfile(providerId)) {
       await this.state.update(LAST_PROVIDER_STATE_KEY, providerId);
-      await vscode.commands.executeCommand('setContext', 'agent-hub.activeProvider', providerId);
+      await vscode.commands.executeCommand('setContext', 'agents-gui.activeProvider', providerId);
     }
 
     await this.state.update(
@@ -1144,7 +1144,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private getDefaultCliId(): string {
     const configured = vscode.workspace
-      .getConfiguration('agent-hub')
+      .getConfiguration('agents-gui')
       .get<string>('defaultProvider', DEFAULT_CLI_ID);
 
     if (configured && getCliProfile(configured)) {
@@ -1157,7 +1157,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private resolveContextOptions(
     overrides: Partial<AssistantContextOptions> = {}
   ): AssistantContextOptions {
-    const config = vscode.workspace.getConfiguration('agent-hub.context');
+    const config = vscode.workspace.getConfiguration('agents-gui.context');
     return {
       includeWorkspace: config.get<boolean>('includeWorkspace', true),
       includeCurrentFile: config.get<boolean>('includeCurrentFile', true),
@@ -1180,7 +1180,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getContextLimits() {
-    const config = vscode.workspace.getConfiguration('agent-hub.context');
+    const config = vscode.workspace.getConfiguration('agents-gui.context');
     return {
       maxFileChars: config.get<number>('maxFileChars', 12000),
       maxSelectionChars: config.get<number>('maxSelectionChars', 8000),

@@ -1,9 +1,9 @@
-# Agent Hub
+# Agents GUI
 
-[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=agent-hub.agent-hub)
-[![CI](https://github.com/trry-hub/agent-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/trry-hub/agent-hub/actions/workflows/ci.yml)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=agents-gui.agents-gui)
+[![CI](https://github.com/trry-hub/agents-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/trry-hub/agents-gui/actions/workflows/ci.yml)
 
-**Agent Hub** is a VS Code extension that turns your editor into a multi-agent workbench. It brings together multiple AI coding assistants — Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider — under a single sidebar interface with context-aware prompts, CLI profile management, and API provider bridging.
+**Agents GUI** is a VS Code extension that turns your editor into a multi-agent workbench. It brings together multiple AI coding assistants — Claude Code, Codex CLI, Gemini CLI, OpenCode, Goose, and Aider — under a single sidebar interface with context-aware prompts, CLI profile management, and API provider bridging.
 
 > ⚠️ **Early Release (v0.0.1).** The core extension logic and webview UI are complete. Expect rapid iteration as we validate the workbench model.
 
@@ -41,10 +41,10 @@
 
 1. **Install the extension** from the VS Code Marketplace.
 2. **Install at least one CLI agent** (see Requirements above).
-3. **Open the Agent Hub sidebar** — click the AI icon in the activity bar, or run `Agent Hub: Open Panel`.
+3. **Open the Agents GUI sidebar** — click the AI icon in the activity bar, or run `Agents GUI: Open Panel`.
 4. **Select a provider** from the dropdown in the sidebar header, then start typing your request.
 
-> The extension defaults to **OpenCode** if no provider is selected. You can change this in `agent-hub.defaultProvider`.
+> The extension defaults to **OpenCode** if no provider is selected. You can change this in `agents-gui.defaultProvider`.
 
 ---
 
@@ -52,19 +52,19 @@
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `agent-hub.defaultProvider` | `"opencode"` | Default AI provider for editor commands |
-| `agent-hub.context.includeWorkspace` | `true` | Attach workspace metadata |
-| `agent-hub.context.includeCurrentFile` | `true` | Attach the active editor file |
-| `agent-hub.context.includeSelection` | `true` | Attach the current editor selection |
-| `agent-hub.context.includeDiagnostics` | `true` | Attach diagnostics for the active file |
-| `agent-hub.context.maxFileChars` | `12000` | Max characters for file context |
-| `agent-hub.context.maxSelectionChars` | `8000` | Max characters for selection context |
-| `agent-hub.context.maxDiagnostics` | `12` | Max diagnostics to include |
-| `agent-hub.apiProviders.customProviders` | `[]` | Custom API provider definitions |
-| `agent-hub.apiProviders.defaultProviderId` | `""` | Global default custom API provider |
-| `agent-hub.apiProviders.agentProviderByCliId` | `{}` | Per-agent custom API provider overrides |
-| `agent-hub.home.visibleAgentIds` | `[]` | Visible agents on the home header |
-| `agent-hub.home.agentOrder` | `[]` | Display order of agents in the header |
+| `agents-gui.defaultProvider` | `"opencode"` | Default AI provider for editor commands |
+| `agents-gui.context.includeWorkspace` | `true` | Attach workspace metadata |
+| `agents-gui.context.includeCurrentFile` | `true` | Attach the active editor file |
+| `agents-gui.context.includeSelection` | `true` | Attach the current editor selection |
+| `agents-gui.context.includeDiagnostics` | `true` | Attach diagnostics for the active file |
+| `agents-gui.context.maxFileChars` | `12000` | Max characters for file context |
+| `agents-gui.context.maxSelectionChars` | `8000` | Max characters for selection context |
+| `agents-gui.context.maxDiagnostics` | `12` | Max diagnostics to include |
+| `agents-gui.apiProviders.customProviders` | `[]` | Custom API provider definitions |
+| `agents-gui.apiProviders.defaultProviderId` | `""` | Global default custom API provider |
+| `agents-gui.apiProviders.agentProviderByCliId` | `{}` | Per-agent custom API provider overrides |
+| `agents-gui.home.visibleAgentIds` | `[]` | Visible agents on the home header |
+| `agents-gui.home.agentOrder` | `[]` | Display order of agents in the header |
 
 ---
 

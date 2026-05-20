@@ -1,7 +1,7 @@
 # Task Plan: OpenCode Parity And Product Readiness
 
 ## Goal
-Make the Agents Hub OpenCode experience feel close to the official OpenCode/Copilot-style workflow, prioritizing stable single-agent flows before reintroducing multi-agent comparison or parallel work.
+Make the Agents GUI OpenCode experience feel close to the official OpenCode/Copilot-style workflow, prioritizing stable single-agent flows before reintroducing multi-agent comparison or parallel work.
 
 ## Current Phase
 Phase 7

@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <g stroke-linecap="butt">
+    <line x1="9" y1="8" x2="15" y2="8"/>
+    <line x1="7.54" y1="10.57" x2="10.46" y2="15.43"/>
+    <line x1="16.46" y1="10.57" x2="13.54" y2="15.43"/>
+  </g>
   <circle cx="6" cy="8" r="3"/>
   <circle cx="18" cy="8" r="3"/>
   <circle cx="12" cy="18" r="3"/>
-  <line x1="8.5" y1="9.5" x2="10.5" y2="16"/>
-  <line x1="15.5" y1="9.5" x2="13.5" y2="16"/>
-  <line x1="9" y1="8" x2="15" y2="8"/>
 </svg>

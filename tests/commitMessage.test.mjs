@@ -111,7 +111,7 @@ test('cleanGeneratedCommitMessage rewrites English summaries to Chinese fallback
     '--- a/.env.dev',
     '+++ b/.env.dev',
     '@@ -1 +1,3 @@',
-    ' VITE_APP_NAME=agent-hub',
+    ' VITE_APP_NAME=agents-gui',
     '+',
     '+',
   ].join('\n');
@@ -134,7 +134,7 @@ test('cleanGeneratedCommitMessage keeps a valid conventional subject when scope 
     '--- a/.env.dev',
     '+++ b/.env.dev',
     '@@ -1 +1,3 @@',
-    ' VITE_APP_NAME=agent-hub',
+    ' VITE_APP_NAME=agents-gui',
     '+',
     '+',
   ].join('\n');
@@ -152,7 +152,7 @@ test('cleanGeneratedCommitMessage does not force scope from non-git diff headers
     '--- .env.dev',
     '+++ .env.dev',
     '@@ -1 +1,2 @@',
-    ' VITE_APP_NAME=agent-hub',
+    ' VITE_APP_NAME=agents-gui',
     '+',
   ].join('\n');
 
@@ -171,7 +171,7 @@ test('cleanGeneratedCommitMessage applies emoji style requested by SCM input', (
     '--- a/.env.dev',
     '+++ b/.env.dev',
     '@@ -1 +1,3 @@',
-    ' VITE_APP_NAME=agent-hub',
+    ' VITE_APP_NAME=agents-gui',
     '+',
     '+',
   ].join('\n');
@@ -195,45 +195,45 @@ test('truncateCommitDiff keeps staged diff under the configured limit', () => {
 
 test('extension contributes SCM title actions for staged AI commit messages', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const commitCommand = manifest.contributes.commands.find((command) => command.command === 'agent-hub.generateCommitMessage');
-  const cancelCommand = manifest.contributes.commands.find((command) => command.command === 'agent-hub.cancelCommitMessageGeneration');
+  const commitCommand = manifest.contributes.commands.find((command) => command.command === 'agents-gui.generateCommitMessage');
+  const cancelCommand = manifest.contributes.commands.find((command) => command.command === 'agents-gui.cancelCommitMessageGeneration');
   const commands = manifest.contributes.commands.map((command) => command.command);
   const scmTitleActions = manifest.contributes.menus['scm/title'] ?? [];
   const scmIdleAction = scmTitleActions.find(
-    (item) => item.command === 'agent-hub.generateCommitMessage'
-      && item.when === 'scmProvider == git && !agent-hub.commitMessageGenerating'
+    (item) => item.command === 'agents-gui.generateCommitMessage'
+      && item.when === 'scmProvider == git && !agents-gui.commitMessageGenerating'
   );
   const scmGeneratingLogoAction = scmTitleActions.find(
-    (item) => item.command === 'agent-hub.generateCommitMessage'
-      && item.when === 'scmProvider == git && agent-hub.commitMessageGenerating'
+    (item) => item.command === 'agents-gui.generateCommitMessage'
+      && item.when === 'scmProvider == git && agents-gui.commitMessageGenerating'
   );
   const scmCancelAction = scmTitleActions.find(
-    (item) => item.command === 'agent-hub.cancelCommitMessageGeneration'
+    (item) => item.command === 'agents-gui.cancelCommitMessageGeneration'
   );
   const scmInputBoxCommands = manifest.contributes.menus['scm/inputBox']?.map((item) => item.command) ?? [];
   const properties = manifest.contributes.configuration.properties;
 
   assert.ok(manifest.extensionDependencies.includes('vscode.git'));
   assert.ok(!manifest.enabledApiProposals?.includes('contribSourceControlInputBoxMenu'));
-  assert.ok(manifest.activationEvents.includes('onCommand:agent-hub.generateCommitMessage'));
-  assert.ok(manifest.activationEvents.includes('onCommand:agent-hub.cancelCommitMessageGeneration'));
-  assert.ok(manifest.activationEvents.includes('onCommand:agent-hub.setupCommitMessage'));
-  assert.ok(commands.includes('agent-hub.generateCommitMessage'));
-  assert.ok(commands.includes('agent-hub.cancelCommitMessageGeneration'));
-  assert.ok(commands.includes('agent-hub.setupCommitMessage'));
-  assert.ok(!commands.includes('agent-hub.generateCommitMessage.loading'));
+  assert.ok(manifest.activationEvents.includes('onCommand:agents-gui.generateCommitMessage'));
+  assert.ok(manifest.activationEvents.includes('onCommand:agents-gui.cancelCommitMessageGeneration'));
+  assert.ok(manifest.activationEvents.includes('onCommand:agents-gui.setupCommitMessage'));
+  assert.ok(commands.includes('agents-gui.generateCommitMessage'));
+  assert.ok(commands.includes('agents-gui.cancelCommitMessageGeneration'));
+  assert.ok(commands.includes('agents-gui.setupCommitMessage'));
+  assert.ok(!commands.includes('agents-gui.generateCommitMessage.loading'));
   assert.deepEqual(commitCommand.icon, {
     light: 'media/commit-message-light.svg',
     dark: 'media/commit-message-dark.svg',
   });
   assert.equal(cancelCommand.icon, '$(debug-stop)');
-  assert.ok(!scmInputBoxCommands.includes('agent-hub.generateCommitMessage'));
+  assert.ok(!scmInputBoxCommands.includes('agents-gui.generateCommitMessage'));
   assert.equal(scmIdleAction.group, 'navigation@-100');
-  assert.ok(!scmTitleActions.some((item) => item.command === 'agent-hub.generateCommitMessage.loading'));
-  assert.equal(scmCancelAction.when, 'scmProvider == git && agent-hub.commitMessageGenerating');
+  assert.ok(!scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading'));
+  assert.equal(scmCancelAction.when, 'scmProvider == git && agents-gui.commitMessageGenerating');
   assert.equal(scmCancelAction.group, 'navigation@-101');
   assert.equal(scmGeneratingLogoAction, undefined);
-  assert.deepEqual(properties['agent-hub.commitMessage.provider'].enum, [
+  assert.deepEqual(properties['agents-gui.commitMessage.provider'].enum, [
     'default',
     'claude',
     'gemini',
@@ -242,9 +242,9 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
     'goose',
     'aider',
   ]);
-  assert.equal(properties['agent-hub.commitMessage.provider'].default, 'default');
-  assert.ok(properties['agent-hub.commitMessage.language']);
-  assert.ok(properties['agent-hub.commitMessage.maxDiffChars']);
+  assert.equal(properties['agents-gui.commitMessage.provider'].default, 'default');
+  assert.ok(properties['agents-gui.commitMessage.language']);
+  assert.ok(properties['agents-gui.commitMessage.maxDiffChars']);
 });
 
 test('commit message command uses staged git diff and writes to repository input box', () => {
@@ -284,11 +284,11 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /getInstalledProfiles\(\)/);
   assert.match(source, /showQuickPick\(providerItems/);
   assert.match(source, /commitMessage'\)\.update\(\s*'provider'/);
-  assert.match(source, /executeCommand\('agent-hub\.openProviderSettings', 'commitMessage'\)/);
+  assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);
   assert.match(source, /clipboard\.writeText\(preferred\.installHint\)/);
-  assert.match(source, /MODEL_STATE_KEY = 'agent-hub\.modelByProvider'/);
+  assert.match(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.match(source, /this\.state\?\.get<Record<string, string>>\(MODEL_STATE_KEY/);
-  assert.match(source, /setContext', 'agent-hub\.commitMessageGenerating'/);
+  assert.match(source, /setContext', 'agents-gui\.commitMessageGenerating'/);
   assert.match(source, /ProgressLocation\.SourceControl/);
   assert.match(source, /cancel\(\): void/);
   assert.match(source, /isLikelyCliError\(normalizedStderr\)/);
@@ -313,7 +313,7 @@ test('sidebar persists the selected model so SCM commit generation can reuse it'
   const mediaSource = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
 
-  assert.match(syncedStateSource, /MODEL_STATE_KEY = 'agent-hub\.modelByProvider'/);
+  assert.match(syncedStateSource, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.match(sidebarSource, /MODEL_STATE_KEY,\n/);
   assert.match(sidebarSource, /activeModelByProvider: this\.getStoredModelState\(\)/);
   assert.match(sidebarSource, /this\.state\.update\(\s*MODEL_STATE_KEY,\s*this\.normalizeModelState\(payload\.activeModelByProvider\)/s);
@@ -326,13 +326,13 @@ test('sidebar persists the selected model so SCM commit generation can reuse it'
 test('extension registers SCM title generation and cancel commands', () => {
   const source = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /setContext', 'agent-hub\.commitMessageGenerating', false/);
-  assert.match(source, /registerCommand\('agent-hub\.generateCommitMessage', \(rootUri, _resourceGroups, token\) =>/);
+  assert.match(source, /setContext', 'agents-gui\.commitMessageGenerating', false/);
+  assert.match(source, /registerCommand\('agents-gui\.generateCommitMessage', \(rootUri, _resourceGroups, token\) =>/);
   assert.match(source, /return commitMessageCommand\.run\(rootUri, token\)/);
-  assert.match(source, /registerCommand\('agent-hub\.cancelCommitMessageGeneration', \(\) =>/);
+  assert.match(source, /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(\) =>/);
   assert.match(source, /commitMessageCommand\.cancel\(\)/);
-  assert.match(source, /registerCommand\('agent-hub\.setupCommitMessage', \(\) =>/);
-  assert.match(source, /executeCommand\('agent-hub\.openProviderSettings', 'commitMessage'\)/);
-  assert.doesNotMatch(source, /registerCommand\('agent-hub\.generateCommitMessage\.loading'/);
+  assert.match(source, /registerCommand\('agents-gui\.setupCommitMessage', \(\) =>/);
+  assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);
+  assert.doesNotMatch(source, /registerCommand\('agents-gui\.generateCommitMessage\.loading'/);
   assert.doesNotMatch(source, /void commitMessageCommand\.run\(\)/);
 });

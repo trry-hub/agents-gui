@@ -20,29 +20,29 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
-  void vscode.commands.executeCommand('setContext', 'agent-hub.commitMessageGenerating', false);
+  void vscode.commands.executeCommand('setContext', 'agents-gui.commitMessageGenerating', false);
   statusBar.text = runtimeT(locale, 'statusBar.text');
   statusBar.tooltip = runtimeT(locale, 'statusBar.tooltip');
-  statusBar.command = 'agent-hub.openPanel';
+  statusBar.command = 'agents-gui.openPanel';
   statusBar.show();
   context.subscriptions.push(statusBar);
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.openPanel', () => {
-      void vscode.commands.executeCommand('agent-hub.sidebar.focus');
+    vscode.commands.registerCommand('agents-gui.openPanel', () => {
+      void vscode.commands.executeCommand('agents-gui.sidebar.focus');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.reloadWindow', async () => {
+    vscode.commands.registerCommand('agents-gui.reloadWindow', async () => {
       getSidebarProvider(false)?.stopAll();
       await vscode.commands.executeCommand('workbench.action.reloadWindow');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.refreshProviders', async () => {
+    vscode.commands.registerCommand('agents-gui.refreshProviders', async () => {
       const provider = getSidebarProvider();
       if (!provider) {
         return;
@@ -52,10 +52,10 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.openProviderSettings', async (section = 'agents') => {
+    vscode.commands.registerCommand('agents-gui.openProviderSettings', async (section = 'agents') => {
       const provider = getSidebarProvider(false);
       if (!provider) {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'agent-hub');
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'agents-gui');
         return;
       }
       await provider.openProviderSettings(section);
@@ -63,13 +63,13 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.openSettings', async () => {
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'agent-hub');
+    vscode.commands.registerCommand('agents-gui.openSettings', async () => {
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'agents-gui');
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.stopAll', () => {
+    vscode.commands.registerCommand('agents-gui.stopAll', () => {
       const provider = getSidebarProvider(false);
       if (provider) {
         provider.stopAll();
@@ -81,7 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.explainSelection', () => {
+    vscode.commands.registerCommand('agents-gui.explainSelection', () => {
       const provider = getSidebarProvider();
       if (provider) {
         void provider.runEditorAction('explainSelection');
@@ -90,7 +90,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.reviewFile', () => {
+    vscode.commands.registerCommand('agents-gui.reviewFile', () => {
       const provider = getSidebarProvider();
       if (provider) {
         void provider.runEditorAction('reviewFile');
@@ -99,7 +99,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.generateTests', () => {
+    vscode.commands.registerCommand('agents-gui.generateTests', () => {
       const provider = getSidebarProvider();
       if (provider) {
         void provider.runEditorAction('generateTests');
@@ -108,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.refactorSelection', () => {
+    vscode.commands.registerCommand('agents-gui.refactorSelection', () => {
       const provider = getSidebarProvider();
       if (provider) {
         void provider.runEditorAction('refactorSelection');
@@ -117,20 +117,20 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.generateCommitMessage', (rootUri, _resourceGroups, token) => {
+    vscode.commands.registerCommand('agents-gui.generateCommitMessage', (rootUri, _resourceGroups, token) => {
       return commitMessageCommand.run(rootUri, token);
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.cancelCommitMessageGeneration', () => {
+    vscode.commands.registerCommand('agents-gui.cancelCommitMessageGeneration', () => {
       commitMessageCommand.cancel();
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agent-hub.setupCommitMessage', () => {
-      return vscode.commands.executeCommand('agent-hub.openProviderSettings', 'commitMessage');
+    vscode.commands.registerCommand('agents-gui.setupCommitMessage', () => {
+      return vscode.commands.executeCommand('agents-gui.openProviderSettings', 'commitMessage');
     })
   );
 

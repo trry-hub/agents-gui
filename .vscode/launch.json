@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Agent Hub Extension",
+      "name": "Run Agents GUI Extension",
       "type": "extensionHost",
       "request": "launch",
       "args": [

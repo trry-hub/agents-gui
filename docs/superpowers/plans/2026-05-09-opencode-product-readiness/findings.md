@@ -11,9 +11,9 @@
 - Current worktree already contains extensive staged changes for OpenCode agent/model discovery, composer UI, transcript rendering, prompt simplification, and product docs.
 - Previous real OpenCode log investigation showed a simple prompt was slow because it was sent to `Sisyphus - Ultraworker` with a project-context wrapper; OpenCode then read project files before answering.
 - The OpenCode freeform prompt path was already changed to send raw text when no substantial IDE context is attached.
-- Debug route exists: `.vscode/launch.json` has `Run Agents Hub Extension`, which launches an Extension Host with `--extensionDevelopmentPath=${workspaceFolder}` and `preLaunchTask: npm: watch`.
+- Debug route exists: `.vscode/launch.json` has `Run Agents GUI Extension`, which launches an Extension Host with `--extensionDevelopmentPath=${workspaceFolder}` and `preLaunchTask: npm: watch`.
 - Watch task exists: `.vscode/tasks.json` runs `npm run watch`, uses an esbuild background problem matcher, and ends when "Watching for changes..." appears.
-- Preview route exists: `scripts/preview-webview.mjs` writes `/tmp/agents-hub-preview/agents-hub-preview.html` and stubs profiles/context/send messages for UI checks.
+- Preview route exists: `scripts/preview-webview.mjs` writes `/tmp/agents-gui-preview/agents-gui-preview.html` and stubs profiles/context/send messages for UI checks.
 - Official OpenCode CLI version is `1.14.39`.
 - Official `opencode models` with isolated DB returned `opencode/big-pickle`, `opencode/minimax-m2.5-free`, `opencode/nemotron-3-super-free`, and `mimo/mimo-v2.5-pro`.
 - Official `opencode agent list` returns user-facing agents mixed with internals/subagents. Extracted names included `build (subagent)`, `explore (subagent)`, `general (subagent)`, `plan (subagent)`, `summary/title/compaction (primary)`, `Atlas - Plan Executor (primary)`, `Hephaestus - Deep Agent (primary)`, `librarian (subagent)`, and `Metis - Plan Consultant (subagent)`.
@@ -60,7 +60,7 @@
 | Preview coverage missed installed non-OpenCode providers | Added Claude and Gemini preview fixtures and verified two-turn history handoff for Claude, Gemini, Codex, and OpenCode. |
 
 ## Resources
-- Project root: `/Users/t/6bt/myproject/agents-hub`
+- Project root: `/Users/t/6bt/myproject/agents-gui`
 - Planning skill: `/Users/t/.agents/skills/planning-with-files/SKILL.md`
 - OpenCode adapter files: `src/cliProfiles.ts`, `src/cliManager.ts`, `src/opencodeAgents.ts`, `src/outputFormatter.ts`, `src/promptBuilder.ts`, `src/sidebarProvider.ts`
 - Webview files: `media/main.html`, `media/main.js`, `media/main.css`, `media/i18n.js`

@@ -1,15 +1,15 @@
-export const LAST_PROVIDER_STATE_KEY = 'agent-hub.lastProviderId';
-export const AGENT_MODE_STATE_KEY = 'agent-hub.agentModeByProvider';
-export const MODEL_STATE_KEY = 'agent-hub.modelByProvider';
-export const RECENT_MODEL_STATE_KEY = 'agent-hub.recentModelByProvider';
-export const FAVORITE_MODEL_STATE_KEY = 'agent-hub.favoriteModelByProvider';
-export const DISABLED_MCP_STATE_KEY = 'agent-hub.disabledMcpByProvider';
-export const CUSTOM_MODEL_STATE_KEY = 'agent-hub.customModelByProvider';
-export const RUNTIME_STATE_KEY = 'agent-hub.runtimeByProvider';
-export const PERMISSION_STATE_KEY = 'agent-hub.permissionByProvider';
-export const CONTEXT_OPTIONS_STATE_KEY = 'agent-hub.contextOptions';
-export const CLAUDE_TERMINAL_BANNER_STATE_KEY = 'agent-hub.claudeTerminalBannerDismissed';
-export const TASK_BOARD_DISMISSED_STATE_KEY = 'agent-hub.taskBoardDismissed';
+export const LAST_PROVIDER_STATE_KEY = 'agents-gui.lastProviderId';
+export const AGENT_MODE_STATE_KEY = 'agents-gui.agentModeByProvider';
+export const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
+export const RECENT_MODEL_STATE_KEY = 'agents-gui.recentModelByProvider';
+export const FAVORITE_MODEL_STATE_KEY = 'agents-gui.favoriteModelByProvider';
+export const DISABLED_MCP_STATE_KEY = 'agents-gui.disabledMcpByProvider';
+export const CUSTOM_MODEL_STATE_KEY = 'agents-gui.customModelByProvider';
+export const RUNTIME_STATE_KEY = 'agents-gui.runtimeByProvider';
+export const PERMISSION_STATE_KEY = 'agents-gui.permissionByProvider';
+export const CONTEXT_OPTIONS_STATE_KEY = 'agents-gui.contextOptions';
+export const CLAUDE_TERMINAL_BANNER_STATE_KEY = 'agents-gui.claudeTerminalBannerDismissed';
+export const TASK_BOARD_DISMISSED_STATE_KEY = 'agents-gui.taskBoardDismissed';
 
 export const SYNCED_GLOBAL_STATE_KEYS = [
   LAST_PROVIDER_STATE_KEY,

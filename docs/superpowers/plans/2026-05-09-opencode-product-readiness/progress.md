@@ -36,7 +36,7 @@
 - Actions taken:
   - Starting debug/preview usage.
   - Built the extension successfully with `npm run build`.
-  - Generated `/tmp/agents-hub-preview/agents-hub-preview.html`.
+  - Generated `/tmp/agents-gui-preview/agents-gui-preview.html`.
   - Computer Use could not access VS Code because macOS returned Apple event error `-1743`.
   - Started a local preview server on port 51437 after sandbox denied binding without escalation.
   - Opened the preview in Playwright at 430x860 and captured initial screenshot/snapshot.
@@ -44,8 +44,8 @@
   - Found OpenCode send button was transparent on white background.
   - Ran official OpenCode CLI discovery and a minimal real `run --format json --thinking` prompt.
 - Files created/modified:
-  - `agents-hub-preview-initial.png` (preview artifact)
-  - `agents-hub-preview-initial.yml` (preview artifact)
+  - `agents-gui-preview-initial.png` (preview artifact)
+  - `agents-gui-preview-initial.yml` (preview artifact)
   - `findings.md` (updated)
   - `progress.md` (updated)
 
@@ -137,7 +137,7 @@
   - Ran `npm test` after fixing OpenCode workspace-only context: 95 passing.
   - Ran `npm run build` after fixing OpenCode workspace-only context: build complete.
   - Ran `git diff --check` after fixing OpenCode workspace-only context: no whitespace errors.
-  - Verified preview workspace-only context shows `工作区` with title `上下文: agents-hub`.
+  - Verified preview workspace-only context shows `工作区` with title `上下文: agents-gui`.
   - Ran `npm test` after adding conversation-history context: 97 passing.
   - Ran `npm run build` after adding conversation-history context: build complete.
   - Ran `git diff --check` after adding conversation-history context: no whitespace errors.
@@ -173,7 +173,7 @@
 |------|-------|----------|--------|--------|
 | Planning catchup | `python3 /Users/t/.agents/skills/planning-with-files/scripts/session-catchup.py ...` | Previous-session report or no-op | Script file missing | Logged |
 | Extension build | `npm run build` | Build completes | Build complete | ✓ |
-| Preview generation | `node scripts/preview-webview.mjs` | HTML written | `/tmp/agents-hub-preview/agents-hub-preview.html` | ✓ |
+| Preview generation | `node scripts/preview-webview.mjs` | HTML written | `/tmp/agents-gui-preview/agents-gui-preview.html` | ✓ |
 | Preview load | Playwright navigate to local preview | Sidebar renders | Initial sidebar rendered | ✓ |
 | OpenCode CLI baseline | `opencode run --format json --thinking --model opencode/minimax-m2.5-free '只回答：OK'` | Fast JSON text response | Returned reasoning + `OK` | ✓ |
 | OpenCode send contrast | Preview OpenCode with prompt | Visible enabled send button | Purple background, white arrow | ✓ |

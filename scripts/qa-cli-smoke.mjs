@@ -78,7 +78,7 @@ const providers = [
     timeoutMs: 45_000,
     expected: /OK|message\.part|text|reasoning/,
     env: {
-      OPENCODE_DB: path.join(tmpRoot, `agents-hub-qa-opencode-${process.pid}.db`),
+      OPENCODE_DB: path.join(tmpRoot, `agents-gui-qa-opencode-${process.pid}.db`),
       OMO_DISABLE_POSTHOG: '1',
       OMO_SEND_ANONYMOUS_TELEMETRY: '0',
     },

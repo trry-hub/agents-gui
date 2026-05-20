@@ -2,9 +2,9 @@
 
 ## Positioning
 
-Agent Hub is a multi-agent workbench for VS Code, with a multi-task control surface. In the current product cut, "multi-agent" means users can switch between several official or CLI-backed single agents reliably. Parallel comparison and multi-agent fan-out are intentionally paused until the single-agent flows are mature.
+Agents GUI is a multi-agent workbench for VS Code, with a multi-task control surface. In the current product cut, "multi-agent" means users can switch between several official or CLI-backed single agents reliably. Parallel comparison and multi-agent fan-out are intentionally paused until the single-agent flows are mature.
 
-The product should not compete with Copilot on inline completion. Copilot owns the "AI autocomplete and single assistant" lane. Agent Hub should own the "agent control plane" lane: many tasks, many capable agents, one visual task surface for context, execution, review, and verification.
+The product should not compete with Copilot on inline completion. Copilot owns the "AI autocomplete and single assistant" lane. Agents GUI should own the "agent control plane" lane: many tasks, many capable agents, one visual task surface for context, execution, review, and verification.
 
 ## Product Thesis
 
@@ -19,7 +19,7 @@ Developers will use more than one coding agent. Each agent has different strengt
 
 ## Competitive Edge
 
-Agent Hub should differentiate from Copilot through orchestration, not replacement.
+Agents GUI should differentiate from Copilot through orchestration, not replacement.
 
 - **Agent choice without lock-in:** Support official and CLI-backed agents in one interface.
 - **Provider choice without clutter:** Let the user switch between several single agents without extra participant controls.
@@ -47,21 +47,21 @@ Every agent run becomes a visible task card. The board shows preparing, running,
 
 ### 4. Delegate, Review, Verify
 
-The user assigns implementation to one agent. When it finishes, Agent Hub can route the diff to another agent for review, then run configured verification commands. Failures become structured follow-up tasks.
+The user assigns implementation to one agent. When it finishes, Agents GUI can route the diff to another agent for review, then run configured verification commands. Failures become structured follow-up tasks.
 
 ### 5. Self-Check And Repair
 
-After an agent run, Agent Hub checks whether the result is empty, failed, noisy, unverified, or risky. If the task changed files, the workbench inspects the diff and runs configured build, test, or lint commands. When a check fails, it can create a repair task with the error log, changed files, and original request attached.
+After an agent run, Agents GUI checks whether the result is empty, failed, noisy, unverified, or risky. If the task changed files, the workbench inspects the diff and runs configured build, test, or lint commands. When a check fails, it can create a repair task with the error log, changed files, and original request attached.
 
-The loop must have boundaries. Agent Hub should stop after a configured number of repair attempts, explain what remains broken, and ask the user to take over when permissions, missing context, or repeated failures make automatic repair unsafe.
+The loop must have boundaries. Agents GUI should stop after a configured number of repair attempts, explain what remains broken, and ask the user to take over when permissions, missing context, or repeated failures make automatic repair unsafe.
 
 ### 6. Keep Official Paths Available
 
-When a provider has an official VS Code extension or panel, Agent Hub can open that official experience. The unified workbench remains the control plane and history layer.
+When a provider has an official VS Code extension or panel, Agents GUI can open that official experience. The unified workbench remains the control plane and history layer.
 
 ## MVP Scope
 
-The MVP should prove that Agent Hub is more than a launcher.
+The MVP should prove that Agents GUI is more than a launcher.
 
 - Single active-provider send flow.
 - Visual task board for the current provider run.

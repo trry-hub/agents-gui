@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const previewRoot = '/tmp/agents-hub-preview';
-const outputPath = path.join(previewRoot, 'agents-hub-preview.html');
+const previewRoot = '/tmp/agents-gui-preview';
+const outputPath = path.join(previewRoot, 'agents-gui-preview.html');
 
 let html = fs.readFileSync(path.join(root, 'media/main.html'), 'utf8');
 
@@ -114,8 +114,8 @@ window.acquireVsCodeApi = () => ({
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
         command: 'contextSummary',
         summary: {
-          workspace: 'agents-hub',
-          workspacePath: '/Users/t/6bt/myproject/agents-hub',
+          workspace: 'agents-gui',
+          workspacePath: '/Users/t/6bt/myproject/agents-gui',
           workspaceBranch: 'main',
           openCodeProject: { id: 'preview-project', worktree: '/Users/t/6bt/project/xiaoyaojing-platform', vcs: 'git' },
           activeFile: 'src/extension.ts',
@@ -143,7 +143,7 @@ window.acquireVsCodeApi = () => ({
         agentMode: message.agentMode,
         action: message.action,
         actionLabel: message.action === 'freeform' ? '自由提问' : message.action,
-        contextSummary: { workspace: 'agents-hub', activeFile: 'src/extension.ts', diagnostics: 2 },
+        contextSummary: { workspace: 'agents-gui', activeFile: 'src/extension.ts', diagnostics: 2 },
       }})), 10);
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
         command: 'output',
