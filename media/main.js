@@ -37,12 +37,13 @@
   const VISUAL_TASK_BOARD_ENABLED = false;
   const MESSAGE_BOTTOM_STICKY_THRESHOLD = 48;
   const FILE_CARD_COLLAPSE_LIMIT = 3;
+  const PROMPT_INPUT_MAX_HEIGHT_FALLBACK = 104;
   const FILE_CARD_ICON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 2.8h5.2l2 2v8.4H3.6V2.8h1.6z"/><path d="M10.4 2.8v2h2M8 6.2v4.2M5.9 8.3h4.2"/></svg>';
   const THINKING_ICON_SVG = '<svg class="message-thinking-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4.25 4.25 0 0 0-2.35 7.79c.45.3.72.74.72 1.21v.25h3.26v-.25c0-.47.27-.91.72-1.21A4.25 4.25 0 0 0 8 1.75Z"/><path d="M6.5 12.25h3M6.9 14h2.2"/></svg>';
   const THINKING_CHEVRON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>';
   const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
   const OPENCODE_OPTION_DIALOG_KINDS = new Set(['sessions', 'models', 'agents']);
-  const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 2200;
+  const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
 
   const saved = vscode.getState() || {};
   let profiles = [];
@@ -1699,9 +1700,18 @@
     homeAgentSettings = normalizeHomeAgentSettings({ ...settings, agentOrder: order });
     renderAll();
     renderHomeAgentSettings();
+    setSettingsSaveStatus('agents', 'info', i18n.t('homeAgents.orderChangedStatus'));
     homeAgentList
       ?.querySelector(`button[data-home-agent-id="${agentId}"][data-home-agent-move="${direction}"]`)
       ?.focus();
+  }
+
+  function showAllHomeAgentsForUi() {
+    homeAgentSettings = normalizeHomeAgentSettings({ visibleAgentIds: [], agentOrder: [] });
+    renderAll();
+    renderHomeAgentSettings();
+    setSettingsSaveStatus('agents', 'info', i18n.t('homeAgents.showAllStatus'));
+    homeAgentList?.querySelector('input[data-home-agent-id]')?.focus();
   }
 
   function settingsSaveStatusElement(section) {
@@ -1725,7 +1735,7 @@
     window.clearTimeout(settingsSaveStatusTimers[section]);
     settingsSaveStatusTimers[section] = undefined;
     element.textContent = '';
-    element.classList.remove('is-saving', 'is-success', 'is-error');
+    element.classList.remove('is-saving', 'is-success', 'is-error', 'is-info');
   }
 
   function setSettingsSaveStatus(section, state, message) {
@@ -1736,7 +1746,7 @@
 
     window.clearTimeout(settingsSaveStatusTimers[section]);
     settingsSaveStatusTimers[section] = undefined;
-    element.classList.remove('is-saving', 'is-success', 'is-error');
+    element.classList.remove('is-saving', 'is-success', 'is-error', 'is-info');
 
     if (!state) {
       element.textContent = '';
@@ -1747,11 +1757,17 @@
       saving: i18n.t('settings.saveStatus.saving'),
       success: i18n.t('settings.saveStatus.saved'),
       error: i18n.t('settings.saveStatus.failed'),
+      info: '',
     };
     element.textContent = message || defaultTextByState[state] || '';
     element.classList.add(`is-${state}`);
 
     if (state === 'success') {
+      settingsSaveStatusTimers[section] = window.setTimeout(() => {
+        clearSettingsSaveStatus(section);
+      }, SETTINGS_SAVE_STATUS_TIMEOUT_MS);
+    }
+    if (state === 'info') {
       settingsSaveStatusTimers[section] = window.setTimeout(() => {
         clearSettingsSaveStatus(section);
       }, SETTINGS_SAVE_STATUS_TIMEOUT_MS);
@@ -2714,7 +2730,7 @@
     const parsed = parseSlashInput(input.value);
     const args = parsed?.args || '';
     input.value = '';
-    input.style.height = 'auto';
+    resizePromptInput();
     hideSlashPalette();
 
     if (command.kind === 'local') {
@@ -3643,13 +3659,17 @@
 
     const titleWrap = document.createElement('div');
     const title = document.createElement('h2');
+    title.id = `openCodeDialogTitle-${openCodeDialogKind}`;
     title.textContent = openCodeDialogTitle(openCodeDialogKind);
     titleWrap.appendChild(title);
+    dialog.setAttribute('aria-labelledby', title.id);
     const descriptionText = openCodeDialogDescription(openCodeDialogKind);
     if (descriptionText) {
       const description = document.createElement('p');
+      description.id = `openCodeDialogDescription-${openCodeDialogKind}`;
       description.textContent = descriptionText;
       titleWrap.appendChild(description);
+      dialog.setAttribute('aria-describedby', description.id);
     }
 
     const close = document.createElement('button');
@@ -4479,6 +4499,55 @@
     }
   }
 
+  function syncMessageThinkingSummaryLabel(container, item, index, itemRunning) {
+    const thinking = container.querySelector(':scope > .message-thinking');
+    const label = thinking?.querySelector(':scope > .message-thinking-summary .message-thinking-label');
+    if (!label) {
+      return;
+    }
+
+    const text = openCodeThinkingSummaryText(
+      item.activity,
+      itemRunning,
+      item.startedAt,
+      item.durationMs
+    );
+    if (label.textContent !== text) {
+      label.textContent = text;
+    }
+
+    const activeThread = ensureActiveThread(activeId);
+    applyMessageDetailOpenState(thinking, messageDetailKey(activeId, activeThread?.id, index, 'thinking'));
+  }
+
+  function syncVisibleRunningMessageStatuses() {
+    const conversation = ensureConversation(activeId);
+    const providerRunning = Boolean(runningByProvider[activeId]);
+    let hasVisibleRunningMessage = false;
+
+    messages.querySelectorAll('.message[data-message-index]').forEach((wrapper) => {
+      const index = Number(wrapper.dataset.messageIndex);
+      const item = conversation[index];
+      if (!item) {
+        return;
+      }
+
+      const itemRunning = Boolean(item.running && providerRunning);
+      hasVisibleRunningMessage = hasVisibleRunningMessage || itemRunning;
+      const bubble = wrapper.querySelector(':scope > .message-bubble');
+      if (!bubble) {
+        return;
+      }
+
+      syncMessageRunningStatusElement(bubble, item, itemRunning);
+      if (item.role === 'assistant') {
+        syncMessageThinkingSummaryLabel(bubble, item, index, itemRunning);
+      }
+    });
+
+    return hasVisibleRunningMessage;
+  }
+
   function assistantCopyGroupStart(conversation, index) {
     let start = index;
     while (start > 0 && conversation[start - 1]?.role === 'assistant') {
@@ -4574,7 +4643,9 @@
   function syncMessageStatusTimer(shouldRun) {
     if (shouldRun && !messageStatusTimer) {
       messageStatusTimer = setInterval(() => {
-        renderMessages();
+        if (!syncVisibleRunningMessageStatuses()) {
+          syncMessageStatusTimer(false);
+        }
       }, 1000);
       return;
     }
@@ -7211,6 +7282,21 @@
     }
   }
 
+  function promptInputMaxHeight() {
+    const parsedMaxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight);
+    return Number.isFinite(parsedMaxHeight) && parsedMaxHeight > 0
+      ? parsedMaxHeight
+      : PROMPT_INPUT_MAX_HEIGHT_FALLBACK;
+  }
+
+  function resizePromptInput() {
+    input.style.height = 'auto';
+    const maxHeight = promptInputMaxHeight();
+    const nextHeight = Math.min(input.scrollHeight, maxHeight);
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
   function selectedAction() {
     return actionSelect.value || 'freeform';
   }
@@ -7250,8 +7336,7 @@
   });
 
   input.addEventListener('input', () => {
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(input.scrollHeight, 104)}px`;
+    resizePromptInput();
     renderComposer();
   });
 
@@ -7387,11 +7472,7 @@
     moveHomeAgent(button.dataset.homeAgentId, button.dataset.homeAgentMove);
   });
 
-  homeAgentsReset?.addEventListener('click', () => {
-    homeAgentList?.querySelectorAll('input[data-home-agent-id]').forEach((checkbox) => {
-      checkbox.checked = true;
-    });
-  });
+  homeAgentsReset?.addEventListener('click', showAllHomeAgentsForUi);
 
   homeAgentsSave?.addEventListener('click', saveHomeAgentSettings);
 
@@ -7712,17 +7793,32 @@
     const currentMenu = target?.closest('details');
     const menus = composerMenus();
 
+    if (
+      slashPaletteVisible()
+      && target
+      && !slashPalette.contains(target)
+      && target !== input
+    ) {
+      hideSlashPalette();
+    }
+
     closeComposerMenus(menus.includes(currentMenu) ? currentMenu : undefined);
   });
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       if (openCodeDialogKind) {
+        event.preventDefault();
         closeOpenCodeStatusDialog();
         return;
       }
       if (apiSettingsPage && !apiSettingsPage.hidden) {
         closeApiProviderSettings();
+        return;
+      }
+      if (slashPaletteVisible()) {
+        event.preventDefault();
+        hideSlashPalette();
         return;
       }
       if (requestStopActiveProvider()) {

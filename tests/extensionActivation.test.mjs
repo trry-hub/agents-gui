@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
+const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const esbuildScript = readFileSync(new URL('../esbuild.mjs', import.meta.url), 'utf8');
 const vscodeIgnore = readFileSync(new URL('../.vscodeignore', import.meta.url), 'utf8');
@@ -33,6 +34,17 @@ test('view title commands are registered before the sidebar provider is construc
       `${command} must be registered before SidebarProvider construction`
     );
   }
+});
+
+test('refresh providers title action reloads the full sidebar state', () => {
+  assert.match(
+    extensionSource,
+    /registerCommand\('agents-gui\.refreshProviders', async \(\) => \{[\s\S]*await provider\.refreshProviders\(\);[\s\S]*\}\)/
+  );
+  assert.match(
+    sidebarSource,
+    /async refreshProviders\(\): Promise<void> \{\s*await this\.sendProfiles\(\);\s*await this\.sendContextSummary\(\);\s*await this\.sendHomeAgentSettings\(\);\s*await this\.sendApiProviderSettings\(\);\s*await this\.sendCommitMessageSettings\(\);\s*\}/s
+  );
 });
 
 test('packaged build includes the tiktoken wasm runtime asset', () => {

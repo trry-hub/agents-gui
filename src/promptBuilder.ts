@@ -139,7 +139,19 @@ export function renderAssistantContext(context: AssistantContextSnapshot): strin
 
   if (context.workspace) {
     sections.push(`Workspace: ${context.workspace.name}`);
-    sections.push(`Workspace root: ${context.workspace.rootPath}`);
+    if (Array.isArray(context.workspace.folders) && context.workspace.folders.length > 1) {
+      sections.push('VS Code multi-root workspace folders:');
+      for (const folder of context.workspace.folders) {
+        sections.push(`- ${folder.name}${folder.active ? ' (active file folder)' : ''}: ${folder.rootPath}`);
+      }
+      if (context.workspace.activeFolderName && context.workspace.activeFolderRootPath) {
+        sections.push(`Active workspace folder: ${context.workspace.activeFolderName}`);
+        sections.push(`Active workspace folder root: ${context.workspace.activeFolderRootPath}`);
+      }
+      sections.push('Do not treat the active file folder as the whole VS Code workspace.');
+    } else {
+      sections.push(`Workspace root: ${context.workspace.rootPath}`);
+    }
   }
 
   if (context.activeFile) {

@@ -2,7 +2,7 @@
   "name": "agents-gui",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "agents-gui",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -145,7 +145,7 @@
       "scm/title": [
         {
           "command": "agents-gui.generateCommitMessage",
-          "when": "scmProvider == git",
+          "when": "scmProvider == git && agents-gui.hasStagedChanges",
           "group": "navigation@-100"
         }
       ],

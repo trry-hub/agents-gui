@@ -223,7 +223,7 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   const scmTitleActions = manifest.contributes.menus['scm/title'] ?? [];
   const scmIdleAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.generateCommitMessage'
-      && item.when === 'scmProvider == git'
+      && item.when === 'scmProvider == git && agents-gui.hasStagedChanges'
   );
   const scmCancelAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.cancelCommitMessageGeneration'
@@ -247,6 +247,7 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   assert.equal(cancelCommand.icon, '$(debug-stop)');
   assert.ok(!scmInputBoxCommands.includes('agents-gui.generateCommitMessage'));
   assert.equal(scmIdleAction.group, 'navigation@-100');
+  assert.match(scmIdleAction.when, /agents-gui\.hasStagedChanges/);
   assert.ok(!scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading'));
   assert.equal(scmCancelAction, undefined);
   assert.ok(!scmTitleActions.some((item) => /agents-gui\.commitMessageGenerating/.test(item.when || '')));
@@ -307,6 +308,8 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.match(source, /this\.state\?\.get<Record<string, string>>\(MODEL_STATE_KEY/);
   assert.match(source, /setContext', 'agents-gui\.commitMessageGenerating'/);
+  assert.match(source, /setContext',\s*HAS_STAGED_CHANGES_CONTEXT,\s*hasStagedChanges/s);
+  assert.match(source, /repository\.state\.indexChanges\.length > 0/);
   assert.match(source, /ProgressLocation\.SourceControl/);
   assert.match(source, /cancel\(\): void/);
   assert.match(source, /isLikelyCliError\(normalizedStderr\)/);

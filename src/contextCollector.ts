@@ -36,18 +36,27 @@ export class AssistantContextCollector {
   ): Promise<AssistantContextSnapshot> {
     const resolvedLimits = { ...DEFAULT_LIMITS, ...limits };
     const editor = this.getCurrentEditor();
+    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
     const workspaceFolder = editor
       ? vscode.workspace.getWorkspaceFolder(editor.document.uri)
-      : vscode.workspace.workspaceFolders?.[0];
+      : workspaceFolders[0];
+    const workspaceName = vscode.workspace.name ?? workspaceFolder?.name ?? workspaceFolders[0]?.name;
 
     const snapshot: AssistantContextSnapshot = {
       diagnostics: [],
     };
 
-    if (options.includeWorkspace && workspaceFolder) {
+    if (options.includeWorkspace && (workspaceFolder || workspaceFolders.length > 0)) {
       snapshot.workspace = {
-        name: workspaceFolder.name,
-        rootPath: workspaceFolder.uri.fsPath,
+        name: workspaceName ?? workspaceFolder?.name ?? 'Workspace',
+        rootPath: workspaceFolder?.uri.fsPath ?? workspaceFolders[0]?.uri.fsPath ?? '',
+        activeFolderName: workspaceFolder?.name,
+        activeFolderRootPath: workspaceFolder?.uri.fsPath,
+        folders: workspaceFolders.map((folder) => ({
+          name: folder.name,
+          rootPath: folder.uri.fsPath,
+          active: Boolean(workspaceFolder && folder.uri.fsPath === workspaceFolder.uri.fsPath),
+        })),
       };
     }
 
@@ -113,6 +122,7 @@ export class AssistantContextCollector {
     if (snapshot.workspace) {
       summary.workspace = snapshot.workspace.name;
       summary.workspacePath = snapshot.workspace.rootPath;
+      summary.workspaceFolders = snapshot.workspace.folders;
     }
     if (snapshot.activeFile) {
       summary.activeFile = snapshot.activeFile.relativePath;

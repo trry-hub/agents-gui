@@ -44,6 +44,7 @@ interface GitChange {
 interface GitRepositoryState {
   readonly indexChanges: GitChange[];
   readonly workingTreeChanges?: GitChange[];
+  readonly onDidChange?: vscode.Event<void>;
 }
 
 interface GitRepositoryUIState {
@@ -60,6 +61,8 @@ interface GitRepository {
 
 interface GitApi {
   readonly repositories: GitRepository[];
+  readonly onDidOpenRepository?: vscode.Event<GitRepository>;
+  readonly onDidCloseRepository?: vscode.Event<GitRepository>;
   getRepository(uri: vscode.Uri): GitRepository | null;
 }
 
@@ -73,6 +76,7 @@ type RuntimeLocale = 'en' | 'zh-CN';
 const DEFAULT_CLI_ID = 'opencode';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 const COMMIT_MESSAGE_TIMEOUT_MS = 120_000;
+const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
 
 const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
   en: {
@@ -137,6 +141,13 @@ export class CommitMessageCommand {
     private readonly cliManager: CliManager,
     private readonly state?: vscode.Memento
   ) {}
+
+  watchStagedChangesContext(context: vscode.ExtensionContext): void {
+    void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
+    void this.bindStagedChangesContext(context).catch(() => {
+      void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
+    });
+  }
 
   async run(
     rootUri?: vscode.Uri | { readonly rootUri?: vscode.Uri },
@@ -242,6 +253,55 @@ export class CommitMessageCommand {
 
   cancel(): void {
     this.currentCancellation?.cancel();
+  }
+
+  private async bindStagedChangesContext(context: vscode.ExtensionContext): Promise<void> {
+    const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git');
+    if (!gitExtension) {
+      return;
+    }
+
+    const extension = gitExtension.isActive ? gitExtension.exports : await gitExtension.activate();
+    if (!extension.enabled) {
+      return;
+    }
+
+    const git = extension.getAPI(1);
+    const repositoryStateDisposables: vscode.Disposable[] = [];
+    const disposeRepositoryStateWatchers = () => {
+      while (repositoryStateDisposables.length > 0) {
+        repositoryStateDisposables.pop()?.dispose();
+      }
+    };
+    const updateHasStagedChanges = () => {
+      const hasStagedChanges = git.repositories.some(
+        (repository) => repository.state.indexChanges.length > 0
+      );
+      void vscode.commands.executeCommand(
+        'setContext',
+        HAS_STAGED_CHANGES_CONTEXT,
+        hasStagedChanges
+      );
+    };
+    const watchRepositories = () => {
+      disposeRepositoryStateWatchers();
+      for (const repository of git.repositories) {
+        const onDidChange = repository.state.onDidChange;
+        if (onDidChange) {
+          repositoryStateDisposables.push(onDidChange(updateHasStagedChanges));
+        }
+      }
+      updateHasStagedChanges();
+    };
+
+    watchRepositories();
+    context.subscriptions.push({ dispose: disposeRepositoryStateWatchers });
+    if (git.onDidOpenRepository) {
+      context.subscriptions.push(git.onDidOpenRepository(watchRepositories));
+    }
+    if (git.onDidCloseRepository) {
+      context.subscriptions.push(git.onDidCloseRepository(watchRepositories));
+    }
   }
 
   private async pickRepository(

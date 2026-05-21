@@ -1084,6 +1084,11 @@ body.is-api-settings-open .composer {
 
 .settings-save-status.is-success {
   color: var(--vscode-testing-iconPassed, #3fb950);
+  font-weight: 600;
+}
+
+.settings-save-status.is-info {
+  color: var(--vscode-descriptionForeground, var(--assistant-muted));
 }
 
 .settings-save-status.is-error {
@@ -2923,34 +2928,33 @@ textarea:focus {
 }
 
 .message-status.is-running .message-status-label {
-  color: transparent;
-  background:
-    linear-gradient(
-      100deg,
-      color-mix(in srgb, var(--assistant-muted) 60%, transparent) 0%,
-      color-mix(in srgb, var(--vscode-foreground) 82%, transparent) 45%,
-      color-mix(in srgb, var(--assistant-muted) 60%, transparent) 90%
-    );
-  background-size: 220% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  animation: activityTextShimmer 1.4s ease-in-out infinite;
+  color: color-mix(in srgb, var(--assistant-muted) 72%, var(--vscode-foreground) 28%);
 }
 
 .message-spinner {
   width: 10px;
   height: 10px;
-  border: 1.4px solid color-mix(in srgb, var(--assistant-muted) 26%, transparent);
-  border-top-color: color-mix(in srgb, var(--vscode-foreground) 78%, transparent);
+  border: 0;
   border-radius: 50%;
-  animation: message-spin 820ms linear infinite;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg 248deg,
+      color-mix(in srgb, var(--vscode-foreground) 82%, transparent) 248deg 360deg
+    );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  animation: message-spin 1s linear infinite;
+  backface-visibility: hidden;
+  contain: paint;
   flex: 0 0 auto;
+  transform: translateZ(0);
+  transform-origin: 50% 50%;
+  will-change: transform;
 }
 
 .message-status.is-running .message-spinner {
-  border-color: color-mix(in srgb, var(--assistant-muted) 24%, transparent);
-  border-top-color: color-mix(in srgb, var(--vscode-foreground) 82%, transparent);
-  opacity: 0.82;
+  opacity: 0.9;
 }
 
 .cursor {
@@ -4233,18 +4237,15 @@ body[data-provider="opencode"] .send-button:disabled svg {
 }
 
 .slash-palette {
-  position: absolute;
-  left: 14px;
-  right: auto;
-  bottom: calc(100% + 6px);
-  z-index: 20;
+  position: static;
   display: grid;
   gap: 1px;
-  width: min(calc(100% - 28px), 640px);
+  width: 100%;
   max-height: min(42vh, 260px);
   padding: 0;
   overflow-y: auto;
-  border: 1px solid var(--assistant-border);
+  border: 0;
+  border-bottom: 1px solid var(--assistant-border);
   border-radius: 0;
   color: var(--vscode-foreground);
   background: var(--vscode-editorWidget-background, var(--vscode-input-background, var(--assistant-surface)));
@@ -4318,17 +4319,16 @@ body[data-provider="opencode"] .send-button:disabled svg {
 }
 
 body[data-provider="opencode"] .slash-palette {
-  left: 20px;
-  bottom: calc(100% + 10px);
-  width: min(620px, calc(100% - 40px));
+  width: 100%;
   padding: 2px 0 1px;
   border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--assistant-border) 78%, transparent);
   background: color-mix(
     in srgb,
     var(--vscode-input-background, var(--assistant-surface)) 94%,
     var(--vscode-editor-background, var(--assistant-surface)) 6%
   );
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--assistant-border) 78%, transparent);
+  box-shadow: none;
 }
 
 body[data-provider="opencode"] .slash-command {
@@ -4908,6 +4908,8 @@ textarea {
   width: 100%;
   min-height: 40px;
   max-height: 104px;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
   resize: none;
   padding: 7px 8px 6px;
   border: 0;

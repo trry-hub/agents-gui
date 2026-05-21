@@ -28,6 +28,15 @@ export interface AssistantContextOptions {
 export interface AssistantWorkspaceContext {
   name: string;
   rootPath: string;
+  activeFolderName?: string;
+  activeFolderRootPath?: string;
+  folders?: AssistantWorkspaceFolderContext[];
+}
+
+export interface AssistantWorkspaceFolderContext {
+  name: string;
+  rootPath: string;
+  active?: boolean;
 }
 
 export interface AssistantFileContext {
@@ -112,6 +121,7 @@ export interface AssistantWebviewRequest {
 export interface AssistantContextSummary {
   workspace?: string;
   workspacePath?: string;
+  workspaceFolders?: AssistantWorkspaceFolderContext[];
   workspaceBranch?: string;
   openCodeProject?: AssistantOpenCodeProject;
   mcpServers?: AssistantMcpServerStatus[];

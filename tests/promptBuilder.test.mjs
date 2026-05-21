@@ -116,6 +116,47 @@ test('buildAssistantPrompt requires delivery checklist for OpenCode freeform pro
   assert.match(prompt, /Risks and caveats: call out assumptions, follow-up work, and edge cases/);
 });
 
+test('buildAssistantPrompt tells OpenCode about every folder in a multi-root workspace', () => {
+  const prompt = buildAssistantPrompt({
+    provider: { id: 'opencode', name: 'OpenCode' },
+    mode: 'agent',
+    agentMode: {
+      id: 'sisyphus',
+      label: 'Sisyphus',
+      instruction: 'Use provider-native behavior.',
+    },
+    action: 'freeform',
+    message: '我当前工作区有几个项目？',
+    context: {
+      workspace: {
+        name: 'qxs-factory_vue3 (工作区)',
+        rootPath: '/Users/t/6bt/demand/daily-work',
+        activeFolderName: 'daily-work',
+        activeFolderRootPath: '/Users/t/6bt/demand/daily-work',
+        folders: [
+          { name: 'qxs-finance-review', rootPath: '/Users/t/6bt/日常优化/qxs-finance-review' },
+          { name: 'daily-work', rootPath: '/Users/t/6bt/demand/daily-work', active: true },
+          { name: 'ksh-mr', rootPath: '/Users/t/6bt/project/ksh-mr' },
+          { name: 'ksh-mr_vue3', rootPath: '/Users/t/6bt/project/ksh-mr_vue3' },
+        ],
+      },
+      activeFile: {
+        relativePath: '第四期prd.md',
+        languageId: 'markdown',
+        lineCount: 24,
+        truncated: false,
+      },
+      diagnostics: [],
+    },
+  });
+
+  assert.match(prompt, /VS Code multi-root workspace folders:/);
+  assert.match(prompt, /qxs-finance-review: \/Users\/t\/6bt\/日常优化\/qxs-finance-review/);
+  assert.match(prompt, /daily-work \(active file folder\): \/Users\/t\/6bt\/demand\/daily-work/);
+  assert.match(prompt, /ksh-mr_vue3: \/Users\/t\/6bt\/project\/ksh-mr_vue3/);
+  assert.match(prompt, /Do not treat the active file folder as the whole VS Code workspace/);
+});
+
 test('buildAssistantPrompt gives provider agent mode stronger implementation instructions', () => {
   const prompt = buildAssistantPrompt({
     provider: { id: 'claude', name: 'Claude Code' },
@@ -1446,6 +1487,7 @@ test('manifest exposes title actions and custom API provider settings', () => {
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const commands = JSON.stringify(manifest.contributes.commands);
   const titleActions = JSON.stringify(manifest.contributes.menus['view/title']);
@@ -1493,6 +1535,7 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /function renderCommitMessageSettings\(\)/);
   assert.match(script, /function saveCommitMessageSettings\(\)/);
   assert.match(script, /function setSettingsSaveStatus\(section,\s*state,\s*message\)/);
+  assert.match(script, /const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;/);
   assert.match(script, /case 'settingsSaveResult':/);
   assert.match(script, /setSettingsSaveStatus\('agents',\s*'saving'\)/);
   assert.match(script, /setSettingsSaveStatus\('apiProviders',\s*'saving'\)/);
@@ -1508,8 +1551,15 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(sidebarSource, /section,\s*ok:\s*false/);
   assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /\.settings-save-status\s*\{/);
-  assert.match(css, /\.settings-save-status\.is-success\s*\{/);
+  assert.match(css, /\.settings-save-status\.is-success\s*\{[^}]*font-weight:\s*600;/s);
+  assert.match(css, /\.settings-save-status\.is-info\s*\{/);
   assert.match(css, /\.settings-save-status\.is-error\s*\{/);
+  assert.match(i18nScript, /'settings\.saveStatus\.saved': 'Settings saved'/);
+  assert.match(i18nScript, /'settings\.saveStatus\.saved': '设置已保存'/);
+  assert.match(i18nScript, /'homeAgents\.showAllStatus': 'All installed agents are visible\. Save to keep this layout\.'/);
+  assert.match(i18nScript, /'homeAgents\.showAllStatus': '已显示全部 Agent，点击保存后生效。'/);
+  assert.match(i18nScript, /'homeAgents\.orderChangedStatus': 'Order changed\. Save to keep this layout\.'/);
+  assert.match(i18nScript, /'homeAgents\.orderChangedStatus': '已调整排序，点击保存后生效。'/);
   assert.match(script, /switch \(activeSettingsSection\)/);
   assert.match(css, /\.api-settings-panel\s*\{\s*[^}]*container-type:\s*inline-size;/s);
   assert.match(css, /\.settings-nav-item\s*\{\s*[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\);/s);
@@ -1524,6 +1574,31 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /commitMessageSettings/);
   assert.match(script, /refreshApiProviderSettings/);
   assert.match(script, /openProviderSettings/);
+});
+
+test('webview settings reset and reorder controls have durable local feedback', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.match(script, /function moveHomeAgent\(agentId, direction\)/);
+  assert.match(script, /\[order\[fromIndex\], order\[toIndex\]\] = \[order\[toIndex\], order\[fromIndex\]\];/);
+  assert.match(script, /homeAgentSettings = normalizeHomeAgentSettings\(\{ \.\.\.settings, agentOrder: order \}\);/);
+  assert.match(script, /setSettingsSaveStatus\('agents', 'info', i18n\.t\('homeAgents\.orderChangedStatus'\)\);/);
+  assert.match(script, /button\.disabled = disabled;/);
+  assert.match(script, /homeAgentList\s*\?\.querySelector\(`button\[data-home-agent-id="\$\{agentId\}"\]\[data-home-agent-move="\$\{direction\}"\]`\)\s*\?\.focus\(\);/s);
+  assert.match(script, /function showAllHomeAgentsForUi\(\)/);
+  assert.match(script, /homeAgentSettings = normalizeHomeAgentSettings\(\{ visibleAgentIds: \[\], agentOrder: \[\] \}\);/);
+  assert.match(script, /setSettingsSaveStatus\('agents', 'info', i18n\.t\('homeAgents\.showAllStatus'\)\);/);
+  assert.match(script, /homeAgentsReset\?\.addEventListener\('click', showAllHomeAgentsForUi\);/);
+});
+
+test('webview commit-message settings reset persists the exact defaults', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.match(script, /function resetCommitMessageSettings\(\)/);
+  assert.match(script, /commitMessageSettings = \{ provider: 'default', language: 'auto', maxDiffChars: 60000 \};/);
+  assert.match(script, /renderCommitMessageSettings\(\);\s*setSettingsSaveStatus\('commitMessage', 'saving'\);/s);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'saveCommitMessageSettings', settings: commitMessageSettings \}\);/);
+  assert.match(script, /commitMessageReset\?\.addEventListener\('click', resetCommitMessageSettings\);/);
 });
 
 test('custom API provider settings can sync explicit keys without leaking them', () => {
@@ -1664,6 +1739,25 @@ test('webview composer controls wrap before narrow sidebars clip the send button
   assert.match(css, /\.prompt-shell\s*\{\s*[^}]*min-width:\s*0;/s);
 });
 
+test('webview keeps very long prompts inside the composer instead of covering controls', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+
+  assert.match(script, /const PROMPT_INPUT_MAX_HEIGHT_FALLBACK = 104;/);
+  assert.match(script, /function promptInputMaxHeight\(\)/);
+  assert.match(script, /Number\.parseFloat\(window\.getComputedStyle\(input\)\.maxHeight\)/);
+  assert.match(script, /return Number\.isFinite\(parsedMaxHeight\) && parsedMaxHeight > 0\s*\?\s*parsedMaxHeight\s*:\s*PROMPT_INPUT_MAX_HEIGHT_FALLBACK;/s);
+  assert.match(script, /function resizePromptInput\(\)/);
+  assert.match(script, /input\.style\.height = 'auto';\s*const maxHeight = promptInputMaxHeight\(\);/s);
+  assert.match(script, /input\.style\.overflowY = input\.scrollHeight > maxHeight \? 'auto' : 'hidden';/);
+  assert.match(script, /input\.addEventListener\('input', \(\) => \{\s*resizePromptInput\(\);/s);
+  assert.match(script, /input\.value = '';\s*resizePromptInput\(\);\s*hideSlashPalette\(\);/s);
+  assert.match(css, /textarea\s*\{\s*[^}]*max-height:\s*104px;/s);
+  assert.match(css, /textarea\s*\{\s*[^}]*overflow-y:\s*hidden;/s);
+  assert.match(css, /textarea\s*\{\s*[^}]*overscroll-behavior:\s*contain;/s);
+  assert.match(css, /body\[data-provider="opencode"\] textarea\s*\{[^}]*max-height:\s*96px;/s);
+});
+
 test('webview uses one primary composer action slot for send and stop', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
@@ -1773,9 +1867,12 @@ test('webview closes composer menus when clicking outside or pressing escape', (
   assert.match(script, /menu\.open = false;/);
   assert.match(script, /document\.addEventListener\('click', \(event\) => \{/);
   assert.match(script, /const currentMenu = target\?\.closest\('details'\);/);
+  assert.match(script, /slashPaletteVisible\(\)\s*&& target\s*&& !slashPalette\.contains\(target\)\s*&& target !== input/s);
+  assert.match(script, /hideSlashPalette\(\);/);
   assert.match(script, /closeComposerMenus\(menus\.includes\(currentMenu\) \? currentMenu : undefined\);/);
   assert.match(script, /window\.addEventListener\('keydown', \(event\) => \{/);
   assert.match(script, /event\.key === 'Escape'/);
+  assert.match(script, /if \(slashPaletteVisible\(\)\) \{\s*event\.preventDefault\(\);\s*hideSlashPalette\(\);\s*return;\s*\}/s);
   assert.match(script, /if \(requestStopActiveProvider\(\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/s);
 });
 
@@ -1951,7 +2048,9 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(css, /\.message-status\.is-running\s*\{/);
   assert.match(css, /\.message-status\.is-running \.message-status-label\s*\{/);
   assert.match(script, /function syncMessageStatusTimer\(shouldRun\)/);
-  assert.match(script, /messageStatusTimer = setInterval\(\(\) => \{\s*renderMessages\(\);[\s\S]*?\}, 1000\);/);
+  assert.match(script, /function syncVisibleRunningMessageStatuses\(\)/);
+  assert.match(script, /messageStatusTimer = setInterval\(\(\) => \{\s*if \(!syncVisibleRunningMessageStatuses\(\)\) \{\s*syncMessageStatusTimer\(false\);/);
+  assert.doesNotMatch(script, /messageStatusTimer = setInterval\(\(\) => \{\s*renderMessages\(\);[\s\S]*?\}, 1000\);/);
   assert.match(script, /const MESSAGE_BOTTOM_STICKY_THRESHOLD = 48;/);
   assert.match(script, /function shouldAutoScrollMessages\(threadKey\)/);
   assert.match(script, /function restoreMessageScroll\(shouldStickToBottom, previousScrollTop, threadKey\)/);
@@ -2142,11 +2241,11 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /const OPENCODE_SLASH_COMMAND_NAMES = new Set/);
   assert.match(script, /seen\.has\(command\.name\)/);
   assert.match(script, /case 'sessions':/);
-  assert.match(script, /showOpenCodeStatusDialog\('sessions'\)/);
+  assert.match(script, /case 'sessions':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('sessions'\);\s*return;/s);
   assert.match(script, /case 'models':/);
-  assert.match(script, /showOpenCodeStatusDialog\('models'\)/);
+  assert.match(script, /case 'models':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('models'\);\s*return;/s);
   assert.match(script, /case 'agents':/);
-  assert.match(script, /showOpenCodeStatusDialog\('agents'\)/);
+  assert.match(script, /case 'agents':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('agents'\);\s*return;/s);
   assert.match(script, /case 'variants':/);
   assert.match(script, /showOpenCodeStatusDialog\('variants'\)/);
   assert.match(script, /case 'status':/);
@@ -2158,6 +2257,9 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
   assert.match(script, /function renderOpenCodeGroupedOptionDialogBody\(body, kind\)/);
   assert.match(script, /const OPENCODE_OPTION_DIALOG_KINDS = new Set\(\['sessions', 'models', 'agents'\]\);/);
+  assert.match(script, /dialog\.setAttribute\('aria-labelledby', title\.id\);/);
+  assert.match(script, /dialog\.setAttribute\('aria-describedby', description\.id\);/);
+  assert.match(script, /if \(openCodeDialogKind\) \{\s*event\.preventDefault\(\);\s*closeOpenCodeStatusDialog\(\);/s);
   assert.match(script, /function handleOpenCodeOptionDialogKeydown\(event\)/);
   assert.match(script, /dialog\.addEventListener\('keydown', handleOpenCodeOptionDialogKeydown\);/);
   assert.match(script, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
@@ -2220,9 +2322,13 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(css, /\.slash-command\.is-active\s*\{/);
   assert.match(script, /title\.className = 'slash-command-label';/);
   assert.match(css, /\.slash-palette\s*\{[^}]*font-family:\s*var\(--vscode-editor-font-family/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*min\(calc\(100% - 28px\),\s*640px\);/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*position:\s*static;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*100%;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*border-bottom:\s*1px solid var\(--assistant-border\);/);
+  assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*\n\s*bottom:/);
   assert.match(css, /\.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(160px,\s*240px\) minmax\(0,\s*1fr\);/);
-  assert.match(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*width:\s*min\(620px,\s*calc\(100% - 40px\)\);/);
+  assert.match(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*width:\s*100%;/);
+  assert.match(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*box-shadow:\s*none;/);
   assert.match(css, /body\[data-provider="opencode"\] \.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(238px,\s*260px\) minmax\(0,\s*1fr\);/);
   assert.match(css, /\.slash-command\.is-active\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/);
   assert.match(css, /\.slash-footer\s*\{/);
@@ -2307,10 +2413,14 @@ test('webview reduces decorative motion when requested', () => {
 test('webview uses a ring spinner for running message status', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const runningSpinnerRule = css.match(/\.message-status\.is-running \.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
+  const spinnerRule = css.match(/\.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
 
-  assert.match(css, /\.message-spinner\s*\{[^}]*border:\s*1\.4px solid/s);
-  assert.match(runningSpinnerRule, /border-top-color:/);
-  assert.doesNotMatch(runningSpinnerRule, /background:/);
+  assert.match(spinnerRule, /conic-gradient/);
+  assert.match(spinnerRule, /will-change:\s*transform/);
+  assert.match(spinnerRule, /contain:\s*paint/);
+  assert.match(spinnerRule, /animation:\s*message-spin 1s linear infinite/);
+  assert.doesNotMatch(spinnerRule, /border-top-color:/);
+  assert.doesNotMatch(runningSpinnerRule, /border-top-color:/);
   assert.doesNotMatch(runningSpinnerRule, /dot-pulse/);
 });
 
@@ -2434,8 +2544,12 @@ test('webview confirms deleting conversation history inside the webview', () => 
   assert.match(script, /function showDeleteThreadDialog\(cliId = activeId\)/);
   assert.match(script, /function closeDeleteThreadDialog\(\)/);
   assert.match(script, /backdrop\.className = 'session-delete-backdrop';/);
+  assert.match(script, /if \(event\.target === backdrop\) \{\s*closeDeleteThreadDialog\(\);/s);
   assert.match(script, /dialog\.className = 'session-delete-dialog';/);
+  assert.match(script, /if \(event\.key === 'Escape'\) \{\s*event\.preventDefault\(\);\s*closeDeleteThreadDialog\(\);/s);
+  assert.match(script, /cancel\.addEventListener\('click', closeDeleteThreadDialog\);/);
   assert.match(script, /deleteActiveThread\(cliId\);/);
+  assert.match(script, /requestAnimationFrame\(\(\) => cancel\.focus\(\)\);/);
   assert.doesNotMatch(script, /window\.confirm/);
   assert.match(css, /\.session-delete-backdrop\s*\{/);
   assert.match(css, /\.session-delete-dialog\s*\{/);
@@ -3181,8 +3295,57 @@ test('context collector keeps the last active editor when the sidebar has focus'
   assert.equal(snapshot.activeFile?.text, 'export const current = true;');
 });
 
-function createFakeVscode(workspaceFolder, activeTextEditor) {
+test('context collector preserves multi-root workspace folders instead of only active file root', async () => {
+  const workspaceFolders = [
+    { name: 'qxs-finance-review', uri: { fsPath: '/Users/t/6bt/日常优化/qxs-finance-review' } },
+    { name: 'daily-work', uri: { fsPath: '/Users/t/6bt/demand/daily-work' } },
+    { name: 'ksh-mr', uri: { fsPath: '/Users/t/6bt/project/ksh-mr' } },
+    { name: 'ksh-mr_vue3', uri: { fsPath: '/Users/t/6bt/project/ksh-mr_vue3' } },
+  ];
+  const editor = {
+    document: {
+      uri: { fsPath: '/Users/t/6bt/demand/daily-work/第四期prd.md' },
+      languageId: 'markdown',
+      lineCount: 24,
+      getText: () => '# 第四期',
+    },
+    selection: {
+      isEmpty: true,
+    },
+  };
+  const fakeVscode = createFakeVscode(workspaceFolders[0], editor, {
+    workspaceFolders,
+    workspaceName: 'qxs-factory_vue3 (工作区)',
+  });
+  const { AssistantContextCollector } = loadContextCollectorWithVscode(fakeVscode);
+  const collector = new AssistantContextCollector();
+
+  const snapshot = await collector.collect({
+    includeWorkspace: true,
+    includeCurrentFile: true,
+    includeSelection: true,
+    includeDiagnostics: true,
+  });
+
+  assert.equal(snapshot.workspace?.name, 'qxs-factory_vue3 (工作区)');
+  assert.equal(snapshot.workspace?.rootPath, '/Users/t/6bt/demand/daily-work');
+  assert.equal(snapshot.workspace?.activeFolderName, 'daily-work');
+  assert.equal(snapshot.workspace?.folders?.length, 4);
+  assert.deepEqual(
+    snapshot.workspace?.folders?.map((folder) => [folder.name, folder.active]),
+    [
+      ['qxs-finance-review', false],
+      ['daily-work', true],
+      ['ksh-mr', false],
+      ['ksh-mr_vue3', false],
+    ]
+  );
+  assert.equal(snapshot.activeFile?.relativePath, '第四期prd.md');
+});
+
+function createFakeVscode(workspaceFolder, activeTextEditor, options = {}) {
   let activeTextEditorListener = () => {};
+  const workspaceFolders = options.workspaceFolders ?? [workspaceFolder];
 
   return {
     DiagnosticSeverity: {
@@ -3199,9 +3362,10 @@ function createFakeVscode(workspaceFolder, activeTextEditor) {
       },
     },
     workspace: {
-      workspaceFolders: [workspaceFolder],
+      name: options.workspaceName,
+      workspaceFolders,
       getWorkspaceFolder(uri) {
-        return uri.fsPath.startsWith(workspaceFolder.uri.fsPath) ? workspaceFolder : undefined;
+        return workspaceFolders.find((folder) => uri.fsPath.startsWith(folder.uri.fsPath));
       },
     },
     languages: {
