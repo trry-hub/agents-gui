@@ -13,6 +13,8 @@ node_modules/**
 .gitignore
 tsconfig.json
 esbuild.mjs
+dist/release-notes.md
+dist/release-docs/**
 **/*.map
 *.vsix
 agents-gui-global-logo-settings.png
