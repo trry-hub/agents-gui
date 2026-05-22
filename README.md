@@ -110,8 +110,11 @@ npm run package
 
 - 运行测试和 VSIX 打包。
 - 根据历史 git commit 生成 release notes。
+- 使用仓库密钥 `VSCE_PAT` 自动发布到 VS Code Marketplace。
 - 创建或更新 GitHub Release，并上传 `agents-gui-<version>.vsix`。
 - 将发布说明同步到 `docs` 分支，作为线上发布日志承接分支。
+
+自动发布到 VS Code Marketplace 前，需要在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 中新增 `VSCE_PAT`。该值应为 Azure DevOps Marketplace Personal Access Token，并且需要有管理/发布 VS Code 扩展的权限。
 
 本地发布流程：
 

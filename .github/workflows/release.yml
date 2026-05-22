@@ -75,6 +75,26 @@ jobs:
       - name: Package VSIX
         run: npm run package
 
+      - name: Validate VS Code Marketplace token
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        shell: bash
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::Missing VSCE_PAT repository secret. Create an Azure DevOps Marketplace Personal Access Token and save it as GitHub secret VSCE_PAT."
+            exit 1
+          fi
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          npx --yes @vscode/vsce publish \
+            --packagePath "agents-gui-${VERSION}.vsix" \
+            --pat "$VSCE_PAT"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
