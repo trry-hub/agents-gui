@@ -1479,7 +1479,7 @@ textarea:focus {
 
 .context-row {
   min-width: 0;
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: flex-start;
 }
@@ -3386,6 +3386,18 @@ body[data-provider="codex"] .prompt-selectors {
   align-items: center;
 }
 
+body[data-provider="codex"] .attach-button,
+body[data-provider="codex"] .composer-settings-button,
+body[data-provider="codex"] .composer-meta,
+body[data-provider="codex"] .mode-menu.is-default:not([open]),
+body[data-provider="codex"] .permission-menu.is-default:not([open]) {
+  display: none;
+}
+
+body[data-provider="codex"] .composer:has(.attachment-strip:not([hidden])) .attach-button {
+  display: inline-grid;
+}
+
 body[data-provider="codex"] .attach-button {
   order: 1;
   width: 24px;
@@ -3452,6 +3464,14 @@ body[data-provider="codex"] .model-menu .option-summary {
 
 body[data-provider="codex"] .mode-summary {
   border-radius: 999px;
+}
+
+body[data-provider="codex"] .composer-footer:has(.runtime-menu.is-default:not([open])) {
+  display: none;
+}
+
+body[data-provider="codex"] .context-row {
+  display: none;
 }
 
 body[data-provider="codex"] .prompt-tools {
@@ -4600,7 +4620,8 @@ body[data-provider="opencode"] .slash-footer {
 .mode-option-list .option-list-item:hover,
 .mode-option-list .option-list-item:focus-visible {
   background: color-mix(in srgb, var(--assistant-hover) 72%, transparent);
-  outline: none;
+  outline: 1px solid var(--assistant-accent);
+  outline-offset: -1px;
 }
 
 .mode-option-list .option-list-item.is-selected {
@@ -4646,7 +4667,8 @@ body[data-provider="opencode"] .slash-footer {
 .model-option-list .option-list-item:hover,
 .model-option-list .option-list-item:focus-visible {
   background: color-mix(in srgb, var(--assistant-hover) 72%, transparent);
-  outline: none;
+  outline: 1px solid var(--assistant-accent);
+  outline-offset: -1px;
 }
 
 .model-option-list .option-list-item.is-selected {
@@ -4684,7 +4706,8 @@ body[data-provider="opencode"] .slash-footer {
 .option-list-item:hover,
 .option-list-item:focus-visible {
   background: var(--vscode-quickInputList-focusBackground, var(--assistant-hover));
-  outline: none;
+  outline: 1px solid var(--assistant-accent);
+  outline-offset: -1px;
 }
 
 .option-list-item span {

@@ -1,5 +1,7 @@
 # Agents GUI Comprehensive QA Matrix - 2026-05-21
 
+Last full-spectrum rerun: 2026-05-22.
+
 This matrix expands the initial smoke QA into release-style coverage. Status values:
 
 - Manual pass: verified in the live VS Code Extension Development Host with Computer Use.
@@ -38,6 +40,41 @@ This matrix expands the initial smoke QA into release-style coverage. Status val
 | AGUI-018 | Missing provider | Select unavailable provider path | Input is disabled and install/configure guidance is visible | Source/UI test coverage | Automated pass |
 | AGUI-019 | Provider persistence | Reload webview after selecting provider | Last provider is restored | Persistent selection tests | Automated pass |
 | AGUI-020 | Provider status | Provider running/preparing/completed status | Status text is displayed in transcript/status areas, not inside composer controls | Provider status tests | Automated pass |
+
+## Codex Provider Dedicated Coverage
+
+| ID | Area | Case | Expected | Verification | Status |
+| --- | --- | --- | --- | --- | --- |
+| AGUI-CX-001 | Codex CLI | Profile command and prompt delivery | Uses `codex -a never exec --color never --ephemeral` and passes the prompt as an argument | `promptBuilder.test.mjs` Codex profile test | Automated pass |
+| AGUI-CX-002 | Codex CLI | Default model and model arguments | Defaults to `gpt-5.4`; known/custom models map to `--model` arguments | `promptBuilder.test.mjs` model option test | Automated pass |
+| AGUI-CX-003 | Codex CLI | Runtime modes | Local mode is selectable; Codex web/quota are action-only; cloud handoff stays disabled | Runtime option tests/source review | Automated pass |
+| AGUI-CX-004 | Codex CLI | Permission modes | Read-only/workspace/full-auto/danger modes map to the intended Codex flags | `promptBuilder.test.mjs` permission test | Automated pass |
+| AGUI-CX-005 | Codex CLI | Agent modes and routing | Build/plan/review modes exist and routing scores recommend Codex for implementation/review | Task routing tests/source review | Automated pass |
+| AGUI-CX-006 | Codex CLI | Command lookup through login shell | nvm-installed `codex` is discoverable through interactive login zsh and startup noise is stripped | CLI lookup/path resolver tests | Automated pass |
+| AGUI-CX-007 | Codex Setup | Install guidance | Missing Codex guidance points to `npm install -g @openai/codex` and disables send until installed | Source inspection | Static pass |
+| AGUI-CX-008 | Codex UI | Provider icon tab | Codex uses the packaged provider icon in light and dark icon slots | Provider icon regression test | Automated pass |
+| AGUI-CX-009 | Codex UI | Codex composer shell | Codex-selected composer uses the compact Codex style without nested toolbar borders | Codex composer CSS test | Automated pass |
+| AGUI-CX-010 | Codex UI | Terminal banner markup and copy | Running banner, stop button, details button, and EN/ZH copy are present | Webview/i18n regression test | Automated pass |
+| AGUI-CX-011 | Codex UI | Runtime menu presentation | Runtime menu renders one layer, shows external/action-only affordances, and localizes Codex labels | Runtime menu tests | Automated pass |
+| AGUI-CX-012 | Codex UI | Permission menu presentation | Codex permission menu hides unselected read-only, preserves dangerous-state warning color, and keeps layout stable | Permission menu tests | Automated pass |
+| AGUI-CX-013 | Codex UI | Model/menu ordering | Codex model controls remain in the compact composer footer and do not push the send button | Codex composer CSS test | Automated pass |
+| AGUI-CX-014 | Codex UI | Theme asset readiness | Codex provider asset is packaged for both light/dark slots; full dark-theme visual pass still belongs to AGUI-127 | Manifest/source inspection | Static pass |
+| AGUI-CX-015 | Codex Interaction | Terminal banner visibility | Banner is shown only when Codex is active and running, and hidden when the task board is visible | Webview render test | Automated pass |
+| AGUI-CX-016 | Codex Interaction | Terminal banner stop | Banner stop button routes to the same active-provider stop path as the composer stop button | Source inspection | Static pass |
+| AGUI-CX-017 | Codex Interaction | Terminal details | Details button opens the Codex provider extension bridge instead of spawning another CLI run | Provider bridge test/source | Automated pass |
+| AGUI-CX-018 | Codex Interaction | Provider extension commands | Codex bridge targets `openai.chatgpt` and tries `chatgpt.newCodexPanel` then `chatgpt.openSidebar` | Provider bridge regression test | Automated pass |
+| AGUI-CX-019 | Codex Interaction | Slash native commands | Native slash commands are provider-scoped to Codex when Codex is active | Slash provider test | Automated pass |
+| AGUI-CX-020 | Codex Interaction | Real Codex prompt send | A real prompt creates exactly one running assistant item and one final response | Live Codex CLI run | Not run |
+| AGUI-CX-021 | Codex Usability | Local-first runtime copy | The default runtime communicates local processing and avoids implying cloud upload | Runtime profile/source review | Static pass |
+| AGUI-CX-022 | Codex Usability | Dangerous permission warning | Dangerous mode carries explicit warning copy and danger metadata | Permission profile/source review | Static pass |
+| AGUI-CX-023 | Codex Usability | SCM provider option | Commit-message settings accept Codex as a provider option without storing invalid disabled mapping | Commit/settings tests | Automated pass |
+| AGUI-CX-024 | Codex Data | Option argument composition | Model, custom model, runtime fallback, and permission flags compose into the final Codex CLI args | `buildCliOptionArgs` tests | Automated pass |
+| AGUI-CX-025 | Codex Data | Token budget metadata | Codex declares OpenAI `o200k_base`, `258000` context tokens, and auto-compaction metadata | Source inspection | Static pass |
+| AGUI-CX-026 | Codex Data | Output JSON error cleanup | Raw Codex JSON errors become readable one-line errors | Output formatter test | Automated pass |
+| AGUI-CX-027 | Codex Data | Output noise cleanup | Codex telemetry, startup noise, and Cloudflare challenge HTML do not pollute transcript | Output formatter tests/source | Automated pass |
+| AGUI-CX-028 | Codex Stability | No ANSI color contract | `--color never` prevents ANSI-heavy Codex output from destabilizing transcript rendering | Codex profile test | Automated pass |
+| AGUI-CX-029 | Codex Stability | Codex web/quota actions | Codex web connection and quota buttons open the provider extension bridge without mutating local run state | Runtime action regression test | Automated pass |
+| AGUI-CX-030 | Codex Stability | Real ChatGPT extension bridge | The bridge opens the installed ChatGPT/Codex VS Code extension on the user's Extension Host | Requires installed/enabled `openai.chatgpt` extension | Not run |
 
 ## Composer, Controls, And Input
 
@@ -188,6 +225,7 @@ This matrix expands the initial smoke QA into release-style coverage. Status val
 | AGUI-128 | Motion | Reduced motion | Decorative motion is reduced when requested | CSS test | Automated pass |
 | AGUI-129 | Accessibility | Keyboard focus | Focus order reaches provider tabs, settings, composer, menus | Manual keyboard pass | Not run |
 | AGUI-130 | Accessibility | Screen reader names | Buttons/menus expose meaningful labels | Accessibility tree review | Manual pass |
+| AGUI-151 | Accessibility | Custom menu hidden selects | Visually hidden native selects are skipped by Tab, and focus lands on visible menu items with an outline | Found and fixed; Node regression + Playwright preview | Fixed |
 
 ## Internationalization And Copy
 
@@ -221,5 +259,5 @@ This matrix expands the initial smoke QA into release-style coverage. Status val
 | AGUI-146 | Publish | `npm run build:test` | TypeScript emits test dist successfully | Command run | Static pass |
 | AGUI-147 | Publish | `npm test` | Full regression suite passes | Command run | Static pass |
 | AGUI-148 | Publish | `git diff --check` | No whitespace errors | Command run | Static pass |
-| AGUI-149 | Publish | Repackage VSIX after fixes | Current artifact includes latest `media/main.js` | `npm run package` output | Static pass |
+| AGUI-149 | Publish | Repackage VSIX after fixes | Current artifact includes latest webview HTML/CSS/JS assets | `npm run package` output | Static pass |
 | AGUI-150 | Publish | Marketplace upload | Upload current VSIX with valid publisher/PAT | Requires Marketplace credentials | Not run |

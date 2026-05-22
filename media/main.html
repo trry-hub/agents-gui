@@ -26,6 +26,7 @@
       <div class="toolbar-main">
         <div class="toolbar-session">
           <div class="provider-tabs" id="providerTabs" role="tablist" aria-label="Provider tabs" data-i18n-aria="provider.label"></div>
+          <div class="provider-hint" id="providerHint" aria-live="polite"></div>
           <label class="thread-select">
             <span class="sr-only" data-i18n="history.label"></span>
             <select id="threadSelect" name="assistantThread" autocomplete="off" data-i18n-title="history.label"></select>
@@ -34,7 +35,6 @@
             <span class="sr-only" data-i18n="provider.label"></span>
             <select id="providerSelect" name="assistantProvider" autocomplete="off"></select>
           </label>
-          <div class="provider-hint" id="providerHint" aria-live="polite"></div>
         </div>
         <div class="toolbar-cluster">
           <div class="toolbar-actions" role="toolbar" aria-label="Conversation actions" data-i18n-aria="toolbar.actions">
@@ -275,7 +275,7 @@
               <div class="option-popover option-popover-single" aria-label="Model" data-i18n-aria="model.label">
                 <label class="select-field agent-select native-option-field">
                   <span class="sr-only" data-i18n="model.label"></span>
-                  <select id="modelSelect" name="assistantModel" autocomplete="off"></select>
+                  <select id="modelSelect" name="assistantModel" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
                 </label>
                 <div class="option-list model-option-list" id="modelOptionList" role="menu"></div>
                 <label class="custom-model-field" id="customModelField" hidden>
@@ -294,7 +294,7 @@
               <div class="option-popover option-popover-single" aria-label="Permission" data-i18n-aria="permission.label">
                 <label class="select-field agent-select native-option-field">
                   <span class="sr-only" data-i18n="permission.label"></span>
-                  <select id="permissionSelect" name="assistantPermission" autocomplete="off"></select>
+                  <select id="permissionSelect" name="assistantPermission" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
                 </label>
                 <div class="option-list permission-option-list" id="permissionOptionList" role="menu"></div>
               </div>
@@ -306,7 +306,7 @@
               <div class="mode-popover option-popover-single" aria-label="Provider agent" data-i18n-aria="agentMode.label">
                 <label class="select-field agent-select native-option-field">
                   <span class="sr-only" data-i18n="agentMode.label"></span>
-                  <select id="agentModeSelect" name="assistantAgentMode" autocomplete="off"></select>
+                  <select id="agentModeSelect" name="assistantAgentMode" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
                 </label>
                 <div class="option-list mode-option-list" id="agentModeOptionList" role="menu"></div>
               </div>
@@ -372,7 +372,7 @@
             <div class="option-popover option-popover-single" aria-label="Runtime" data-i18n-aria="runtime.label">
               <label class="select-field agent-select native-option-field">
                 <span class="sr-only" data-i18n="runtime.label"></span>
-                <select id="runtimeSelect" name="assistantRuntime" autocomplete="off"></select>
+                <select id="runtimeSelect" name="assistantRuntime" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
               </label>
               <div class="option-list runtime-option-list" id="runtimeOptionList" role="menu"></div>
             </div>

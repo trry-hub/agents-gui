@@ -66,6 +66,7 @@ const OPEN_CODE_PROMPT_POLL_INTERVAL_MS = 800;
 const OPEN_CODE_PROMPT_TIMEOUT_MS = 120_000;
 const OPEN_CODE_REQUEST_TIMEOUT_MS = 30_000;
 const OPEN_CODE_SERVER_READY_TIMEOUT_MS = 20_000;
+const PROCESS_TERMINATE_GRACE_MS = 1500;
 
 interface OpenCodeEventStream {
   close(): void;
@@ -85,6 +86,7 @@ export class CliManager {
   private counters = new Map<string, number>();
   private commandPathCache = new Map<string, string>();
   private backgroundServers = new Map<string, BackgroundServerState>();
+  private forceKillTimers = new WeakMap<ChildProcess, NodeJS.Timeout>();
 
   getWorkspaceRoot(): string {
     const folders = vscode.workspace.workspaceFolders;
@@ -576,6 +578,7 @@ export class CliManager {
     const proc = spawn(command, args, {
       cwd,
       env,
+      detached: process.platform !== 'win32',
       stdio: [profile.inputMode === 'stdin' ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
 
@@ -611,6 +614,7 @@ export class CliManager {
 
     proc.on('close', (code) => {
       session.eventStream?.close();
+      this.killChildProcessTree(proc, 'SIGTERM');
       session.onEnd.fire(code ?? -1);
       this.sessions.delete(sessionId);
     });
@@ -660,7 +664,7 @@ export class CliManager {
     if (!session) { return; }
     try {
       session.eventStream?.close();
-      session.process.kill('SIGTERM');
+      this.terminateChildProcess(session.process);
     } catch {
       // process may already be dead
     }
@@ -928,7 +932,7 @@ export class CliManager {
     for (const server of this.resolveBackgroundServerCandidates(profile, cwd)) {
       const state = this.backgroundServers.get(server.key);
       const ownedProcess =
-        state?.process && state.process.exitCode === null && !state.process.killed;
+        state?.process && this.isChildProcessRunning(state.process);
 
       if (ownedProcess && await this.waitForTcp(server.host, server.port, 120)) {
         return server.attachArgs;
@@ -2125,24 +2129,33 @@ export class CliManager {
     port: number
   ): Promise<boolean> {
     const current = this.backgroundServers.get(key);
-    if (current?.process && current.process.exitCode === null && !current.process.killed) {
-      return this.waitForTcp(host, port, 1800);
+    if (current?.process && this.isChildProcessRunning(current.process)) {
+      const ready = await this.waitForTcp(host, port, 1800);
+      if (ready) {
+        return true;
+      }
+      this.terminateChildProcess(current.process);
+      this.backgroundServers.delete(key);
     }
 
+    let proc: ChildProcess | undefined;
     try {
-      const proc = spawn(command, args, {
+      proc = spawn(command, args, {
         cwd,
         env,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'ignore', 'ignore'],
       });
+      const backgroundProc = proc;
 
       const state = this.backgroundServers.get(key) ?? {};
-      state.process = proc;
+      state.process = backgroundProc;
       this.backgroundServers.set(key, state);
 
       const clearState = () => {
+        this.killChildProcessTree(backgroundProc, 'SIGTERM');
         const latest = this.backgroundServers.get(key);
-        if (latest?.process === proc) {
+        if (latest?.process === backgroundProc) {
           this.backgroundServers.delete(key);
         }
       };
@@ -2160,6 +2173,9 @@ export class CliManager {
       if (state) {
         state.starting = undefined;
       }
+      if (proc) {
+        this.terminateChildProcess(proc);
+      }
     }
 
     return ready;
@@ -2167,17 +2183,76 @@ export class CliManager {
 
   private stopBackgroundServers(): void {
     for (const [, state] of this.backgroundServers) {
-      if (!state.process || state.process.killed) {
+      if (!state.process || !this.isChildProcessRunning(state.process)) {
         continue;
       }
 
       try {
-        state.process.kill('SIGTERM');
+        this.terminateChildProcess(state.process);
       } catch {
         // background process may already be dead
       }
     }
     this.backgroundServers.clear();
+  }
+
+  private terminateChildProcess(proc: ChildProcess): void {
+    if (!this.isChildProcessRunning(proc)) {
+      return;
+    }
+
+    this.killChildProcessTree(proc, 'SIGTERM');
+    if (this.forceKillTimers.has(proc)) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.forceKillTimers.delete(proc);
+      this.killChildProcessTree(proc, 'SIGKILL');
+    }, PROCESS_TERMINATE_GRACE_MS);
+    this.forceKillTimers.set(proc, timer);
+  }
+
+  private killChildProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
+    if (!proc.pid) {
+      try {
+        proc.kill(signal);
+      } catch {
+        // process may already be dead
+      }
+      return;
+    }
+
+    if (process.platform === 'win32') {
+      const args = ['/pid', String(proc.pid), '/T'];
+      if (signal === 'SIGKILL') {
+        args.push('/F');
+      }
+      try {
+        spawn('taskkill', args, { stdio: 'ignore', windowsHide: true });
+      } catch {
+        try {
+          proc.kill(signal);
+        } catch {
+          // process may already be dead
+        }
+      }
+      return;
+    }
+
+    try {
+      process.kill(-proc.pid, signal);
+    } catch {
+      try {
+        proc.kill(signal);
+      } catch {
+        // process may already be dead
+      }
+    }
+  }
+
+  private isChildProcessRunning(proc: ChildProcess): boolean {
+    return proc.exitCode === null && proc.signalCode === null;
   }
 
   private getTcpTarget(urlText: string): { host: string; port: number } | undefined {

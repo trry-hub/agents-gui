@@ -44,6 +44,12 @@
   const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
   const OPENCODE_OPTION_DIALOG_KINDS = new Set(['sessions', 'models', 'agents']);
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
+  const DEFAULT_CONTEXT_OPTIONS = Object.freeze({
+    includeWorkspace: true,
+    includeCurrentFile: true,
+    includeSelection: true,
+    includeDiagnostics: true,
+  });
 
   const saved = vscode.getState() || {};
   let profiles = [];
@@ -71,12 +77,7 @@
   let threadsByProvider = normalizeSavedThreads(saved.threadsByProvider, saved.conversations);
   let tasks = normalizeSavedTasks(saved.tasks);
   let activeThreadByProvider = saved.activeThreadByProvider || {};
-  let contextOptions = saved.contextOptions || {
-    includeWorkspace: true,
-    includeCurrentFile: true,
-    includeSelection: true,
-    includeDiagnostics: true,
-  };
+  let contextOptions = { ...DEFAULT_CONTEXT_OPTIONS };
   let contextSummary = null;
   let streamTargets = {};
   let taskBySessionId = {};
@@ -483,7 +484,7 @@
       threadsByProvider: serializeThreadsForState(threadsByProvider),
       tasks: serializeTasksForState(tasks),
       activeThreadByProvider,
-      contextOptions,
+      contextOptions: defaultContextOptions(),
     });
     schedulePersistUserSelection();
   }
@@ -522,7 +523,7 @@
       customModelByProvider,
       activeRuntimeByProvider,
       activePermissionByProvider,
-      contextOptions,
+      contextOptions: defaultContextOptions(),
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
     });
@@ -2241,7 +2242,7 @@
     if (!activeId) {
       return;
     }
-    vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId() });
+    vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
   }
 
   function switchActiveProvider(providerId) {
@@ -2365,6 +2366,10 @@
 
   function actionRequiresSelection(action) {
     return action === 'explainSelection' || action === 'refactorSelection';
+  }
+
+  function defaultContextOptions() {
+    return { ...DEFAULT_CONTEXT_OPTIONS };
   }
 
   function actionLabel(action) {
@@ -2566,7 +2571,7 @@
         return;
       case 'refresh':
         vscode.postMessage({ command: 'checkProfiles' });
-        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId() });
+        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
         return;
       case 'stop':
         if (runningByProvider[activeId]) {
@@ -2601,7 +2606,7 @@
       case 'mcp':
         closeComposerMenus();
         showOpenCodeStatusDialog('mcp');
-        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId() });
+        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
         return;
       case 'variants':
         closeComposerMenus();
@@ -2618,7 +2623,7 @@
       case 'status':
         closeComposerMenus();
         showOpenCodeStatusDialog('status');
-        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId() });
+        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
         return;
       case 'themes':
         closeComposerMenus();
@@ -5020,6 +5025,10 @@
     );
     runtimeMenu?.classList.toggle('is-visible', Boolean(profile && options.length > 1));
     runtimeMenu?.classList.toggle('is-danger', Boolean(runtime?.dangerous));
+    runtimeMenu?.classList.toggle(
+      'is-default',
+      Boolean(profile && runtime?.id === normalizeOptionId(profile, profile?.defaultRuntime, 'runtimeModes', 'defaultRuntime', 'runtime.short'))
+    );
   }
 
   function renderPermissionSelect() {
@@ -5040,6 +5049,10 @@
     );
     permissionMenu?.classList.toggle('is-visible', Boolean(profile && options.length > 1));
     permissionMenu?.classList.toggle('is-danger', Boolean(permission.dangerous));
+    permissionMenu?.classList.toggle(
+      'is-default',
+      Boolean(profile && permission?.id === normalizeOptionId(profile, profile?.defaultPermissionMode, 'permissionModes', 'defaultPermissionMode', 'permission.short'))
+    );
   }
 
   function renderAgentModeSelect() {
@@ -5072,6 +5085,10 @@
       );
     }
     modeMenu?.classList.toggle('is-visible', Boolean(profile && (profile?.id === 'opencode' || modes.length > 1)));
+    modeMenu?.classList.toggle(
+      'is-default',
+      Boolean(profile && mode?.id === normalizeAgentModeId(profile, profile?.defaultAgentMode))
+    );
   }
 
   function renderAgentModeOptionList(modes, selectedId) {
@@ -5157,6 +5174,12 @@
     runtimeSelect.disabled = !canSend || busy;
     permissionSelect.disabled = !canSend || busy;
     agentModeSelect.disabled = !canSend || busy;
+    if (attachImageBtn) {
+      attachImageBtn.disabled = !canSend || busy;
+    }
+    if (imageFileInput) {
+      imageFileInput.disabled = !canSend || busy;
+    }
     modelOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
       button.disabled = !canSend || busy;
     });
@@ -5299,7 +5322,7 @@
       action,
       attachments,
       conversationHistory: conversationHistoryForSend(providerId),
-      contextOptions,
+      contextOptions: defaultContextOptions(),
     });
     return true;
   }
@@ -7410,6 +7433,10 @@
   });
 
   attachImageBtn?.addEventListener('click', () => {
+    if (attachImageBtn.disabled || imageFileInput?.disabled) {
+      return;
+    }
+
     imageFileInput?.click();
   });
 
@@ -7661,7 +7688,17 @@
 
   runtimeOptionList?.addEventListener('click', (event) => {
     const button = event.target.closest('.option-list-item');
-    if (!button || button.disabled || button.classList.contains('is-action')) {
+    if (!button || button.disabled) {
+      return;
+    }
+
+    if (button.classList.contains('is-action')) {
+      runtimeMenu.open = false;
+      vscode.postMessage({
+        command: 'openProviderExtension',
+        cliId: activeId,
+        runtimeAction: button.dataset.value,
+      });
       return;
     }
 
@@ -7693,7 +7730,7 @@
 
   document.querySelectorAll('[data-context]').forEach((checkbox) => {
     checkbox.addEventListener('change', () => {
-      contextOptions[checkbox.dataset.context] = checkbox.checked;
+      contextOptions = defaultContextOptions();
       persist();
       refreshActiveContext();
       renderContextSummaryLabel();
@@ -7873,9 +7910,7 @@
           activePermissionByProvider = hasAppliedPersistentSelection
             ? { ...storedPermissions, ...activePermissionByProvider }
             : { ...activePermissionByProvider, ...storedPermissions };
-          if (!hasAppliedPersistentSelection && message.contextOptions) {
-            contextOptions = { ...contextOptions, ...message.contextOptions };
-          }
+          contextOptions = defaultContextOptions();
           if (!hasAppliedPersistentSelection) {
             claudeTerminalBannerDismissed = Boolean(message.claudeTerminalBannerDismissed);
             taskBoardDismissed = Boolean(message.taskBoardDismissed);

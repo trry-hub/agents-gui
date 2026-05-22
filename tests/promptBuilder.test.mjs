@@ -614,6 +614,15 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /stableHash\(`\$\{profileId\}:\$\{cwd\}`\)/);
   assert.match(source, /private async waitForTcp/);
   assert.match(source, /private stopBackgroundServers/);
+  assert.match(source, /detached:\s*process\.platform !== 'win32'/);
+  assert.match(source, /PROCESS_TERMINATE_GRACE_MS/);
+  assert.match(source, /terminateChildProcess\(session\.process\)/);
+  assert.match(source, /terminateChildProcess\(state\.process\)/);
+  assert.match(source, /terminateChildProcess\(proc\)/);
+  assert.match(source, /proc\.on\('close', \(code\) => \{[\s\S]*?killChildProcessTree\(proc, 'SIGTERM'\)/);
+  assert.match(source, /const clearState = \(\) => \{[\s\S]*?killChildProcessTree\(backgroundProc, 'SIGTERM'\)/);
+  assert.match(source, /process\.kill\(-proc\.pid,\s*signal\)/);
+  assert.match(source, /spawn\('taskkill', args, \{ stdio: 'ignore', windowsHide: true \}\)/);
   assert.match(sidebarSource, /const newSession = await this\.cliManager\.startPrompt/);
   assert.match(sidebarSource, /openCodeSessionId: session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
   assert.match(sidebarSource, /case 'openCodeNativeCommand':/);
@@ -970,6 +979,11 @@ test('webview renders the Codex local mode menu like Code X', () => {
   assert.match(script, /displayRuntime\.summaryLabel \|\| displayRuntime\.label/);
   assert.match(script, /function selectableOption\(option\)/);
   assert.match(script, /return !option\?\.disabled && !option\?\.actionOnly;/);
+  assert.match(script, /if \(!button \|\| button\.disabled\) \{/);
+  assert.match(script, /if \(button\.classList\.contains\('is-action'\)\) \{/);
+  assert.match(script, /runtimeMenu\.open = false;/);
+  assert.match(script, /runtimeAction: button\.dataset\.value/);
+  assert.doesNotMatch(script, /button\.disabled \|\| button\.classList\.contains\('is-action'\)\) \{/);
   assert.match(css, /\.runtime-option-list\s*\{/);
   assert.match(css, /\.runtime-option-list \.option-list-item\s*\{/);
   assert.match(css, /\.option-list-item-trailing\s*\{/);
@@ -1015,6 +1029,9 @@ test('webview renders model selection as a single-layer menu', () => {
   assert.match(css, /\.mode-option-list \.option-list-item::before\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /\.model-option-list \.option-list-item:hover,\s*\.model-option-list \.option-list-item:focus-visible\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--assistant-hover\) 72%, transparent\);/s);
   assert.match(css, /\.mode-option-list \.option-list-item:hover,\s*\.mode-option-list \.option-list-item:focus-visible\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--assistant-hover\) 72%, transparent\);/s);
+  assert.match(css, /\.option-list-item:hover,\s*\.option-list-item:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--assistant-accent\);/s);
+  assert.match(css, /\.model-option-list \.option-list-item:hover,\s*\.model-option-list \.option-list-item:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--assistant-accent\);/s);
+  assert.match(css, /\.mode-option-list \.option-list-item:hover,\s*\.mode-option-list \.option-list-item:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--assistant-accent\);/s);
   assert.match(css, /\.model-option-item\.is-selected \.model-option-check\s*\{/);
   assert.match(css, /\.mode-option-item\.is-selected \.mode-option-marker\s*\{/);
   assert.match(css, /\.model-menu \.custom-model-field\s*\{/);
@@ -1061,6 +1078,7 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible,\s*body\[data-provider="opencode"\] \.mode-menu\.is-visible/s);
   assert.match(css, /body\[data-provider="opencode"\] \.model-menu \.option-summary::before\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(html, /class="context-row"[\s\S]*class="context-menu"/);
+  assert.match(css, /\.context-row\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(html, /<aside class="sidebar" id="sidebar"/);
   assert.match(i18nScript, /'sidebar\.mcp': 'MCP'/);
   assert.match(i18nScript, /'sidebar\.lsp': 'LSP'/);
@@ -1260,6 +1278,15 @@ test('webview renders a Codex style composer when Codex is selected', () => {
   assert.match(css, /body\[data-provider="codex"\] \.permission-menu\.is-visible\s*\{\s*[^}]*order:\s*2;/s);
   assert.match(css, /body\[data-provider="codex"\] \.permission-menu \.option-summary\s*\{\s*[^}]*color:\s*var\(--vscode-foreground\);/s);
   assert.match(css, /body\[data-provider="codex"\] \.permission-menu\.is-danger \.option-summary\s*\{\s*[^}]*color:\s*var\(--vscode-inputValidation-warningForeground, #b87500\);/s);
+  assert.match(css, /body\[data-provider="codex"\] \.composer-settings-button,/);
+  assert.match(css, /body\[data-provider="codex"\] \.mode-menu\.is-default:not\(\[open\]\),/);
+  assert.match(css, /body\[data-provider="codex"\] \.permission-menu\.is-default:not\(\[open\]\)\s*\{[\s\S]*?display:\s*none;/s);
+  assert.doesNotMatch(css, /body\[data-provider="codex"\][^{]*:hover[^{]*\{[\s\S]*?display:\s*(?:inline-grid|block|flex)/);
+  assert.match(css, /body\[data-provider="codex"\] \.composer-footer:has\(\.runtime-menu\.is-default:not\(\[open\]\)\)\s*\{[\s\S]*?display:\s*none;/s);
+  assert.match(css, /body\[data-provider="codex"\] \.context-row\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(script, /runtimeMenu\?\.classList\.toggle\(\s*'is-default'/);
+  assert.match(script, /permissionMenu\?\.classList\.toggle\(\s*'is-default'/);
+  assert.match(script, /modeMenu\?\.classList\.toggle\(\s*'is-default'/);
   assert.match(css, /body\[data-provider="codex"\] \.composer-meta\s*\{\s*[^}]*margin-left:\s*auto;/s);
   assert.match(css, /body\[data-provider="codex"\] \.model-menu\.is-visible\s*\{\s*[^}]*order:\s*7;/s);
   assert.match(css, /body\[data-provider="codex"\] \.send-button\s*\{\s*[^}]*background:\s*#8f8f8f;/s);
@@ -1342,6 +1369,9 @@ test('webview supports pasted image attachments in the composer', () => {
   assert.match(html, /id="attachImageBtn"/);
   assert.match(html, /id="imageFileInput"[^>]*accept="image\/\*"/);
   assert.match(script, /let promptAttachments = \[\];/);
+  assert.match(script, /attachImageBtn\.disabled = !canSend \|\| busy;/);
+  assert.match(script, /imageFileInput\.disabled = !canSend \|\| busy;/);
+  assert.match(script, /if \(attachImageBtn\.disabled \|\| imageFileInput\?\.disabled\) \{/);
   assert.match(script, /input\.addEventListener\('paste'/);
   assert.match(script, /event\.clipboardData\?\.items/);
   assert.match(script, /function addImageFiles/);
@@ -1401,7 +1431,7 @@ test('webview renders installed provider logo tabs in the header', () => {
   const titleActions = manifest.contributes.menus['view/title'] || [];
 
   assert.match(html, /<div class="toolbar-session">[\s\S]*<div class="provider-tabs" id="providerTabs" role="tablist" aria-label="Provider tabs"/);
-  assert.match(html, /<div class="provider-tabs" id="providerTabs"[\s\S]*<\/div>\s*<label class="thread-select">/);
+  assert.match(html, /<div class="provider-tabs" id="providerTabs"[\s\S]*<\/div>\s*<div class="provider-hint" id="providerHint" aria-live="polite"><\/div>\s*<label class="thread-select">/);
   assert.doesNotMatch(html, /<div class="toolbar-session">\s*<div class="brand-mark"/);
   assert.doesNotMatch(html, /<div class="toolbar-actions"[\s\S]*id="newChatBtn"[\s\S]*id="deleteThreadBtn"[\s\S]*<\/div>\s*<div class="provider-tabs" id="providerTabs"/);
   assert.doesNotMatch(html, /id="refreshBtn"/);
@@ -1480,6 +1510,23 @@ test('webview keeps provider switching in the header and out of the conversation
   assert.doesNotMatch(css, /\.composer-provider-dock/);
   assert.match(css, /\.context-budget\s*\{\s*[^}]*height:\s*22px;/s);
   assert.match(css, /\.context-budget\s*\{\s*[^}]*max-width:\s*48px;/s);
+});
+
+test('custom option menus keep hidden native selects out of the tab order', () => {
+  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
+  const hiddenSelectIds = [
+    'modelSelect',
+    'permissionSelect',
+    'agentModeSelect',
+    'runtimeSelect',
+  ];
+
+  for (const id of hiddenSelectIds) {
+    assert.match(
+      html,
+      new RegExp(`<select id="${id}"[^>]*tabindex="-1"[^>]*aria-hidden="true"`)
+    );
+  }
 });
 
 test('manifest exposes title actions and custom API provider settings', () => {
@@ -1781,7 +1828,9 @@ test('webview uses one primary composer action slot for send and stop', () => {
 test('webview refreshes context after a concrete provider is active', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
 
-  assert.match(script, /function refreshActiveContext\(\) \{\s*if \(!activeId\) \{\s*return;\s*\}\s*vscode\.postMessage\(\{ command: 'refreshContext', cliId: activeId, contextOptions, modelId: activeModelId\(\) \}\);\s*\}/);
+  assert.match(script, /const DEFAULT_CONTEXT_OPTIONS = Object\.freeze\(\{\s*includeWorkspace: true,\s*includeCurrentFile: true,\s*includeSelection: true,\s*includeDiagnostics: true,\s*\}\);/);
+  assert.match(script, /function defaultContextOptions\(\) \{\s*return \{ \.\.\.DEFAULT_CONTEXT_OPTIONS \};\s*\}/);
+  assert.match(script, /function refreshActiveContext\(\) \{\s*if \(!activeId\) \{\s*return;\s*\}\s*vscode\.postMessage\(\{ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions\(\), modelId: activeModelId\(\) \}\);\s*\}/);
   assert.match(script, /providerSelect\.addEventListener\('change', \(\) => \{[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*\}\);/);
   assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
@@ -2469,7 +2518,7 @@ test('agent mode select is persisted per provider', () => {
   assert.match(script, /customModelByProvider,/);
   assert.match(script, /activeRuntimeByProvider,/);
   assert.match(script, /activePermissionByProvider,/);
-  assert.match(script, /contextOptions,/);
+  assert.match(script, /contextOptions: defaultContextOptions\(\),/);
   assert.match(script, /persistedSelectionMap\(message\.activeAgentModeByProvider\)/);
   assert.match(script, /persistedSelectionMap\(message\.activeRuntimeByProvider\)/);
   assert.match(script, /message\.activeProviderId/);

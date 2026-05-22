@@ -1,5 +1,7 @@
 # Agents GUI Manual QA Report - 2026-05-21
 
+Automation rerun: 2026-05-22. Manual Computer Use observations remain from the 2026-05-21 pass; the latest automated/static/package and Playwright preview evidence is recorded in `full-spectrum-test-report.md`.
+
 ## Scope
 
 Runtime surface: existing VS Code Extension Development Host window, `[扩展开发宿主] 欢迎 — pc`.
@@ -10,16 +12,16 @@ Expanded matrix: `comprehensive-test-matrix.md`.
 
 ## Expanded Coverage Summary
 
-The broader release-style matrix now contains 150 cases:
+The broader release-style matrix now contains 181 cases:
 
-- 95 automated pass
-- 19 static pass
+- 117 automated pass
+- 25 static pass
 - 24 manual pass
-- 3 fixed during this QA pass
+- 4 fixed during this QA pass
 - 0 needs review
-- 9 not run
+- 11 not run
 
-The not-run cases are intentionally called out instead of being marked as passed because they require a clean VS Code install profile, live provider execution, theme switching, file picker interaction, or Marketplace credentials. Seven previously unexecuted low-risk cases were moved into automated/static coverage after the optimization pass.
+The not-run cases are intentionally called out instead of being marked as passed because they require a clean VS Code install profile, live provider execution, theme switching, file picker interaction, or Marketplace credentials. Eight previously unexecuted low-risk cases were moved into automated/static coverage after the optimization pass, including the Codex web/quota action bridge.
 
 ## Test Matrix
 
@@ -54,6 +56,8 @@ The not-run cases are intentionally called out instead of being marked as passed
 | QA-27 | Settings show all | Click Show all in Agent settings | Hidden agents are revealed, ordering resets locally, and the user sees a save-required note | Automated regression | Pass |
 | QA-28 | Commit settings reset | Click reset in commit settings | Provider/language/maxDiff return to `default`/`auto`/`60000` and save is requested | Automated regression | Pass |
 | QA-29 | Local OpenCode option menus | Run `/sessions`, `/models`, `/agents` | Opens modal option dialogs with keyboard/ARIA guards and does not start a provider run | Automated regression | Pass |
+| QA-30 | Codex runtime actions | Click Codex web/quota runtime entries | Opens the provider extension bridge without changing selected runtime | Automated regression | Pass |
+| QA-31 | Custom menu keyboard focus | Open Codex runtime menu and press `Tab` | Focus skips hidden native select and lands on a visible menu item with outline | Playwright preview + automated regression | Pass |
 
 ## Findings
 
@@ -97,11 +101,19 @@ Severity: Quality hardening
 
 The report had several `Not run` items that did not actually need a live provider or destructive state mutation. This pass moved provider refresh, long prompt layout, local OpenCode option dialogs, cancel deletion, Agent reorder/show-all, and commit settings reset into automated/static checks.
 
-Fix: added focused source/CSS tests and small UI guards for long prompt scroll behavior, settings feedback, and OpenCode dialog accessibility.
+Fix: added focused source/CSS tests and small UI guards for long prompt scroll behavior, settings feedback, OpenCode dialog accessibility, Codex runtime actions, attachment disabled state, and composer menu keyboard focus.
+
+### AGQA-04 - Hidden native selects could capture keyboard focus
+
+Severity: P2
+
+During the 2026-05-22 preview rerun, opening the Codex runtime menu and pressing `Tab` moved focus to a visually hidden native `select`, so the user would not see a useful focus target.
+
+Fix: hidden fallback selects for model, permission, agent mode, and runtime are now `tabindex="-1"` and `aria-hidden="true"`. The visible custom menu buttons keep the keyboard focus and `focus-visible` outline.
 
 ## Limitations
 
-After opening native VS Code popup menus, Computer Use occasionally returned an empty accessibility tree until the window was refocused. I did not mark provider send, file picker, clean install, dark theme, full keyboard巡航, or Marketplace upload as passed; they remain listed as not run in the expanded matrix.
+After opening native VS Code popup menus, Computer Use occasionally returned an empty accessibility tree until the window was refocused, and the later Computer Use connection timed out during rerun. I did not mark provider send, file picker, clean install, dark theme, full keyboard巡航, or Marketplace upload as passed; they remain listed as not run in the expanded matrix.
 
 ## Verification Commands
 
