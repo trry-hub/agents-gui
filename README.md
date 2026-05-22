@@ -5,7 +5,7 @@
 
 **Agents GUI** 是一个面向 VS Code 的多 Agent 工作台。它把 Claude Code、Codex CLI、Gemini CLI、OpenCode、Goose 和 Aider 等外部编码 Agent 汇聚到同一个侧边栏里，并提供上下文感知提示词、CLI 配置管理、自定义 API 供应商桥接和原生 Git 提交信息生成能力。
 
-> **早期版本 v0.0.1。** 核心扩展逻辑和 Webview UI 已可用，后续会围绕真实工作流持续迭代。
+> **早期版本 v0.0.2。** 核心扩展逻辑和 Webview UI 已可用，后续会围绕真实工作流持续迭代。
 
 ---
 
@@ -102,6 +102,24 @@ npm test
 
 # 打包 VSIX
 npm run package
+```
+
+### 发布与变更日志
+
+本仓库使用 git tag 发布版本。推送 `v*` tag 后，`.github/workflows/release.yml` 会自动：
+
+- 运行测试和 VSIX 打包。
+- 根据历史 git commit 生成 release notes。
+- 创建或更新 GitHub Release，并上传 `agents-gui-<version>.vsix`。
+- 将发布说明同步到 `docs` 分支，作为线上发布日志承接分支。
+
+本地发布流程：
+
+```bash
+npm run changelog -- --version v0.0.2 --changelog CHANGELOG.md --release-notes dist/release-notes.md --docs-dir dist/release-docs
+npm run package
+git tag v0.0.2
+git push origin main v0.0.2
 ```
 
 ### 项目结构

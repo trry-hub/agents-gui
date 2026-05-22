@@ -1,0 +1,114 @@
+name: Release Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.0.2"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.version }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ "$tag" != v* ]]; then
+            tag="v${tag}"
+          fi
+
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag exists for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git rev-parse "${{ steps.release.outputs.tag }}" >/dev/null 2>&1; then
+            git tag "${{ steps.release.outputs.tag }}"
+            git push origin "${{ steps.release.outputs.tag }}"
+          fi
+
+      - name: Generate release notes and docs
+        run: |
+          npm run changelog -- \
+            --version "${{ steps.release.outputs.tag }}" \
+            --release-notes dist/release-notes.md \
+            --docs-dir dist/release-docs
+
+      - name: Test
+        run: npm test
+
+      - name: Package VSIX
+        run: npm run package
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          asset="agents-gui-${VERSION}.vsix"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$asset" --clobber
+            gh release edit "$TAG" --title "$TAG" --notes-file dist/release-notes.md --latest
+          else
+            gh release create "$TAG" "$asset" --title "$TAG" --notes-file dist/release-notes.md --latest
+          fi
+
+      - name: Publish changelog to docs branch
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          rm -rf .docs-worktree
+          if git ls-remote --exit-code --heads origin docs >/dev/null 2>&1; then
+            git fetch origin docs:refs/remotes/origin/docs
+            git worktree add .docs-worktree origin/docs
+          else
+            git worktree add --orphan -b docs .docs-worktree
+          fi
+
+          find .docs-worktree -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R dist/release-docs/. .docs-worktree/
+
+          git -C .docs-worktree add -A
+          git -C .docs-worktree commit -m "docs: update changelog for ${TAG}" || echo "No docs changes to commit"
+          git -C .docs-worktree push origin HEAD:docs
