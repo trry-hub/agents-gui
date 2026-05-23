@@ -73,6 +73,12 @@ interface GitExtension {
 
 type RuntimeLocale = 'en' | 'zh-CN';
 
+interface CommitMessageGenerationResult {
+  message: string;
+  profile: CliProfile;
+  fallbackFrom?: CliProfile;
+}
+
 const DEFAULT_CLI_ID = 'opencode';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 const COMMIT_MESSAGE_TIMEOUT_MS = 120_000;
@@ -102,6 +108,8 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     emptyOutput: 'The AI provider did not return a commit message.',
     generated: 'Commit message generated from staged changes.',
     generatedTruncated: 'Commit message generated from truncated staged changes.',
+    generatedWithFallback: 'Commit message generated with {provider} after {fallbackProvider} was unavailable.',
+    generatedTruncatedWithFallback: 'Commit message generated from truncated staged changes with {provider} after {fallbackProvider} was unavailable.',
     cancelled: 'Commit message generation was cancelled.',
     failed: 'Failed to generate commit message: {message}',
   },
@@ -128,6 +136,8 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     emptyOutput: 'AI 提供方没有返回提交信息。',
     generated: '已根据暂存区变更生成提交信息。',
     generatedTruncated: '已根据截断后的暂存区变更生成提交信息。',
+    generatedWithFallback: '已在 {fallbackProvider} 不可用后，降级使用 {provider} 生成提交信息。',
+    generatedTruncatedWithFallback: '已根据截断后的暂存区变更生成提交信息，并在 {fallbackProvider} 不可用后降级使用 {provider}。',
     cancelled: '已取消生成提交信息。',
     failed: '生成提交信息失败：{message}',
   },
@@ -164,7 +174,7 @@ export class CommitMessageCommand {
     this.currentCancellation = cancellation;
     let streamingRepository: GitRepository | undefined;
     let originalInputValue = '';
-    let wroteGeneratedMessage = false;
+    let completedGeneration = false;
 
     try {
       await vscode.commands.executeCommand('setContext', 'agents-gui.commitMessageGenerating', true);
@@ -196,10 +206,11 @@ export class CommitMessageCommand {
       );
       const inputMessage = repository.inputBox.value.trim();
       const prompt = buildCommitMessagePrompt({ diff, language, truncated, inputMessage });
-      const profile = await this.resolveReadyProfile(locale);
-      if (!profile) {
+      const primaryProfile = await this.resolveReadyProfile(locale);
+      if (!primaryProfile) {
         return;
       }
+      const profiles = await this.resolveGenerationProfiles(primaryProfile);
 
       streamingRepository = repository;
       originalInputValue = repository.inputBox.value;
@@ -207,30 +218,36 @@ export class CommitMessageCommand {
       const streamCommitMessage = (output: string) => {
         const partialMessage = this.cleanCommitMessageOutput(output, language, diff, inputMessage, true);
         if (partialMessage) {
-          wroteGeneratedMessage = true;
           repository.inputBox.value = partialMessage;
         }
       };
-      const message = await this.generateCommitMessageWithCancellation(
-        profile,
+      const result = await this.generateCommitMessageWithFallback(
+        profiles,
         prompt,
         repository.rootUri.fsPath,
         language,
         diff,
         streamCommitMessage,
+        () => {
+          repository.inputBox.value = '';
+        },
         inputMessage,
         cancellation.token,
         externalToken
       );
 
-      wroteGeneratedMessage = true;
-      repository.inputBox.value = message;
+      completedGeneration = true;
+      repository.inputBox.value = result.message;
       await vscode.commands.executeCommand('workbench.view.scm');
-      vscode.window.showInformationMessage(
-        this.t(locale, truncated ? 'generatedTruncated' : 'generated')
-      );
+      const messageKey = result.fallbackFrom
+        ? (truncated ? 'generatedTruncatedWithFallback' : 'generatedWithFallback')
+        : (truncated ? 'generatedTruncated' : 'generated');
+      vscode.window.showInformationMessage(this.t(locale, messageKey, {
+        provider: result.profile.name,
+        fallbackProvider: result.fallbackFrom?.name ?? '',
+      }));
     } catch (error) {
-      if (!wroteGeneratedMessage && streamingRepository) {
+      if (!completedGeneration && streamingRepository) {
         streamingRepository.inputBox.value = originalInputValue;
       }
 
@@ -482,6 +499,25 @@ export class CommitMessageCommand {
     return results.filter((result) => result.installed).map((result) => result.profile);
   }
 
+  private async resolveGenerationProfiles(primaryProfile: CliProfile): Promise<CliProfile[]> {
+    if (!this.usesDefaultCommitMessageProvider()) {
+      return [primaryProfile];
+    }
+
+    const seen = new Set<string>([primaryProfile.id]);
+    const profiles = [primaryProfile];
+    for (const profile of await this.getInstalledProfiles()) {
+      if (seen.has(profile.id)) {
+        continue;
+      }
+
+      seen.add(profile.id);
+      profiles.push(profile);
+    }
+
+    return profiles;
+  }
+
   private async openCommitMessageSettings(): Promise<void> {
     await vscode.commands.executeCommand('agents-gui.openProviderSettings', 'commitMessage');
   }
@@ -665,6 +701,13 @@ export class CommitMessageCommand {
       .get<string>('defaultProvider', DEFAULT_CLI_ID);
   }
 
+  private usesDefaultCommitMessageProvider(): boolean {
+    const commitProvider = vscode.workspace
+      .getConfiguration('agents-gui.commitMessage')
+      .get<string>('provider', 'default');
+    return !commitProvider || commitProvider === 'default';
+  }
+
   private getConfiguredLanguage(): CommitMessageLanguageSetting {
     return vscode.workspace
       .getConfiguration('agents-gui.commitMessage')
@@ -757,6 +800,59 @@ export class CommitMessageCommand {
         }
       }
     );
+  }
+
+  private async generateCommitMessageWithFallback(
+    profiles: CliProfile[],
+    prompt: string,
+    repositoryRoot: string,
+    language: CommitMessageLanguage,
+    diff: string,
+    onPartial: (output: string) => void,
+    onAttemptStart: (profile: CliProfile) => void,
+    inputMessage: string,
+    token: vscode.CancellationToken,
+    externalToken?: vscode.CancellationToken
+  ): Promise<CommitMessageGenerationResult> {
+    const primaryProfile = profiles[0];
+    let lastError: Error | undefined;
+
+    for (let index = 0; index < profiles.length; index += 1) {
+      const profile = profiles[index];
+      onAttemptStart(profile);
+
+      try {
+        const message = await this.generateCommitMessageWithCancellation(
+          profile,
+          prompt,
+          repositoryRoot,
+          language,
+          diff,
+          onPartial,
+          inputMessage,
+          token,
+          externalToken
+        );
+
+        return {
+          message,
+          profile,
+          ...(index > 0 && primaryProfile ? { fallbackFrom: primaryProfile } : {}),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message === 'cancelled') {
+          throw error;
+        }
+
+        lastError = error instanceof Error ? error : new Error(message);
+        if (!this.usesDefaultCommitMessageProvider() || index >= profiles.length - 1) {
+          throw lastError;
+        }
+      }
+    }
+
+    throw lastError ?? new Error(this.t(this.getRuntimeLocale(), 'emptyOutput'));
   }
 
   private t(locale: RuntimeLocale, key: string, values: Record<string, string> = {}): string {

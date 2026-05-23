@@ -423,7 +423,7 @@ export const CLI_PROFILES: CliProfile[] = [
     promptArgs: ['run', '--format', 'json', '--thinking'],
     backgroundServer: {
       args: ['serve', '--hostname', '127.0.0.1', '--port', '{port}'],
-      attachArgs: ['--attach', 'http://127.0.0.1:{port}'],
+      attachArgs: ['--attach', 'http://127.0.0.1:{port}', '--dir', '{cwd}'],
       url: 'http://127.0.0.1:{port}',
       portRange: { start: 46100, size: 200 },
     },

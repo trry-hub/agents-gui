@@ -279,14 +279,17 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /const streamCommitMessage = \(output: string\) =>/);
   assert.match(source, /repository\.inputBox\.value = '';/);
   assert.match(source, /repository\.inputBox\.value = partialMessage;/);
-  assert.match(source, /repository\.inputBox\.value = message/);
+  assert.match(source, /repository\.inputBox\.value = result\.message/);
   assert.match(source, /const inputMessage = repository\.inputBox\.value\.trim\(\)/);
   assert.match(source, /buildCommitMessagePrompt\(\{ diff, language, truncated, inputMessage \}\)/);
   assert.match(source, /cleanCommitMessageOutput\(output, language, diff, inputMessage, true\)/);
-  assert.match(source, /generateCommitMessageWithCancellation\(\s*profile,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s);
+  assert.match(source, /const profiles = await this\.resolveGenerationProfiles\(primaryProfile\);/);
+  assert.match(source, /generateCommitMessageWithFallback\(\s*profiles,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s);
+  assert.match(source, /repository\.inputBox\.value = '';\s*\},\s*inputMessage,/s);
   assert.match(source, /cleanGeneratedCommitMessage\(output, \{ language, diff, inputMessage \}\)/);
   assert.match(source, /getRepository\(rootUri\)/);
   assert.match(source, /generateCommitMessageWithCancellation/);
+  assert.match(source, /generateCommitMessageWithFallback/);
   assert.match(source, /profile\.id === 'opencode'/);
   assert.match(
     source,
@@ -300,6 +303,12 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /isProviderErrorOutput\(output\)/);
   assert.match(source, /getConfiguredProvider\(\)/);
   assert.match(source, /resolveReadyProfile\(locale\)/);
+  assert.match(source, /resolveGenerationProfiles\(primaryProfile: CliProfile\)/);
+  assert.match(source, /usesDefaultCommitMessageProvider\(\)/);
+  assert.match(source, /profiles = \[primaryProfile\]/);
+  assert.match(source, /if \(!this\.usesDefaultCommitMessageProvider\(\) \|\| index >= profiles\.length - 1\)/);
+  assert.match(source, /fallbackFrom: primaryProfile/);
+  assert.match(source, /generatedWithFallback/);
   assert.match(source, /getInstalledProfiles\(\)/);
   assert.match(source, /showQuickPick\(providerItems/);
   assert.match(source, /commitMessage'\)\.update\(\s*'provider'/);
@@ -311,6 +320,8 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /setContext',\s*HAS_STAGED_CHANGES_CONTEXT,\s*hasStagedChanges/s);
   assert.match(source, /repository\.state\.indexChanges\.length > 0/);
   assert.match(source, /ProgressLocation\.SourceControl/);
+  assert.match(source, /let completedGeneration = false;/);
+  assert.match(source, /if \(!completedGeneration && streamingRepository\)/);
   assert.match(source, /cancel\(\): void/);
   assert.match(source, /isLikelyCliError\(normalizedStderr\)/);
   assert.doesNotMatch(source, /diff\(false\)/);
@@ -322,6 +333,7 @@ test('OpenCode server commit generation waits for completed text parts only', ()
   assert.match(source, /onPartial\?: \(text: string\) => void/);
   assert.match(source, /waitForOpenCodeServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*errorStream\s*\)/s);
   assert.match(source, /const textState = this\.extractOpenCodeAssistantTextState\(messages\);/);
+  assert.match(source, /tools:\s*\{ '\*': false \}/);
   assert.match(source, /onPartial\?\.\(textState\.text\);/);
   assert.match(source, /const completed = this\.isOpenCodeAssistantMessageCompleted\(info\);/);
   assert.match(source, /this\.pickString\(partRecord\.type\) === 'text'/);

@@ -624,17 +624,31 @@ function extractOpenCodeReadableError(text: string): string | undefined {
     return 'OpenCode local database is locked by another running OpenCode server. Close that server or run this workspace from the same OpenCode server, then retry.';
   }
 
+  if (/No context found for instance/i.test(text)) {
+    return 'OpenCode did not receive the workspace directory for this attached session. Reload the window or retry after Agents GUI reconnects to OpenCode.';
+  }
+
+  if (/unhashable type: 'dict'|tool schema|tools schema/i.test(text)) {
+    return 'OpenCode provider rejected the tool schema. Use a no-tool OpenCode agent or switch to a provider with tool-calling support.';
+  }
+
   const unsupportedFormatMatch = /(?:^|\n)(?:Error:\s*)?Model\s+([^\s]+)\s+not supported for format\s+([^\s\n]+)/i.exec(text);
   if (unsupportedFormatMatch) {
     return `Model ${unsupportedFormatMatch[1]} is not supported for format ${unsupportedFormatMatch[2]}. Switch to another OpenCode model/provider and retry.`;
   }
 
-  if (!text.includes('ProviderModelNotFoundError') && !text.includes('Model not found:')) {
-    return undefined;
+  if (text.includes('ProviderModelNotFoundError') || text.includes('Model not found:')) {
+    const modelErrorMatch = /Error:\s*(Model not found:[^\n]+)/.exec(text);
+    if (modelErrorMatch) {
+      return modelErrorMatch[1].trim();
+    }
   }
 
-  const modelErrorMatch = /Error:\s*(Model not found:[^\n]+)/.exec(text);
-  return modelErrorMatch?.[1]?.trim();
+  if (/model[_ -]?not[_ -]?found|unsupported model|unknown model/i.test(text)) {
+    return 'OpenCode model is not available in the current provider. Choose Configured or another listed OpenCode model, then retry.';
+  }
+
+  return undefined;
 }
 
 function isOpenCodeRunBannerLine(line: string): boolean {

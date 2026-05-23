@@ -376,6 +376,8 @@ test('opencode profile uses run command with prompt as argument', () => {
   assert.deepEqual(profile.backgroundServer?.attachArgs, [
     '--attach',
     'http://127.0.0.1:{port}',
+    '--dir',
+    '{cwd}',
   ]);
   assert.equal(profile.backgroundServer?.url, 'http://127.0.0.1:{port}');
   assert.deepEqual(profile.backgroundServer?.portRange, { start: 46100, size: 200 });
@@ -608,7 +610,9 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/revert'\)/);
   assert.match(source, /openCodeSessionUrl\(serverUrl,\s*sessionId,\s*'\/unrevert'\)/);
   assert.match(source, /backgroundServerPorts/);
-  assert.match(source, /ownedProcess && await this\.waitForTcp/);
+  assert.match(source, /isBackgroundServerAvailable/);
+  assert.match(source, /openCodeApiUrl\(server.url, '\/session\/status', cwd\)/);
+  assert.match(source, /ownedProcess && await this\.isBackgroundServerAvailable/);
   assert.match(source, /!ownedProcess && await this\.waitForTcp/);
   assert.match(source, /continue;/);
   assert.match(source, /stableHash\(`\$\{profileId\}:\$\{cwd\}`\)/);
@@ -3061,6 +3065,20 @@ test('normalizeCliOutput explains OpenCode database lock errors', () => {
   );
 });
 
+test('normalizeCliOutput explains OpenCode attach and provider setup errors', () => {
+  assert.equal(
+    normalizeCliOutput('No context found for instance\n', 'opencode'),
+    'Error: OpenCode did not receive the workspace directory for this attached session. Reload the window or retry after Agents GUI reconnects to OpenCode.\n'
+  );
+  assert.equal(
+    normalizeCliOutput(
+      'Service Unavailable: {"error":{"code":"model_not_found","message":"model_not_found"}}',
+      'opencode'
+    ),
+    'Error: OpenCode model is not available in the current provider. Choose Configured or another listed OpenCode model, then retry.\n'
+  );
+});
+
 test('normalizeCliOutput surfaces OpenCode top-level provider errors', () => {
   const errorLine = '{"type":"error","timestamp":1778855556690,"sessionID":"ses_1","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details."}}}\n';
 
@@ -3092,6 +3110,10 @@ test('cli manager can run OpenCode prompts through the server API and detect ret
   assert.match(source, /openCodeApiUrl\(serverUrl, '\/session\/status', directory\)/);
   assert.match(source, /url\.searchParams\.set\('directory', directory\)/);
   assert.match(source, /OpenCode request to \$\{url\.pathname\} timed out/);
+  assert.match(source, /openCodeHttpErrorMessage\(response\.statusCode, responseBody\)/);
+  assert.match(source, /openCodeHttpErrorBodyMessage/);
+  assert.match(source, /openCodeHttpErrorObjectMessage/);
+  assert.match(source, /normalizeOpenCodeProviderError\(rawMessage\)/);
   assert.match(source, /quota exhausted/i);
   assert.match(source, /abortOpenCodeServerSession/);
   assert.match(source, /extractOpenCodeAssistantText/);

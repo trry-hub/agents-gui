@@ -52,6 +52,7 @@ interface BackgroundServerState {
 
 interface ResolvedBackgroundServer {
   key: string;
+  url: string;
   args: string[];
   attachArgs: string[];
   host: string;
@@ -722,6 +723,7 @@ export class CliManager {
           timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,
           body: {
             parts: [{ type: 'text', text: prompt }],
+            tools: { '*': false },
             ...(model ? { model } : {}),
           },
         }
@@ -934,11 +936,14 @@ export class CliManager {
       const ownedProcess =
         state?.process && this.isChildProcessRunning(state.process);
 
-      if (ownedProcess && await this.waitForTcp(server.host, server.port, 120)) {
+      if (ownedProcess && await this.isBackgroundServerAvailable(profile, server, cwd, 120)) {
         return server.attachArgs;
       }
 
       if (!ownedProcess && await this.waitForTcp(server.host, server.port, 120)) {
+        if (await this.isBackgroundServerAvailable(profile, server, cwd, 900)) {
+          return server.attachArgs;
+        }
         continue;
       }
 
@@ -958,7 +963,7 @@ export class CliManager {
       }
 
       const ready = await nextState.starting;
-      if (ready) {
+      if (ready && await this.isBackgroundServerAvailable(profile, server, cwd, 1800)) {
         return server.attachArgs;
       }
     }
@@ -986,6 +991,7 @@ export class CliManager {
 
         return {
           key: `${profile.id}:${url}`,
+          url,
           args: server.args.map((arg) => this.expandBackgroundServerArg(arg, cwd, port)),
           attachArgs: server.attachArgs.map((arg) => this.expandBackgroundServerArg(arg, cwd, port)),
           host: target.host,
@@ -993,6 +999,27 @@ export class CliManager {
         };
       })
       .filter((candidate): candidate is ResolvedBackgroundServer => Boolean(candidate));
+  }
+
+  private async isBackgroundServerAvailable(
+    profile: CliProfile,
+    server: ResolvedBackgroundServer,
+    cwd: string,
+    timeoutMs: number
+  ): Promise<boolean> {
+    if (!(await this.waitForTcp(server.host, server.port, timeoutMs))) {
+      return false;
+    }
+
+    if (profile.id !== 'opencode') {
+      return true;
+    }
+
+    const status = await this.fetchJson(
+      this.openCodeApiUrl(server.url, '/session/status', cwd),
+      Math.max(600, timeoutMs)
+    );
+    return Boolean(status && typeof status === 'object' && !Array.isArray(status));
   }
 
   private backgroundServerPorts(profileId: string, cwd: string): number[] {
@@ -1122,15 +1149,17 @@ export class CliManager {
   private openCodeStatusError(status: Record<string, unknown>): string | undefined {
     const statusMessage = this.pickString(status.message);
     if (statusMessage) {
-      if (/quota exhausted|rate limit exceeded|FreeUsageLimitError/i.test(statusMessage)) {
-        return this.normalizeOpenCodeProviderError(statusMessage);
+      const normalized = this.normalizeOpenCodeProviderError(statusMessage);
+      if (normalized !== statusMessage) {
+        return normalized;
       }
       if (this.pickString(status.type) === 'error') {
         return statusMessage;
       }
     }
 
-    return this.openCodeErrorMessage(status);
+    const errorMessage = this.openCodeErrorMessage(status);
+    return errorMessage ? this.normalizeOpenCodeProviderError(errorMessage) : undefined;
   }
 
   private async waitForOpenCodeServerReady(
@@ -1509,7 +1538,7 @@ export class CliManager {
           });
           response.on('end', () => {
             if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
-              finish(new Error(`OpenCode request failed with HTTP ${response.statusCode ?? 'unknown'}.`));
+              finish(new Error(this.openCodeHttpErrorMessage(response.statusCode, responseBody)));
               return;
             }
 
@@ -1584,6 +1613,74 @@ export class CliManager {
       });
       request.on('error', () => finish(undefined));
     });
+  }
+
+  private openCodeHttpErrorMessage(statusCode: number | undefined, responseBody: string): string {
+    const fallback = `OpenCode request failed with HTTP ${statusCode ?? 'unknown'}.`;
+    const rawMessage = this.openCodeHttpErrorBodyMessage(responseBody);
+    if (!rawMessage) {
+      return fallback;
+    }
+
+    const normalized = this.normalizeOpenCodeProviderError(rawMessage);
+    if (normalized !== rawMessage) {
+      return normalized;
+    }
+
+    return rawMessage.length > 240
+      ? `${rawMessage.slice(0, 240).trim()}...`
+      : rawMessage;
+  }
+
+  private openCodeHttpErrorBodyMessage(responseBody: string): string | undefined {
+    const trimmed = responseBody.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const parsed = this.parseOpenCodeHttpErrorObject(trimmed);
+    if (parsed) {
+      const message = this.openCodeHttpErrorObjectMessage(parsed);
+      if (message) {
+        return message;
+      }
+    }
+
+    const jsonStart = trimmed.indexOf('{');
+    if (jsonStart > 0) {
+      const embedded = this.parseOpenCodeHttpErrorObject(trimmed.slice(jsonStart));
+      if (embedded) {
+        const message = this.openCodeHttpErrorObjectMessage(embedded);
+        if (message) {
+          return `${trimmed.slice(0, jsonStart).replace(/:\s*$/, '')}: ${message}`;
+        }
+      }
+    }
+
+    return trimmed;
+  }
+
+  private openCodeHttpErrorObjectMessage(record: Record<string, unknown>): string | undefined {
+    const error = this.objectRecord(record.error);
+    const data = this.objectRecord(error.data);
+    return this.openCodeErrorMessage(record) ?? this.pickString(
+      data.message,
+      data.code,
+      error.message,
+      error.code,
+      record.message,
+      record.code
+    );
+  }
+
+  private parseOpenCodeHttpErrorObject(text: string): Record<string, unknown> | undefined {
+    try {
+      const parsed = JSON.parse(text);
+      const record = this.objectRecord(parsed);
+      return Object.keys(record).length > 0 ? record : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private normalizeOpenCodeMcpStatus(payload: unknown): AssistantMcpServerStatus[] | undefined {
@@ -2034,6 +2131,18 @@ export class CliManager {
   private normalizeOpenCodeProviderError(message: string): string {
     if (/FreeUsageLimitError|rate limit exceeded|quota exhausted/i.test(message)) {
       return 'OpenCode provider rate limit exceeded. Switch model/provider or wait before retrying.';
+    }
+
+    if (/model[_ -]?not[_ -]?found|model_not_found|unsupported model|unknown model/i.test(message)) {
+      return 'OpenCode model is not available in the current provider. Choose Configured or another listed OpenCode model, then retry.';
+    }
+
+    if (/No context found for instance/i.test(message)) {
+      return 'OpenCode did not receive the workspace directory for this attached session. Reload the window or retry after Agents GUI reconnects to OpenCode.';
+    }
+
+    if (/unhashable type: 'dict'|tool schema|tools schema/i.test(message)) {
+      return 'OpenCode provider rejected the tool schema. Use a no-tool OpenCode agent or switch to a provider with tool-calling support.';
     }
 
     return message;
