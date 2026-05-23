@@ -1,11 +1,20 @@
 # Agents GUI
 
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=agents-gui.agents-gui)
+[![Website](https://img.shields.io/badge/Website-agents--gui.pages.dev-7c3aed)](https://agents-gui.pages.dev/)
 [![CI](https://github.com/trry-hub/agents-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/trry-hub/agents-gui/actions/workflows/ci.yml)
 
 **Agents GUI** 是一个面向 VS Code 的多 Agent 工作台。它把 Claude Code、Codex CLI、Gemini CLI、OpenCode、Goose 和 Aider 等外部编码 Agent 汇聚到同一个侧边栏里，并提供上下文感知提示词、CLI 配置管理、自定义 API 供应商桥接和原生 Git 提交信息生成能力。
 
 > **早期版本 v0.0.2。** 核心扩展逻辑和 Webview UI 已可用，后续会围绕真实工作流持续迭代。
+
+---
+
+## 相关链接
+
+- **官网 / 在线文档**：https://agents-gui.pages.dev/
+- **VS Code Marketplace**：https://marketplace.visualstudio.com/items?itemName=agents-gui.agents-gui
+- **GitHub 仓库**：https://github.com/trry-hub/agents-gui
 
 ---
 
