@@ -1,5 +1,17 @@
 # 更新日志
 
+## v0.0.3 - 2026-05-23
+
+Range: `v0.0.2..HEAD`
+
+### 修复
+
+- harden commit message generation (0c3dc0d)
+
+### 工作流
+
+- 自动发布到 VS Code Marketplace (a5ac296)
+
 ## v0.0.2 - 2026-05-22
 
 Range: `v0.0.1..HEAD`
