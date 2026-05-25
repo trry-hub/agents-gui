@@ -150,7 +150,7 @@
         },
         {
           "command": "agents-gui.generateCommitMessage",
-          "when": "scmProvider == git && agents-gui.hasStagedChanges && !agents-gui.commitMessageGenerating",
+          "when": "scmProvider == git && scmProviderRootUri in agents-gui.commitMessageStagedRoots && !agents-gui.commitMessageGenerating",
           "group": "navigation@-100"
         }
       ],

@@ -549,8 +549,14 @@ select {
 }
 
 .stop-button svg {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.stop-button svg .stop-icon-square {
   fill: currentColor;
   stroke: none;
 }
@@ -712,6 +718,22 @@ select {
 .provider-tab-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.provider-tab-button.is-busy::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--assistant-accent);
+  box-shadow: 0 0 0 1px var(--vscode-input-background, var(--assistant-surface));
+}
+
+.provider-tab-button.is-busy:not(.is-active) .provider-tab-logo {
+  opacity: 0.74;
 }
 
 .provider-tab-logo {
@@ -2336,6 +2358,55 @@ textarea:focus {
   animation: activityTextShimmer 1.4s ease-in-out infinite;
 }
 
+.message-choice-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.message-choice-button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--assistant-border);
+  border-radius: 7px;
+  color: var(--vscode-foreground);
+  background: var(--assistant-panel);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.message-choice-button:hover,
+.message-choice-button:focus-visible {
+  border-color: color-mix(in srgb, var(--assistant-accent) 55%, var(--assistant-border));
+  background: var(--assistant-hover);
+  outline: none;
+}
+
+.message-choice-index {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--assistant-accent);
+  background: color-mix(in srgb, var(--assistant-accent) 12%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.message-choice-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .message-actions {
   display: flex;
   align-items: center;
@@ -2427,6 +2498,11 @@ textarea:focus {
 
 .message-content:has(.md-spacer:only-child) {
   display: none;
+}
+
+.message-streaming-cursor {
+  align-self: end;
+  margin-top: 1px;
 }
 
 .message.assistant .message-bubble:has(.message-content .md-spacer:only-child),
@@ -2932,6 +3008,7 @@ textarea:focus {
 }
 
 .message-spinner {
+  display: inline-block;
   width: 10px;
   height: 10px;
   border: 0;
@@ -2969,19 +3046,11 @@ textarea:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .message-spinner,
   .cursor,
   .message-activity-inline.is-running .message-activity-text,
-  .message-status.is-running .message-status-label,
-  .message-status.is-running .message-spinner {
+  .message-status.is-running .message-status-label {
     animation: none;
   }
-
-  .loading-spinner,
-  .provider-hint.is-loading::before {
-    animation: none;
-  }
-
 }
 
 @keyframes cursor-blink {
@@ -2991,8 +3060,12 @@ textarea:focus {
 }
 
 @keyframes message-spin {
+  from {
+    transform: translateZ(0) rotate(0turn);
+  }
+
   to {
-    transform: rotate(360deg);
+    transform: translateZ(0) rotate(1turn);
   }
 }
 
@@ -4227,8 +4300,8 @@ body[data-provider="opencode"] .stop-button {
 }
 
 body[data-provider="opencode"] .stop-button svg {
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
 }
 
 body[data-provider="opencode"] .send-button {
@@ -5058,9 +5131,9 @@ textarea:disabled {
 
 .stop-button {
   display: none;
-  color: var(--vscode-errorForeground, #c00);
-  background: color-mix(in srgb, var(--assistant-panel) 64%, transparent);
-  border-color: transparent;
+  color: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 82%, var(--assistant-muted));
+  background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 7%, var(--assistant-panel));
+  border-color: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 16%, transparent);
 }
 
 .stop-button.is-visible {

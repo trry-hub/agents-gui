@@ -699,6 +699,7 @@ test('gemini profile passes prompt as the -p argument for headless mode', () => 
 });
 
 test('CLI profiles expose provider model, runtime, and permission option args', () => {
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const codex = getCliProfile('codex');
 
   assert.equal(codex.defaultModel, 'gpt-5.4');
@@ -730,6 +731,7 @@ test('CLI profiles expose provider model, runtime, and permission option args', 
     }),
     ['--model', 'qwen2.5-coder:14b', '--sandbox', 'read-only']
   );
+  assert.match(sidebarSource, /const agentArgs = \[\s*\.\.\.\(agentMode\.args \?\? \[\]\),\s*\.\.\.optionArgs,\s*\];/s);
 });
 
 test('CLI profiles expose task routing scores for agent recommendations', () => {
@@ -836,7 +838,10 @@ test('extension defaults to OpenCode as the active provider', () => {
   assert.match(syncedStateSource, /AGENT_MODE_STATE_KEY = 'agents-gui\.agentModeByProvider'/);
   assert.match(sidebarSource, /LAST_PROVIDER_STATE_KEY,\n/);
   assert.match(sidebarSource, /AGENT_MODE_STATE_KEY,\n/);
-  assert.match(sidebarSource, /const storedProviderId = this\.getStoredProviderId\(profiles\)/);
+  assert.match(sidebarSource, /const installedProfiles = profiles\.filter\(\(profile\) => profile\.installed\)/);
+  assert.match(sidebarSource, /this\.profilesById\.set\(profile\.id, profile\)/);
+  assert.match(sidebarSource, /const storedProviderId = this\.getStoredProviderId\(installedProfiles\)/);
+  assert.match(sidebarSource, /profiles: installedProfiles\.map\(\(profile\) => \(\{/);
   assert.match(sidebarSource, /activeProviderId: storedProviderId/);
   assert.match(sidebarSource, /activeAgentModeByProvider: this\.getStoredAgentModeState\(\)/);
 });
@@ -1172,7 +1177,7 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /appendMessageThinking\(bubble, item\.thinking, \{\s*activity: item\.activity,\s*suppressActivityDetails: hasInlineAssistantActivity,\s*running: itemRunning,\s*startedAt: item\.startedAt,\s*durationMs: item\.durationMs,\s*detailKey: messageDetailKey\(activeId, activeThread\?\.id, index, 'thinking'\),\s*\}\)/s);
   assert.match(script, /renderMarkdownWithActivity\(\s*body,\s*normalizeMessageText\(item\.text\),\s*item\.activity,\s*item\.activityTimeline,\s*itemRunning,\s*baseDetailKey\s*\)/s);
   assert.doesNotMatch(script, /renderMarkdownLite\(body, normalizeMessageText\(item\.text\)\);/);
-  assert.match(script, /if \(itemRunning\) \{\s*appendMessageRunningStatus\(bubble, item\);\s*\} else if \(shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)\) \{/s);
+  assert.match(script, /if \(itemRunning\) \{\s*appendMessageRunningStatus\(bubble, item\);\s*\} else \{\s*if \(item\.role === 'assistant'\) \{\s*appendMessageChoiceActions\(bubble, item\.text\);\s*\}\s*if \(shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)\) \{/s);
   assert.match(script, /function appendMessageThinking\(bubble, text, options = \{\}\)/);
   assert.match(script, /function renderMarkdownWithActivity\(container, text, activity, activityTimeline, running, baseDetailKey = ''\)/);
   assert.match(script, /function mergeOpenCodeActivityTimeline\(existing, activities, offset\)/);
@@ -1239,6 +1244,7 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
 });
 
 test('webview composer uses compact Code X style controls', () => {
+  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
   assert.match(css, /\.prompt-shell\s*\{\s*[^}]*padding:\s*12px;/s);
@@ -1249,8 +1255,9 @@ test('webview composer uses compact Code X style controls', () => {
   assert.match(css, /\.model-menu \.option-summary::before\s*\{/);
   assert.match(css, /\.send-button,\s*\.stop-button\s*\{\s*[^}]*border-radius:\s*999px;/s);
   assert.match(css, /\.send-button\s*\{\s*[^}]*background:\s*color-mix\(in srgb, var\(--vscode-foreground, #1f1f1f\) 92%, transparent\);/s);
-  assert.match(css, /\.stop-button\s*\{\s*[^}]*color:\s*var\(--vscode-errorForeground, #c00\);/s);
-  assert.match(css, /\.stop-button\s*\{\s*[^}]*background:\s*color-mix\(in srgb, var\(--assistant-panel\) 64%, transparent\);/s);
+  assert.match(html, /<circle cx="8" cy="8" r="5\.1"\/><rect class="stop-icon-square"/);
+  assert.match(css, /\.stop-button\s*\{\s*[^}]*color:\s*color-mix\(in srgb, var\(--vscode-errorForeground, #f14c4c\) 82%, var\(--assistant-muted\)\);/s);
+  assert.match(css, /\.stop-button\s*\{\s*[^}]*background:\s*color-mix\(in srgb, var\(--vscode-errorForeground, #f14c4c\) 7%, var\(--assistant-panel\)\);/s);
   assert.match(css, /\.composer-runtime \.option-summary\s*\{\s*[^}]*border-color:\s*transparent;/s);
   assert.match(css, /\.composer-runtime \.option-summary::before\s*\{\s*[^}]*border:\s*1px solid currentColor;/s);
 });
@@ -1473,6 +1480,14 @@ test('webview renders installed provider logo tabs in the header', () => {
   assert.match(script, /for \(const profile of availableProfiles\)/);
   assert.match(script, /providerTabs\.style\.setProperty\('--provider-tabs-expanded-width'/);
   assert.match(script, /button\.className = 'provider-tab-button'/);
+  assert.match(script, /const providerIsBusy = providerIsRunning \|\| providerIsPending;/);
+  assert.match(script, /button\.setAttribute\('aria-busy', String\(providerIsBusy\)\)/);
+  assert.match(script, /button\.disabled = false;/);
+  assert.match(script, /button\.classList\.add\('is-busy'\)/);
+  assert.doesNotMatch(script, /activeIsBusy/);
+  assert.doesNotMatch(script, /button\.disabled = activeIsBusy && !isActive/);
+  assert.match(script, /providerTabs\.addEventListener\('click', \(event\) => \{\s*const button = event\.target\.closest\('\.provider-tab-button'\);\s*if \(!button\) \{\s*return;\s*\}\s*switchActiveProvider\(button\.dataset\.providerId\);/s);
+  assert.match(css, /\.provider-tab-button\.is-busy::after\s*\{/);
   assert.match(script, /logo\.className = 'provider-tab-logo'/);
   assert.doesNotMatch(script, /version\.className = 'provider-tab-version'/);
   assert.doesNotMatch(css, /\.provider-tabs:not\(:hover\):not\(:focus-within\) \.provider-tab-button:not\(\.is-active\)\s*\{[^}]*scale\(/s);
@@ -1825,8 +1840,9 @@ test('webview uses one primary composer action slot for send and stop', () => {
   assert.match(css, /\.prompt-tools\s*\{\s*[^}]*width:\s*30px;/s);
   assert.match(css, /\.prompt-tools\s*\{\s*[^}]*display:\s*grid;/s);
   assert.match(css, /\.send-button\.is-hidden\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /\.stop-button svg\s*\{\s*[^}]*fill:\s*currentColor;/s);
-  assert.match(css, /\.stop-button svg\s*\{\s*[^}]*stroke:\s*none;/s);
+  assert.match(css, /\.stop-button svg\s*\{\s*[^}]*fill:\s*none;/s);
+  assert.match(css, /\.stop-button svg\s*\{\s*[^}]*stroke:\s*currentColor;/s);
+  assert.match(css, /\.stop-button svg \.stop-icon-square\s*\{\s*[^}]*fill:\s*currentColor;/s);
 });
 
 test('webview refreshes context after a concrete provider is active', () => {
@@ -2050,13 +2066,13 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(script, /meta\.className = 'message-meta';/);
   assert.match(script, /bubble\.appendChild\(meta\);/);
   assert.match(script, /const activeConversationRunning = Boolean\(runningByProvider\[activeId\] \|\| pendingByProvider\[activeId\]\);/);
-  assert.match(script, /if \(itemRunning\) \{\s*appendMessageRunningStatus\(bubble, item\);\s*\} else if \(shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)\) \{/s);
+  assert.match(script, /if \(itemRunning\) \{\s*appendMessageRunningStatus\(bubble, item\);\s*\} else \{\s*if \(item\.role === 'assistant'\) \{\s*appendMessageChoiceActions\(bubble, item\.text\);\s*\}\s*if \(shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)\) \{/s);
   assert.match(script, /function shouldShowAssistantCopyButton\(conversation, index, activeConversationRunning\)/);
   assert.match(script, /if \(activeConversationRunning \|\| item\?\.role !== 'assistant' \|\| !normalizeMessageText\(item\.text\)\.trim\(\)\) \{/);
   assert.match(script, /function appendMessageRunningStatus\(container, item\)/);
   assert.match(script, /function syncMessageRunningStatusElement\(container, item, itemRunning\)/);
   assert.match(script, /syncMessageRunningStatusElement\(bubble, item, itemRunning\);/);
-  assert.match(script, /if \(itemRunning \|\| Boolean\(runningByProvider\[activeId\] \|\| pendingByProvider\[activeId\]\)\) \{\s*bubble\.querySelector\(':scope > \.message-actions'\)\?\.remove\(\);\s*\}/s);
+  assert.match(script, /if \(itemRunning \|\| Boolean\(runningByProvider\[activeId\] \|\| pendingByProvider\[activeId\]\)\) \{\s*bubble\.querySelector\(':scope > \.message-actions'\)\?\.remove\(\);\s*bubble\.querySelector\(':scope > \.message-choice-actions'\)\?\.remove\(\);\s*\}/s);
   assert.match(script, /function assistantCopyGroupPlainText\(conversation, start, end\)/);
   assert.match(script, /const copyActions = document\.createElement\('div'\);/);
   assert.match(script, /copyActions\.className = 'message-actions';/);
@@ -2458,9 +2474,38 @@ test('webview slash command palette shows each command label once', () => {
 
 test('webview reduces decorative motion when requested', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const reducedMotionBlocks = Array.from(
+    css.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{(?<body>[\s\S]*?)\n\}/g),
+    (match) => match.groups?.body ?? ''
+  );
+  const statusMotionBlock = reducedMotionBlocks.find((block) => block.includes('.cursor')) || '';
 
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(css, /\.message-spinner,\s*\.cursor,\s*\.message-activity-inline\.is-running \.message-activity-text,\s*\.message-status\.is-running \.message-status-label,\s*\.message-status\.is-running \.message-spinner\s*\{[^}]*animation:\s*none;/s);
+  assert.match(statusMotionBlock, /\.cursor,\s*\.message-activity-inline\.is-running \.message-activity-text,\s*\.message-status\.is-running \.message-status-label\s*\{[^}]*animation:\s*none;/s);
+  assert.doesNotMatch(statusMotionBlock, /\.message-spinner/);
+  assert.doesNotMatch(statusMotionBlock, /\.loading-spinner/);
+});
+
+test('webview keeps visible streaming affordances and quick choices', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const promptSource = readFileSync(new URL('../src/promptBuilder.ts', import.meta.url), 'utf8');
+
+  assert.match(script, /function appendStreamingCursor\(container, running, text\)/);
+  assert.match(script, /className = 'cursor message-streaming-cursor'/);
+  assert.match(script, /function extractMessageChoices\(text\)/);
+  assert.match(script, /\(\?:选项\|方案\|Option\)/);
+  assert.match(script, /dataset\.messageChoicePrompt = choice\.prompt/);
+  assert.match(script, /event\.target\.closest\('\[data-message-choice-prompt\]'\)/);
+  assert.match(script, /send\('freeform', prompt\)/);
+  assert.match(css, /\.message-choice-actions\s*\{/);
+  assert.match(css, /\.message-choice-button\s*\{/);
+  assert.match(css, /\.message-streaming-cursor\s*\{/);
+  assert.match(i18nScript, /'message\.choice\.label'/);
+  assert.match(i18nScript, /'message\.choice\.prompt'/);
+  assert.match(promptSource, /Option N — label/);
+  assert.match(promptSource, /选项 N — 标签/);
 });
 
 test('webview uses a ring spinner for running message status', () => {
@@ -2468,10 +2513,12 @@ test('webview uses a ring spinner for running message status', () => {
   const runningSpinnerRule = css.match(/\.message-status\.is-running \.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
   const spinnerRule = css.match(/\.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
 
+  assert.match(spinnerRule, /display:\s*inline-block/);
   assert.match(spinnerRule, /conic-gradient/);
   assert.match(spinnerRule, /will-change:\s*transform/);
   assert.match(spinnerRule, /contain:\s*paint/);
   assert.match(spinnerRule, /animation:\s*message-spin 1s linear infinite/);
+  assert.match(css, /@keyframes message-spin \{\s*from \{\s*transform:\s*translateZ\(0\) rotate\(0turn\);\s*\}\s*to \{\s*transform:\s*translateZ\(0\) rotate\(1turn\);/s);
   assert.doesNotMatch(spinnerRule, /border-top-color:/);
   assert.doesNotMatch(runningSpinnerRule, /border-top-color:/);
   assert.doesNotMatch(runningSpinnerRule, /dot-pulse/);

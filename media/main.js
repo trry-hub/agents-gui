@@ -1440,21 +1440,30 @@
       }
     }
 
-    const activeIsBusy = Boolean(runningByProvider[activeId] || pendingByProvider[activeId]);
-
     for (const profile of availableProfiles) {
       const isActive = profile.id === activeId;
+      const providerIsRunning = Boolean(runningByProvider[profile.id]);
+      const providerIsPending = Boolean(pendingByProvider[profile.id]);
+      const providerIsBusy = providerIsRunning || providerIsPending;
       const button = existingButtons.get(profile.id) || document.createElement('button');
 
       button.type = 'button';
       button.dataset.providerId = profile.id;
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', String(isActive));
-      button.title = profile.name || '';
-      button.disabled = activeIsBusy && !isActive;
+      button.setAttribute('aria-busy', String(providerIsBusy));
+      button.title = [
+        profile.name || '',
+        providerIsRunning ? i18n.t('provider.running') : '',
+        providerIsPending ? i18n.t('provider.preparing') : '',
+      ].filter(Boolean).join(' · ');
+      button.disabled = false;
       button.className = 'provider-tab-button';
       if (isActive) {
         button.classList.add('is-active');
+      }
+      if (providerIsBusy) {
+        button.classList.add('is-busy');
       }
 
       const iconUri = providerIconUri(profile);
@@ -1506,13 +1515,7 @@
     const record = value && typeof value === 'object' ? value : {};
     const knownProviderIds = new Set([
       'default',
-      'claude',
-      'gemini',
-      'codex',
-      'opencode',
-      'goose',
-      'aider',
-      ...profiles.map((profile) => profile.id),
+      ...installedProfiles().map((profile) => profile.id),
     ]);
     const provider = knownProviderIds.has(record.provider) ? record.provider : 'default';
     const language = ['auto', 'zh-CN', 'en'].includes(record.language) ? record.language : 'auto';
@@ -4413,6 +4416,7 @@
         itemRunning,
         baseDetailKey
       );
+      appendStreamingCursor(body, itemRunning, item.text);
       bubble.appendChild(body);
 
       if (Array.isArray(item.attachments) && item.attachments.length > 0) {
@@ -4421,18 +4425,23 @@
 
       if (itemRunning) {
         appendMessageRunningStatus(bubble, item);
-      } else if (shouldShowAssistantCopyButton(conversation, index, activeConversationRunning)) {
-        const copyActions = document.createElement('div');
-        copyActions.className = 'message-actions';
-        const copyButton = createMessageCopyButton();
-        const copyGroupStart = assistantCopyGroupStart(conversation, index);
-        copyButton.dataset.messageCopyStart = String(copyGroupStart);
-        copyButton.dataset.messageCopyEnd = String(index);
-        if (isCopiedFeedbackActive(copyGroupStart, index)) {
-          applyCopiedFeedback(copyButton);
+      } else {
+        if (item.role === 'assistant') {
+          appendMessageChoiceActions(bubble, item.text);
         }
-        copyActions.appendChild(copyButton);
-        bubble.appendChild(copyActions);
+        if (shouldShowAssistantCopyButton(conversation, index, activeConversationRunning)) {
+          const copyActions = document.createElement('div');
+          copyActions.className = 'message-actions';
+          const copyButton = createMessageCopyButton();
+          const copyGroupStart = assistantCopyGroupStart(conversation, index);
+          copyButton.dataset.messageCopyStart = String(copyGroupStart);
+          copyButton.dataset.messageCopyEnd = String(index);
+          if (isCopiedFeedbackActive(copyGroupStart, index)) {
+            applyCopiedFeedback(copyButton);
+          }
+          copyActions.appendChild(copyButton);
+          bubble.appendChild(copyActions);
+        }
       }
 
       wrapper.appendChild(bubble);
@@ -5657,12 +5666,126 @@
       itemRunning,
       baseDetailKey
     );
+    appendStreamingCursor(body, itemRunning, item.text);
     syncMessageRunningStatusElement(bubble, item, itemRunning);
     if (itemRunning || Boolean(runningByProvider[activeId] || pendingByProvider[activeId])) {
       bubble.querySelector(':scope > .message-actions')?.remove();
+      bubble.querySelector(':scope > .message-choice-actions')?.remove();
+    } else if (item.role === 'assistant') {
+      appendMessageChoiceActions(bubble, item.text);
     }
     restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
     return true;
+  }
+
+  function appendStreamingCursor(container, running, text) {
+    if (!running || !normalizeMessageText(text).trim()) {
+      return;
+    }
+
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor message-streaming-cursor';
+    cursor.setAttribute('aria-hidden', 'true');
+    container.appendChild(cursor);
+  }
+
+  function appendMessageChoiceActions(bubble, text) {
+    const choices = extractMessageChoices(text);
+    bubble.querySelector(':scope > .message-choice-actions')?.remove();
+    if (choices.length === 0) {
+      return;
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'message-choice-actions';
+    actions.setAttribute('role', 'group');
+    actions.setAttribute('aria-label', i18n.t('message.choice.label'));
+
+    for (const choice of choices) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'message-choice-button';
+      button.dataset.messageChoicePrompt = choice.prompt;
+      button.title = choice.prompt;
+      const index = document.createElement('span');
+      index.className = 'message-choice-index';
+      index.textContent = choice.index;
+      const label = document.createElement('span');
+      label.className = 'message-choice-label';
+      label.textContent = choice.label;
+      button.append(index, label);
+      actions.appendChild(button);
+    }
+
+    bubble.appendChild(actions);
+  }
+
+  function extractMessageChoices(text) {
+    const source = normalizeMessageText(text);
+    if (!source.trim()) {
+      return [];
+    }
+
+    const choices = [];
+    let inFence = false;
+    for (const rawLine of source.split('\n')) {
+      const trimmed = rawLine.trim();
+      if (/^```/.test(trimmed)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence || !trimmed) {
+        continue;
+      }
+
+      const cleaned = stripInlineMarkdown(trimmed)
+        .replace(/^[-*+]\s+/, '')
+        .replace(/^#{1,6}\s+/, '')
+        .trim();
+      const match = /^(?:选项|方案|Option)\s*([0-9０-９一二三四五六七八九十]+)\s*(?:[—\-:：]|--)\s*(.+)$/i.exec(cleaned);
+      if (!match) {
+        continue;
+      }
+
+      const index = normalizeChoiceIndex(match[1]);
+      const label = match[2]
+        .replace(/\s+/g, ' ')
+        .replace(/[。；;:：]+$/, '')
+        .trim();
+      if (!index || !label) {
+        continue;
+      }
+
+      choices.push({
+        index,
+        label,
+        prompt: i18n.t('message.choice.prompt', { index, label }),
+      });
+      if (choices.length >= 5) {
+        break;
+      }
+    }
+
+    return choices;
+  }
+
+  function normalizeChoiceIndex(value) {
+    const text = String(value || '').trim();
+    const fullWidth = '０１２３４５６７８９';
+    const halfWidth = text.replace(/[０-９]/g, (char) => String(fullWidth.indexOf(char)));
+    const cnMap = {
+      一: '1',
+      二: '2',
+      三: '3',
+      四: '4',
+      五: '5',
+      六: '6',
+      七: '7',
+      八: '8',
+      九: '9',
+      十: '10',
+    };
+    return cnMap[halfWidth] || halfWidth;
   }
 
   function appendMessageThinking(bubble, text, options = {}) {
@@ -7606,7 +7729,7 @@
 
   providerTabs.addEventListener('click', (event) => {
     const button = event.target.closest('.provider-tab-button');
-    if (!button || button.disabled) {
+    if (!button) {
       return;
     }
 
@@ -7762,6 +7885,17 @@
         executeOpenCodeNativeSlashCommand({ name: 'undo' });
       } else if (fileCardAction.dataset.fileCardAction === 'review') {
         send('freeform', fileCardReviewPrompt());
+      }
+      return;
+    }
+
+    const choiceButton = event.target.closest('[data-message-choice-prompt]');
+    if (choiceButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const prompt = normalizeMessageText(choiceButton.dataset.messageChoicePrompt);
+      if (prompt && !runningByProvider[activeId] && !pendingByProvider[activeId]) {
+        send('freeform', prompt);
       }
       return;
     }

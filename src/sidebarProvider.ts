@@ -351,20 +351,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async sendProfiles(): Promise<void> {
     const profiles = await this.cliManager.getProfilesWithStatus();
+    const installedProfiles = profiles.filter((profile) => profile.installed);
     this.profilesById.clear();
-    profiles.forEach((profile) => {
+    installedProfiles.forEach((profile) => {
       this.profilesById.set(profile.id, profile);
     });
-    const storedProviderId = this.getStoredProviderId(profiles);
-    await this.updateProviderTitleContexts(profiles, storedProviderId ?? this.getDefaultCliId());
+    const configuredDefaultProviderId = this.getDefaultCliId();
+    const defaultProviderId = installedProfiles.some((profile) => profile.id === configuredDefaultProviderId)
+      ? configuredDefaultProviderId
+      : installedProfiles[0]?.id || '';
+    const storedProviderId = this.getStoredProviderId(installedProfiles);
+    await this.updateProviderTitleContexts(profiles, storedProviderId ?? defaultProviderId);
     this.view?.webview.postMessage({
       command: 'profiles',
-      profiles: profiles.map((profile) => ({
+      profiles: installedProfiles.map((profile) => ({
         ...profile,
         vscodeExtension: this.getProviderExtensionStatus(profile.id),
         webviewIcon: this.getProviderIconUris(profile.id),
       })),
-      defaultProviderId: this.getDefaultCliId(),
+      defaultProviderId,
       activeProviderId: storedProviderId,
       activeAgentModeByProvider: this.getStoredAgentModeState(),
       activeModelByProvider: this.getStoredModelState(),
@@ -793,10 +798,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.activeSessions.delete(cliId);
       }
 
+      const agentArgs = [
+        ...(agentMode.args ?? []),
+        ...optionArgs,
+      ];
       const newSession = await this.cliManager.startPrompt(
         cliId,
         profile.inputMode === 'argument' ? prompt : undefined,
-        [...optionArgs, ...(agentMode.args ?? [])],
+        agentArgs,
         agentMode.id,
         optionKey,
         apiProviderRuntime.env

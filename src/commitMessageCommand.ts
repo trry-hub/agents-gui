@@ -83,6 +83,7 @@ const DEFAULT_CLI_ID = 'opencode';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 const COMMIT_MESSAGE_TIMEOUT_MS = 120_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
+const STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui.commitMessageStagedRoots';
 const COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui.commitMessageGenerating';
 const COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui.commitMessageGeneratingRoots';
 
@@ -156,9 +157,11 @@ export class CommitMessageCommand {
 
   watchStagedChangesContext(context: vscode.ExtensionContext): void {
     void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
+    void vscode.commands.executeCommand('setContext', STAGED_CHANGE_ROOTS_CONTEXT, []);
     void this.setGeneratingContext(false);
     void this.bindStagedChangesContext(context).catch(() => {
       void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
+      void vscode.commands.executeCommand('setContext', STAGED_CHANGE_ROOTS_CONTEXT, []);
     });
   }
 
@@ -308,13 +311,18 @@ export class CommitMessageCommand {
       }
     };
     const updateHasStagedChanges = () => {
-      const hasStagedChanges = git.repositories.some(
-        (repository) => repository.state.indexChanges.length > 0
-      );
+      const stagedRoots = git.repositories
+        .filter((repository) => repository.state.indexChanges.length > 0)
+        .map((repository) => repository.rootUri.toString());
       void vscode.commands.executeCommand(
         'setContext',
         HAS_STAGED_CHANGES_CONTEXT,
-        hasStagedChanges
+        stagedRoots.length > 0
+      );
+      void vscode.commands.executeCommand(
+        'setContext',
+        STAGED_CHANGE_ROOTS_CONTEXT,
+        stagedRoots
       );
     };
     const watchRepositories = () => {

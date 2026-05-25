@@ -64,6 +64,7 @@ export function buildAssistantPrompt(request: AssistantPromptRequest): string {
     '- Use concise Markdown.',
     '- When suggesting code changes, include file paths and minimal patches or snippets.',
     '- If context is missing, say what is missing and proceed with the best available information.',
+    '- When you need the user to choose among discrete options, put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies.',
     DELIVERY_REQUIREMENTS,
     languageInstructionForLocale(request.locale),
   ];
@@ -109,6 +110,7 @@ function buildOpenCodeFreeformPrompt(request: AssistantPromptRequest): string {
   }
 
   lines.push('Keep the answer concise. Do not inspect the project unless the request needs it.');
+  lines.push('When you need the user to choose among discrete options, put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies.');
   lines.push('');
   lines.push(DELIVERY_REQUIREMENTS);
 

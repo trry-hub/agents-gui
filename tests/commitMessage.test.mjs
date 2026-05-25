@@ -223,7 +223,7 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   const scmTitleActions = manifest.contributes.menus['scm/title'] ?? [];
   const scmIdleAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.generateCommitMessage'
-      && item.when === 'scmProvider == git && agents-gui.hasStagedChanges && !agents-gui.commitMessageGenerating'
+      && item.when === 'scmProvider == git && scmProviderRootUri in agents-gui.commitMessageStagedRoots && !agents-gui.commitMessageGenerating'
   );
   const scmCancelAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.cancelCommitMessageGeneration'
@@ -248,7 +248,7 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   assert.equal(cancelCommand.icon, '$(debug-stop)');
   assert.ok(!scmInputBoxCommands.includes('agents-gui.generateCommitMessage'));
   assert.equal(scmIdleAction.group, 'navigation@-100');
-  assert.match(scmIdleAction.when, /agents-gui\.hasStagedChanges/);
+  assert.match(scmIdleAction.when, /scmProviderRootUri in agents-gui\.commitMessageStagedRoots/);
   assert.match(scmIdleAction.when, /!agents-gui\.commitMessageGenerating/);
   assert.ok(!scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading'));
   assert.equal(scmCancelAction.group, 'navigation@-100');
@@ -319,11 +319,14 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.match(source, /this\.state\?\.get<Record<string, string>>\(MODEL_STATE_KEY/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui\.commitMessageGenerating'/);
+  assert.match(source, /STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui\.commitMessageStagedRoots'/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui\.commitMessageGeneratingRoots'/);
   assert.match(source, /setGeneratingContext\(true,\s*repository\.rootUri\)/);
   assert.match(source, /rootUri\.toString\(\)/);
-  assert.match(source, /setContext',\s*HAS_STAGED_CHANGES_CONTEXT,\s*hasStagedChanges/s);
+  assert.match(source, /setContext',\s*HAS_STAGED_CHANGES_CONTEXT,\s*stagedRoots\.length > 0/s);
+  assert.match(source, /setContext',\s*STAGED_CHANGE_ROOTS_CONTEXT,\s*stagedRoots/s);
   assert.match(source, /repository\.state\.indexChanges\.length > 0/);
+  assert.match(source, /repository\.rootUri\.toString\(\)/);
   assert.match(source, /ProgressLocation\.SourceControl/);
   assert.match(source, /let completedGeneration = false;/);
   assert.match(source, /if \(!completedGeneration && streamingRepository\)/);
@@ -366,6 +369,7 @@ test('extension registers SCM title generation and cancel commands', () => {
 
   assert.match(source, /setContext', 'agents-gui\.commitMessageGenerating', false/);
   assert.match(source, /setContext', 'agents-gui\.commitMessageGeneratingRoots', \[\]/);
+  assert.match(source, /setContext', 'agents-gui\.commitMessageStagedRoots', \[\]/);
   assert.match(source, /registerCommand\('agents-gui\.generateCommitMessage', \(rootUri, _resourceGroups, token\) =>/);
   assert.match(source, /return commitMessageCommand\.run\(rootUri, token\)/);
   assert.match(source, /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(\) =>/);
