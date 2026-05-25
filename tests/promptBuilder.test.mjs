@@ -795,20 +795,24 @@ test('CLI profiles include detected agent version status', () => {
   assert.match(managerSource, /normalizeCommandVersionOutput/);
 });
 
-test('context summary carries provider-specific token usage without fallback estimates', () => {
+test('context summary carries lightweight token usage estimates without bundled tokenizer runtimes', () => {
   const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
   const collectorSource = readFileSync(new URL('../src/contextCollector.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const counterSource = readFileSync(new URL('../src/tokenCounter.ts', import.meta.url), 'utf8');
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.match(typesSource, /tokenUsage\?: AssistantTokenUsage/);
+  assert.match(typesSource, /'estimated'/);
   assert.doesNotMatch(collectorSource, /estimateContextTokens/);
   assert.match(sidebarSource, /tokenUsage: countContextTokens\(snapshot, profile, modelId\)/);
-  assert.match(counterSource, /encodingForModel|getEncoding/);
-  assert.match(counterSource, /countAnthropicTokens/);
-  assert.match(counterSource, /precision: 'exact'/);
-  assert.match(counterSource, /precision: 'unavailable'/);
+  assert.match(counterSource, /function isCjkCodePoint/);
+  assert.match(counterSource, /precision: 'estimated'/);
+  assert.doesNotMatch(counterSource, /getEncoding/);
+  assert.doesNotMatch(counterSource, /countAnthropicTokens/);
   assert.doesNotMatch(counterSource, /Math\.ceil\(characters \/ 4\)/);
+  assert.ok(!('@anthropic-ai/tokenizer' in manifest.dependencies));
+  assert.ok(!('js-tiktoken' in manifest.dependencies));
 });
 
 test('extension contributes reload window command for debugging', () => {
@@ -1573,6 +1577,9 @@ test('manifest exposes title actions and custom API provider settings', () => {
   );
   assert.ok(properties['agents-gui.home.visibleAgentIds']);
   assert.ok(properties['agents-gui.home.agentOrder']);
+  assert.equal(manifest.scripts['package:vsix'], 'npm run package');
+  assert.equal(manifest.scripts['package:manual'], 'npm run package');
+  assert.match(manifest.scripts['publish:manual'], /vsce publish --packagePath agents-gui-\$\{npm_package_version\}\.vsix/);
   assert.ok(properties['agents-gui.commitMessage.provider']);
   assert.match(html, /id="settingsNavAgents"/);
   assert.match(html, /id="settingsNavApiProviders"/);
@@ -2024,6 +2031,8 @@ test('webview displays attached context window usage details', () => {
   assert.match(script, /contextWindow\.remaining/);
   assert.match(script, /contextWindow\.autoCompact/);
   assert.match(script, /tokenUsage\.precision === 'exact'/);
+  assert.match(script, /tokenUsage\.precision === 'estimated'/);
+  assert.match(script, /contextWindow\.estimated/);
   assert.match(script, /contextWindow\.exactUnavailable/);
   assert.match(script, /contextBudgetTokens\.textContent = i18n\.t\('contextWindow\.providerManaged'/);
   assert.match(css, /\.context-budget\s*\{/);
@@ -2034,6 +2043,7 @@ test('webview displays attached context window usage details', () => {
   assert.match(i18nScript, /'contextWindow\.title'/);
   assert.match(i18nScript, /'contextWindow\.totalTokens'/);
   assert.match(i18nScript, /'contextWindow\.remaining'/);
+  assert.match(i18nScript, /'contextWindow\.estimated'/);
 });
 
 test('webview hides low-value default composer chips', () => {

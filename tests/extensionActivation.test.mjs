@@ -47,9 +47,9 @@ test('refresh providers title action reloads the full sidebar state', () => {
   );
 });
 
-test('packaged build includes the tiktoken wasm runtime asset', () => {
-  assert.match(esbuildScript, /tiktoken\/lite\/tiktoken_bg\.wasm/);
-  assert.match(esbuildScript, /dist\/tiktoken_bg\.wasm/);
-  assert.match(esbuildScript, /build\.onEnd/);
-  assert.doesNotMatch(vscodeIgnore, /^\s*\*\*\/\*\.wasm\s*$/m);
+test('packaged build avoids tokenizer wasm runtime assets', () => {
+  assert.doesNotMatch(esbuildScript, /tiktoken/);
+  assert.doesNotMatch(esbuildScript, /dist\/tiktoken_bg\.wasm/);
+  assert.doesNotMatch(esbuildScript, /copy-runtime-assets/);
+  assert.doesNotMatch(vscodeIgnore, /^\s*!\s*dist\/tiktoken_bg\.wasm\s*$/m);
 });

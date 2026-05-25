@@ -70,7 +70,7 @@ export interface CliProfile {
   contextWindowTokens?: number;
   /** Whether the provider is expected to compact older background context automatically. */
   autoCompactsContext?: boolean;
-  /** Exact tokenizer used for locally attached context when it is provider-known. */
+  /** Tokenizer family used to estimate locally attached context usage. */
   tokenizer?: CliTokenizerConfig;
   /** Provider-native model presets shown in the composer. */
   modelOptions?: CliModelOption[];

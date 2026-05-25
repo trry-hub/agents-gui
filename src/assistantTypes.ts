@@ -175,7 +175,7 @@ export interface AssistantLspServerStatus {
   error?: string;
 }
 
-export type AssistantTokenPrecision = 'exact' | 'unavailable';
+export type AssistantTokenPrecision = 'exact' | 'estimated' | 'unavailable';
 
 export interface AssistantTokenUsage {
   precision: AssistantTokenPrecision;

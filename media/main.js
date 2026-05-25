@@ -2835,10 +2835,13 @@
 
     contextBudget.hidden = false;
     const isExact = tokenUsage.precision === 'exact' && Number.isFinite(Number(tokenUsage.tokens));
-    contextBudget.classList.toggle('has-total', Boolean(isExact && (contextSummary.contextWindowTokens || profile.contextWindowTokens)));
-    contextBudget.classList.toggle('is-unavailable', !isExact);
+    const isEstimated = tokenUsage.precision === 'estimated' && Number.isFinite(Number(tokenUsage.tokens));
+    const hasTokenUsage = isExact || isEstimated;
+    contextBudget.classList.toggle('has-total', Boolean(hasTokenUsage && (contextSummary.contextWindowTokens || profile.contextWindowTokens)));
+    contextBudget.classList.toggle('is-unavailable', !hasTokenUsage);
+    contextBudget.classList.toggle('is-estimated', isEstimated);
 
-    if (!isExact) {
+    if (!hasTokenUsage) {
       contextBudgetLabel.textContent = '';
       contextBudgetPercent.textContent = i18n.t('contextWindow.exactUnavailable', { provider: profile.name });
       contextBudgetTokens.textContent = i18n.t('contextWindow.providerManaged', { provider: profile.name });
@@ -2862,22 +2865,24 @@
       const usedPercent = Math.min(100, Math.max(usedTokens > 0 ? 1 : 0, Math.round((usedTokens / totalTokens) * 100)));
       const total = formatTokenCount(totalTokens);
       const remaining = formatTokenCount(Math.max(0, totalTokens - usedTokens));
-      contextBudgetLabel.textContent = `${usedPercent}%`;
+      contextBudgetLabel.textContent = isEstimated ? `~${usedPercent}%` : `${usedPercent}%`;
       contextBudgetPercent.textContent = i18n.t('contextWindow.usedPercent', { percent: String(usedPercent) });
       contextBudgetTokens.textContent = i18n.t('contextWindow.usedTokens', { used });
       contextBudgetTokenizer.textContent = i18n.t('contextWindow.totalTokens', { total });
       contextBudgetPolicy.textContent = [
+        isEstimated ? i18n.t('contextWindow.estimated') : '',
         i18n.t('contextWindow.remaining', { remaining }),
         profile.autoCompactsContext ? i18n.t('contextWindow.autoCompact') : '',
       ].filter(Boolean).join(' · ');
     } else {
-      contextBudgetLabel.textContent = used;
+      contextBudgetLabel.textContent = isEstimated ? `~${used}` : used;
       contextBudgetPercent.textContent = i18n.t('contextWindow.usedTokens', { used });
       contextBudgetTokens.textContent = contextSummary.workspace || '';
       contextBudgetTokenizer.textContent = contextSummary.activeFile || '';
-      contextBudgetPolicy.textContent = profile.autoCompactsContext
-        ? i18n.t('contextWindow.autoCompact')
-        : '';
+      contextBudgetPolicy.textContent = [
+        isEstimated ? i18n.t('contextWindow.estimated') : '',
+        profile.autoCompactsContext ? i18n.t('contextWindow.autoCompact') : '',
+      ].filter(Boolean).join(' · ');
     }
     contextBudget.title = [
       i18n.t('contextWindow.title'),

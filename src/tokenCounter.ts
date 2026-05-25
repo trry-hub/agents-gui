@@ -1,10 +1,6 @@
-import { countTokens as countAnthropicTokens } from '@anthropic-ai/tokenizer';
-import { getEncoding, type Tiktoken } from 'js-tiktoken';
 import { AssistantContextSnapshot, AssistantTokenUsage } from './assistantTypes';
 import { CliProfile, CliTokenizerConfig, inferTokenizerFromModelId } from './cliProfiles';
 import { renderAssistantContext } from './promptBuilder';
-
-const openAiEncoders = new Map<string, Tiktoken>();
 
 export function countContextTokens(
   snapshot: AssistantContextSnapshot,
@@ -12,46 +8,59 @@ export function countContextTokens(
   modelId?: string
 ): AssistantTokenUsage {
   const tokenizer = profile.tokenizer ?? inferTokenizerFromModelId(modelId);
-  if (!tokenizer) {
-    return {
-      precision: 'unavailable',
-      reason: `${profile.name} does not expose a local tokenizer for its current model.`,
-    };
-  }
-
   const text = renderAssistantContext(snapshot);
 
-  try {
-    switch (tokenizer.provider) {
-      case 'openai':
-        return {
-          precision: 'exact',
-          tokens: getOpenAiEncoding(tokenizer.encoding).encode(text).length,
-          tokenizer: tokenizer.label,
-        };
-      case 'anthropic':
-        return {
-          precision: 'exact',
-          tokens: countAnthropicTokens(text),
-          tokenizer: tokenizer.label,
-        };
-    }
-  } catch (error) {
-    return {
-      precision: 'unavailable',
-      tokenizer: tokenizer.label,
-      reason: error instanceof Error ? error.message : `${profile.name} tokenizer failed.`,
-    };
-  }
+  return {
+    precision: 'estimated',
+    tokens: estimateTextTokens(text, tokenizer),
+    tokenizer: tokenizer ? `${tokenizer.label} estimate` : 'Generic estimate',
+  };
 }
 
-function getOpenAiEncoding(encoding: 'o200k_base' | 'cl100k_base'): Tiktoken {
-  const cached = openAiEncoders.get(encoding);
-  if (cached) {
-    return cached;
+export function estimateTextTokens(text: string, tokenizer?: CliTokenizerConfig): number {
+  if (!text.trim()) {
+    return 0;
   }
 
-  const encoder = getEncoding(encoding);
-  openAiEncoders.set(encoding, encoder);
-  return encoder;
+  let asciiChars = 0;
+  let cjkChars = 0;
+  let otherChars = 0;
+  let structuralChars = 0;
+
+  for (const char of text) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (codePoint <= 0x7f) {
+      asciiChars += 1;
+      if (/\w/.test(char) === false && /\s/.test(char) === false) {
+        structuralChars += 1;
+      }
+      continue;
+    }
+    if (isCjkCodePoint(codePoint)) {
+      cjkChars += 1;
+      continue;
+    }
+    otherChars += 1;
+  }
+
+  const asciiCharsPerToken = tokenizer?.provider === 'anthropic'
+    ? 3.7
+    : tokenizer?.provider === 'openai' && tokenizer.encoding === 'cl100k_base'
+      ? 3.8
+      : 4;
+  const asciiTokens = asciiChars / asciiCharsPerToken;
+  const cjkTokens = cjkChars * 0.95;
+  const otherTokens = otherChars * 0.6;
+  const structureTokens = structuralChars * 0.18;
+
+  return Math.max(1, Math.ceil(asciiTokens + cjkTokens + otherTokens + structureTokens));
+}
+
+function isCjkCodePoint(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x3400 && codePoint <= 0x9fff) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0x3040 && codePoint <= 0x30ff) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7af)
+  );
 }
