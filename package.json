@@ -2,7 +2,7 @@
   "name": "agents-gui",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "agents-gui",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -144,8 +144,13 @@
       ],
       "scm/title": [
         {
+          "command": "agents-gui.cancelCommitMessageGeneration",
+          "when": "scmProvider == git && scmProviderRootUri in agents-gui.commitMessageGeneratingRoots",
+          "group": "navigation@-100"
+        },
+        {
           "command": "agents-gui.generateCommitMessage",
-          "when": "scmProvider == git && agents-gui.hasStagedChanges",
+          "when": "scmProvider == git && agents-gui.hasStagedChanges && !agents-gui.commitMessageGenerating",
           "group": "navigation@-100"
         }
       ],

@@ -83,6 +83,8 @@ const DEFAULT_CLI_ID = 'opencode';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 const COMMIT_MESSAGE_TIMEOUT_MS = 120_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
+const COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui.commitMessageGenerating';
+const COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui.commitMessageGeneratingRoots';
 
 const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
   en: {
@@ -154,6 +156,7 @@ export class CommitMessageCommand {
 
   watchStagedChangesContext(context: vscode.ExtensionContext): void {
     void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
+    void this.setGeneratingContext(false);
     void this.bindStagedChangesContext(context).catch(() => {
       void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
     });
@@ -177,11 +180,12 @@ export class CommitMessageCommand {
     let completedGeneration = false;
 
     try {
-      await vscode.commands.executeCommand('setContext', 'agents-gui.commitMessageGenerating', true);
+      await this.setGeneratingContext(true);
       const repository = await this.pickRepository(locale, resolveRepositoryRootUri(rootUri));
       if (!repository) {
         return;
       }
+      await this.setGeneratingContext(true, repository.rootUri);
 
       let rawDiff = repository.state.indexChanges.length > 0
         ? await repository.diff(true)
@@ -264,12 +268,25 @@ export class CommitMessageCommand {
       }
       cancellation.dispose();
       this.isGenerating = false;
-      await vscode.commands.executeCommand('setContext', 'agents-gui.commitMessageGenerating', false);
+      await this.setGeneratingContext(false);
     }
   }
 
   cancel(): void {
     this.currentCancellation?.cancel();
+  }
+
+  private async setGeneratingContext(isGenerating: boolean, rootUri?: vscode.Uri): Promise<void> {
+    await vscode.commands.executeCommand(
+      'setContext',
+      COMMIT_MESSAGE_GENERATING_CONTEXT,
+      isGenerating
+    );
+    await vscode.commands.executeCommand(
+      'setContext',
+      COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT,
+      isGenerating && rootUri ? [rootUri.toString()] : []
+    );
   }
 
   private async bindStagedChangesContext(context: vscode.ExtensionContext): Promise<void> {

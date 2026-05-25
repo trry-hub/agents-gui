@@ -21,6 +21,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   void vscode.commands.executeCommand('setContext', 'agents-gui.commitMessageGenerating', false);
+  void vscode.commands.executeCommand('setContext', 'agents-gui.commitMessageGeneratingRoots', []);
   commitMessageCommand.watchStagedChangesContext(context);
   statusBar.text = runtimeT(locale, 'statusBar.text');
   statusBar.tooltip = runtimeT(locale, 'statusBar.tooltip');
