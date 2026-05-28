@@ -117,29 +117,39 @@
                       <input id="apiProviderName" autocomplete="off">
                     </label>
                     <label class="api-field">
-                      <span data-i18n="apiSettings.baseUrl"></span>
-                      <input id="apiProviderBaseUrl" autocomplete="off" spellcheck="false">
+                      <span data-i18n="apiSettings.protocol"></span>
+                      <select id="apiProviderProtocol">
+                        <option value="openai" data-i18n="apiSettings.protocolOpenAI"></option>
+                        <option value="anthropic" data-i18n="apiSettings.protocolAnthropic"></option>
+                      </select>
                     </label>
                     <label class="api-field">
-                      <span data-i18n="apiSettings.apiKeyEnv"></span>
-                      <input id="apiProviderApiKeyEnv" autocomplete="off" spellcheck="false">
+                      <span data-i18n="apiSettings.baseUrl"></span>
+                      <input id="apiProviderBaseUrl" autocomplete="off" spellcheck="false">
                     </label>
                     <label class="api-field">
                       <span data-i18n="apiSettings.apiKey"></span>
                       <input id="apiProviderApiKey" type="password" autocomplete="off" spellcheck="false">
                     </label>
-                    <label class="api-field">
+                    <label class="api-field api-field-wide">
                       <span data-i18n="apiSettings.model"></span>
-                      <input id="apiProviderModel" autocomplete="off" spellcheck="false">
+                      <div class="api-model-row">
+                        <input id="apiProviderModel" list="apiProviderModelOptions" autocomplete="off" spellcheck="false" data-i18n-placeholder="apiSettings.modelPlaceholder">
+                        <datalist id="apiProviderModelOptions"></datalist>
+                        <button class="api-secondary-button" id="apiProviderFetchModels" type="button" data-i18n="apiSettings.fetchModels"></button>
+                      </div>
+                      <span class="api-model-status" id="apiProviderModelStatus" aria-live="polite"></span>
                     </label>
                   </div>
 
-                  <label class="api-provider-enabled">
+                  <label class="api-provider-enabled" hidden>
                     <input id="apiProviderEnabled" type="checkbox">
                     <span data-i18n="apiSettings.enabled"></span>
                   </label>
 
-                  <div class="api-settings-section">
+                  <input id="apiProviderApiKeyEnv" type="hidden">
+
+                  <div class="api-settings-section api-advanced-settings" hidden>
                     <div class="api-settings-row-title">
                       <span data-i18n="apiSettings.extraEnv"></span>
                       <button class="api-link-button" id="apiProviderAddEnv" type="button" data-i18n="apiSettings.addEnv"></button>
@@ -147,7 +157,7 @@
                     <div class="api-extra-env-list" id="apiProviderExtraEnv"></div>
                   </div>
 
-                  <div class="api-settings-section">
+                  <div class="api-settings-section api-advanced-settings" hidden>
                     <div class="api-settings-section-title" data-i18n="apiSettings.binding"></div>
                     <label class="api-field">
                       <span data-i18n="apiSettings.globalDefault"></span>
@@ -238,8 +248,8 @@
           </button>
         </div>
       </div>
+      <div class="slash-palette" id="slashPalette" role="listbox" aria-label="Slash commands" data-i18n-aria="slash.label" hidden></div>
       <div class="prompt-shell">
-        <div class="slash-palette" id="slashPalette" role="listbox" aria-label="Slash commands" data-i18n-aria="slash.label" hidden></div>
         <textarea id="promptInput" name="assistantPrompt" autocomplete="off" rows="1" data-i18n-placeholder="input.placeholder"></textarea>
         <div class="attachment-strip" id="attachmentStrip" aria-live="polite" data-i18n-aria="attachment.label" hidden></div>
 
@@ -248,11 +258,8 @@
             <button class="attach-button" id="attachImageBtn" type="button" data-i18n-title="attachment.add" aria-label="Attach image">
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
             </button>
-            <button class="claude-tool-button" id="claudeContextBtn" type="button" data-i18n-title="context.label" aria-label="Attached context">
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="3.2" y="3" width="9.6" height="10" rx="1.4"/>
-                <path d="M5.4 10.6 10.7 5.3M6 5.3h4.7v4.7"/>
-              </svg>
+            <button class="claude-tool-button" id="claudeSlashBtn" type="button" data-i18n-title="slash.label" aria-label="Slash commands">
+              <span class="claude-slash-glyph" aria-hidden="true">/</span>
             </button>
             <input id="imageFileInput" type="file" accept="image/*" multiple hidden>
             <div class="composer-meta">

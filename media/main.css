@@ -1223,6 +1223,10 @@ body.is-api-settings-open .composer {
   gap: 10px;
 }
 
+.api-field-wide {
+  grid-column: 1 / -1;
+}
+
 .api-field {
   min-width: 0;
   display: grid;
@@ -1251,6 +1255,28 @@ body.is-api-settings-open .composer {
 .api-extra-env-row input:focus,
 .api-agent-binding select:focus {
   border-color: var(--assistant-accent);
+}
+
+.api-model-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: center;
+}
+
+.api-model-status {
+  min-height: 14px;
+  color: var(--assistant-muted);
+  font-size: 11px;
+}
+
+.api-model-status[data-state="success"] {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+.api-model-status[data-state="error"] {
+  color: var(--vscode-errorForeground, #f85149);
 }
 
 .api-provider-enabled {
@@ -1420,6 +1446,7 @@ body.is-api-settings-open .composer {
   }
 
   .api-provider-grid,
+  .api-model-row,
   .api-extra-env-row,
   .api-agent-binding {
     grid-template-columns: minmax(0, 1fr);
@@ -1958,6 +1985,105 @@ textarea:focus {
   justify-items: center;
 }
 
+.claude-code-header {
+  width: 100%;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--vscode-foreground);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.claude-code-mark {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  color: #d97757;
+  flex: 0 0 auto;
+}
+
+.claude-code-mark::before,
+.claude-code-mark::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0;
+  width: 2px;
+  height: 14px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: center;
+}
+
+.claude-code-mark::after {
+  transform: rotate(90deg);
+}
+
+.claude-code-mark {
+  transform: rotate(45deg);
+}
+
+.claude-empty-state {
+  width: min(100%, 360px);
+  margin: auto;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  color: var(--vscode-foreground);
+  text-align: center;
+  transform: translateY(-8%);
+}
+
+.claude-empty-mark {
+  width: 44px;
+  height: 38px;
+  position: relative;
+  color: #d97757;
+}
+
+.claude-empty-mark::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 5px;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  box-shadow:
+    6px 0 0 currentColor,
+    12px 0 0 currentColor,
+    18px 0 0 currentColor,
+    24px 0 0 currentColor,
+    0 6px 0 currentColor,
+    24px 6px 0 currentColor,
+    0 12px 0 currentColor,
+    6px 12px 0 currentColor,
+    12px 12px 0 currentColor,
+    18px 12px 0 currentColor,
+    24px 12px 0 currentColor,
+    0 18px 0 currentColor,
+    6px 18px 0 currentColor,
+    18px 18px 0 currentColor,
+    24px 18px 0 currentColor;
+}
+
+.claude-empty-title {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.claude-empty-subtitle {
+  color: var(--assistant-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .loading-spinner {
   width: 18px;
   height: 18px;
@@ -2405,6 +2531,103 @@ textarea:focus {
 .message-choice-label {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.message.assistant:has(.claude-approval-panel) {
+  justify-items: stretch;
+}
+
+.message.assistant .message-bubble:has(.claude-approval-panel) {
+  width: 100%;
+  max-width: 100%;
+}
+
+.claude-approval-panel {
+  width: min(100%, 680px);
+  margin: 18vh auto 18px;
+  padding: 10px 9px 9px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 72%, transparent);
+  border-radius: 8px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background, var(--assistant-bg));
+  box-shadow: 0 10px 30px -24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.claude-approval-title {
+  margin: 0 0 10px;
+  padding: 0 1px;
+  color: var(--vscode-foreground);
+  font-weight: 650;
+}
+
+.claude-approval-choices {
+  display: grid;
+  gap: 6px;
+}
+
+.claude-approval-choice {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  align-items: center;
+  min-height: 28px;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 76%, transparent);
+  border-radius: 4px;
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--assistant-panel) 72%, transparent);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.claude-approval-choice.is-selected {
+  color: var(--vscode-list-activeSelectionForeground, #fff);
+  border-color: var(--vscode-list-activeSelectionBackground, #0e70c0);
+  background: var(--vscode-list-activeSelectionBackground, #0e70c0);
+}
+
+.claude-approval-choice:hover,
+.claude-approval-choice:focus-visible {
+  border-color: var(--vscode-focusBorder, var(--assistant-accent));
+  outline: none;
+}
+
+.claude-approval-choice-number {
+  color: currentColor;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.claude-approval-choice-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.claude-approval-input {
+  width: 100%;
+  height: 29px;
+  margin-top: 8px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 76%, transparent);
+  border-radius: 4px;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  background: var(--vscode-input-background, var(--assistant-panel));
+  font: inherit;
+}
+
+.claude-approval-input:focus {
+  border-color: var(--vscode-focusBorder, var(--assistant-accent));
+  outline: none;
+}
+
+.claude-approval-hint {
+  margin-top: 9px;
+  padding: 0 1px;
+  color: var(--assistant-muted);
+  font-size: 12px;
 }
 
 .message-actions {
@@ -3088,6 +3311,7 @@ textarea:focus {
 
 .composer {
   grid-area: composer;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: max-content;
@@ -3224,6 +3448,7 @@ textarea:focus {
 
 .prompt-shell {
   position: relative;
+  z-index: 3;
   display: grid;
   align-self: start;
   gap: 10px;
@@ -3244,13 +3469,18 @@ textarea:focus {
 body[data-provider="claude"] .prompt-shell {
   gap: 0;
   padding: 0;
-  border-color: #d97757;
+  border-color: color-mix(in srgb, var(--assistant-border) 86%, transparent);
   border-radius: 8px;
   background: var(--vscode-input-background, var(--assistant-surface));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+body[data-provider="claude"] .prompt-shell:focus-within {
+  border-color: color-mix(in srgb, #d97757 58%, var(--assistant-border));
 }
 
 body[data-provider="claude"] .composer {
-  gap: 5px;
+  gap: 7px;
   padding: 4px 16px 8px;
 }
 
@@ -3259,9 +3489,9 @@ body[data-provider="claude"] .claude-terminal-banner {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   color: var(--assistant-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
 }
 
@@ -3298,9 +3528,46 @@ body[data-provider="claude"] .prompt-selectors {
 }
 
 body[data-provider="claude"] .composer-meta,
-body[data-provider="claude"] .model-menu,
 body[data-provider="claude"] .mode-menu,
-body[data-provider="claude"] .context-menu {
+body[data-provider="claude"] .context-menu,
+body[data-provider="claude"] .composer-settings-button {
+  display: none;
+}
+
+body[data-provider="claude"] .composer-footer {
+  display: none;
+}
+
+body[data-provider="claude"] .model-menu.is-visible {
+  display: block;
+  flex: 0 1 auto;
+}
+
+body[data-provider="claude"] .model-menu .option-summary {
+  height: 24px;
+  max-width: 140px;
+  gap: 5px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--vscode-foreground);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+body[data-provider="claude"] .model-menu .option-summary::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  box-shadow: inset 0 0 0 3px var(--vscode-input-background, var(--assistant-surface));
+}
+
+body[data-provider="claude"] .model-menu .option-summary::after {
   display: none;
 }
 
@@ -3329,6 +3596,20 @@ body[data-provider="claude"] .claude-tool-button svg {
   stroke-linejoin: round;
 }
 
+body[data-provider="claude"] .claude-slash-glyph {
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  place-items: center;
+  border: 1.4px solid currentColor;
+  border-radius: 3px;
+  color: currentColor;
+  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 body[data-provider="claude"] .attach-button:hover,
 body[data-provider="claude"] .claude-tool-button:hover {
   background: var(--assistant-hover);
@@ -3344,11 +3625,11 @@ body[data-provider="claude"] .permission-menu .option-summary {
   height: 24px;
   max-width: none;
   gap: 5px;
-  padding: 0 4px;
+  padding: 0 7px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 7px;
   color: var(--vscode-foreground);
-  background: transparent;
+  background: color-mix(in srgb, var(--assistant-hover) 72%, transparent);
   font-size: 12px;
   font-weight: 600;
 }
@@ -4138,7 +4419,6 @@ body[data-provider="opencode"] .attach-button:focus-visible {
   background: color-mix(in srgb, var(--assistant-hover) 74%, transparent);
 }
 
-body[data-provider="opencode"] .model-menu.is-visible,
 body[data-provider="opencode"] .mode-menu.is-visible,
 body[data-provider="opencode"] .context-menu.is-visible {
   display: block;
@@ -4148,12 +4428,6 @@ body[data-provider="opencode"] .context-menu.is-visible {
 body[data-provider="opencode"] .context-menu.is-visible {
   display: block;
   flex: 0 0 auto;
-}
-
-body[data-provider="opencode"] .model-menu.is-visible {
-  order: 3;
-  flex: 0 1 auto;
-  min-width: 0;
 }
 
 body[data-provider="opencode"] .mode-menu.is-visible {
@@ -4202,14 +4476,6 @@ body[data-provider="opencode"] .context-summary {
   font-size: 12px;
   font-weight: 400;
   letter-spacing: 0;
-}
-
-body[data-provider="opencode"] .model-menu .option-summary::before {
-  display: none;
-}
-
-body[data-provider="opencode"] .model-menu .option-summary {
-  max-width: 92px;
 }
 
 body[data-provider="opencode"] .mode-summary {
@@ -4330,22 +4596,30 @@ body[data-provider="opencode"] .send-button:disabled svg {
 }
 
 .slash-palette {
-  position: static;
+  position: absolute;
+  z-index: 2;
+  right: clamp(14px, 2.4vw, 18px);
+  bottom: calc(100% - 8px);
+  left: clamp(14px, 2.4vw, 18px);
   display: grid;
   gap: 1px;
-  width: 100%;
-  max-height: min(42vh, 260px);
-  padding: 0;
+  width: auto;
+  max-height: min(56vh, 430px);
+  margin: 0;
+  padding: 0 0 12px;
   overflow-y: auto;
-  border: 0;
-  border-bottom: 1px solid var(--assistant-border);
-  border-radius: 0;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 48%, transparent);
+  border-radius: 4px 4px 0 0;
   color: var(--vscode-foreground);
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background, var(--assistant-surface)));
-  box-shadow: none;
+  background: var(--vscode-editor-background, var(--assistant-surface));
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+    0 6px 18px color-mix(in srgb, #000 5%, transparent);
   font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
   font-size: 12px;
   line-height: 16px;
+  transform-origin: bottom center;
+  animation: slash-drawer-enter 120ms ease-out;
 }
 
 .slash-palette[hidden] {
@@ -4366,11 +4640,21 @@ body[data-provider="opencode"] .send-button:disabled svg {
   background: transparent;
   text-align: left;
   font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.slash-command:hover {
+  background: var(--assistant-hover);
 }
 
 .slash-command.is-active {
-  background: var(--vscode-list-activeSelectionBackground, #0e70c0);
   color: var(--vscode-list-activeSelectionForeground, #fff);
+  background: var(--vscode-list-activeSelectionBackground, #0e70c0);
+}
+
+.slash-command:active {
+  transform: none;
 }
 
 .slash-command-label {
@@ -4379,6 +4663,10 @@ body[data-provider="opencode"] .send-button:disabled svg {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.slash-command.is-active .slash-command-label {
+  color: inherit;
 }
 
 .slash-command-description {
@@ -4412,16 +4700,9 @@ body[data-provider="opencode"] .send-button:disabled svg {
 }
 
 body[data-provider="opencode"] .slash-palette {
-  width: 100%;
-  padding: 2px 0 1px;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--assistant-border) 78%, transparent);
-  background: color-mix(
-    in srgb,
-    var(--vscode-input-background, var(--assistant-surface)) 94%,
-    var(--vscode-editor-background, var(--assistant-surface)) 6%
-  );
-  box-shadow: none;
+  padding: 2px 0 12px;
+  border-color: color-mix(in srgb, var(--assistant-border) 48%, transparent);
+  background: var(--vscode-editor-background, var(--assistant-surface));
 }
 
 body[data-provider="opencode"] .slash-command {
@@ -4438,6 +4719,171 @@ body[data-provider="opencode"] .slash-command.is-active {
 
 body[data-provider="opencode"] .slash-footer {
   padding-right: 10px;
+}
+
+body[data-provider="claude"] .slash-palette.is-claude-actions {
+  right: 14px;
+  bottom: calc(100% + 8px);
+  left: 14px;
+  gap: 0;
+  max-height: min(46vh, 360px);
+  padding: 6px 0 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 82%, transparent);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--assistant-surface));
+  box-shadow: 0 12px 30px color-mix(in srgb, #000 9%, transparent);
+  font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.claude-action-filter {
+  width: calc(100% - 12px);
+  height: 32px;
+  margin: 0 6px 4px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 42%, transparent);
+  border-radius: 5px;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  background: var(--vscode-input-background, var(--assistant-surface));
+  font: inherit;
+  outline: none;
+}
+
+.claude-action-filter:focus {
+  border-color: color-mix(in srgb, #d97757 42%, var(--assistant-border));
+}
+
+.claude-action-list {
+  max-height: calc(min(46vh, 360px) - 42px);
+  overflow-y: auto;
+}
+
+.claude-action-section {
+  padding: 7px 0 8px;
+  border-top: 1px solid var(--assistant-soft-border);
+}
+
+.claude-action-section:first-child {
+  border-top: 0;
+}
+
+.claude-action-section-title {
+  padding: 0 12px 6px;
+  color: var(--assistant-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+body[data-provider="claude"] .slash-command.claude-action-item {
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: 0;
+  color: var(--vscode-foreground);
+  background: transparent;
+  font: inherit;
+}
+
+body[data-provider="claude"] .slash-command.claude-action-item:hover,
+body[data-provider="claude"] .slash-command.claude-action-item.is-active {
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--assistant-hover) 78%, transparent);
+}
+
+.claude-action-label {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claude-action-trailing {
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--assistant-muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claude-action-effort-dots {
+  width: 72px;
+  height: 18px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 16px 9px, color-mix(in srgb, var(--assistant-muted) 42%, transparent) 0 1.8px, transparent 2px),
+    radial-gradient(circle at 28px 9px, color-mix(in srgb, var(--assistant-muted) 46%, transparent) 0 1.8px, transparent 2px),
+    radial-gradient(circle at 42px 9px, var(--vscode-foreground) 0 6px, transparent 6.5px),
+    radial-gradient(circle at 56px 9px, color-mix(in srgb, var(--assistant-muted) 46%, transparent) 0 1.8px, transparent 2px),
+    color-mix(in srgb, var(--assistant-hover) 76%, transparent);
+}
+
+.claude-action-toggle {
+  position: relative;
+  width: 28px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--assistant-muted) 18%, transparent);
+}
+
+.claude-action-toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--assistant-muted) 70%, var(--vscode-foreground));
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.claude-action-toggle.is-on::after {
+  transform: translateX(10px);
+  background: var(--vscode-foreground);
+}
+
+.claude-action-empty {
+  padding: 8px 12px 14px;
+  font-family: inherit;
+}
+
+@media (max-width: 380px) {
+  .slash-command,
+  body[data-provider="opencode"] .slash-command {
+    grid-template-columns: 1fr;
+    gap: 1px;
+    align-items: start;
+  }
+
+  .slash-command-description {
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slash-palette {
+    animation: none;
+  }
+}
+
+@keyframes slash-drawer-enter {
+  from {
+    opacity: 0.76;
+    transform: translateY(8px) scaleY(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
 }
 
 .prompt-selectors,
@@ -4896,6 +5342,205 @@ body[data-provider="opencode"] .slash-footer {
   transform: rotate(45deg) translate(-1px, -1px);
 }
 
+body[data-provider="claude"] .permission-menu.is-claude-panel .option-popover {
+  --claude-menu-hover: color-mix(in srgb, #f3f5f9 92%, var(--vscode-editorWidget-background, var(--assistant-surface)));
+  --claude-menu-selected: color-mix(in srgb, #e8eefc 94%, var(--vscode-editorWidget-background, var(--assistant-surface)));
+  --claude-menu-muted: color-mix(in srgb, var(--vscode-foreground) 64%, var(--assistant-muted));
+  width: min(300px, calc(100vw - 16px));
+  max-width: min(300px, calc(100vw - 16px));
+  max-height: none;
+  overflow: hidden;
+  gap: 0;
+  padding: 5px;
+  border-color: color-mix(in srgb, var(--assistant-border) 72%, transparent);
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--assistant-surface));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.12);
+}
+
+body.vscode-dark[data-provider="claude"] .permission-menu.is-claude-panel .option-popover {
+  --claude-menu-hover: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editorWidget-background, var(--assistant-surface)));
+  --claude-menu-selected: color-mix(in srgb, #dbe7ff 16%, var(--vscode-editorWidget-background, var(--assistant-surface)));
+  --claude-menu-muted: color-mix(in srgb, var(--vscode-foreground) 60%, var(--assistant-muted));
+}
+
+.claude-permission-panel-header {
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 7px 5px;
+  color: color-mix(in srgb, var(--vscode-foreground) 84%, var(--assistant-muted));
+  font-size: 11.5px;
+  line-height: 1;
+}
+
+.claude-permission-panel-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--assistant-muted);
+  font-size: 10px;
+}
+
+.claude-permission-panel-shortcut kbd {
+  min-width: 18px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 80%, transparent);
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--vscode-foreground) 70%, var(--assistant-muted));
+  background: color-mix(in srgb, var(--assistant-panel) 75%, transparent);
+  font: inherit;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-list {
+  min-width: 0;
+  gap: 1px;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-list .option-list-item {
+  min-height: 48px;
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
+  gap: 7px;
+  align-items: center;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--vscode-foreground);
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-list .option-list-item:hover,
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-list .option-list-item:focus-visible {
+  color: var(--vscode-foreground);
+  background: var(--claude-menu-hover);
+  outline: none;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-list .option-list-item.is-selected {
+  color: var(--vscode-foreground);
+  background: var(--claude-menu-selected);
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  justify-self: center;
+  color: var(--claude-menu-muted);
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-icon::before,
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-icon::after {
+  content: none;
+  display: none;
+}
+
+.claude-lucide-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex: 0 0 auto;
+  vector-effect: non-scaling-stroke;
+}
+
+.claude-permission-option-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.claude-permission-option-title,
+.claude-permission-option-description {
+  min-width: 0;
+}
+
+.claude-permission-option-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.16;
+}
+
+.claude-permission-option-description {
+  color: var(--claude-menu-muted);
+  font-size: 11px;
+  line-height: 1.14;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .claude-permission-option-title,
+body[data-provider="claude"] .permission-menu.is-claude-panel .claude-permission-option-description {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .claude-permission-option-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-check {
+  width: 8px;
+  height: 13px;
+  justify-self: center;
+}
+
+body[data-provider="claude"] .permission-menu.is-claude-panel .permission-option-item.is-selected .permission-option-check {
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+}
+
+.claude-permission-effort-row {
+  width: 100%;
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  padding: 7px 7px 1px;
+  border: 0;
+  border-top: 1px solid var(--assistant-soft-border);
+  color: var(--vscode-foreground);
+  background: transparent;
+  cursor: default;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.claude-effort-icon {
+  position: relative;
+  width: 18px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--vscode-foreground) 72%, var(--assistant-muted));
+}
+
+.claude-effort-icon .claude-lucide-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.claude-effort-dots {
+  width: 72px;
+  height: 18px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 16px 9px, color-mix(in srgb, var(--assistant-muted) 42%, transparent) 0 1.8px, transparent 2px),
+    radial-gradient(circle at 28px 9px, color-mix(in srgb, var(--assistant-muted) 46%, transparent) 0 1.8px, transparent 2px),
+    radial-gradient(circle at 42px 9px, var(--vscode-foreground) 0 6px, transparent 6.5px),
+    radial-gradient(circle at 56px 9px, color-mix(in srgb, var(--assistant-muted) 46%, transparent) 0 1.8px, transparent 2px),
+    color-mix(in srgb, var(--assistant-hover) 76%, transparent);
+}
+
 .option-list-item.is-disabled {
   color: var(--assistant-muted);
   opacity: 0.56;
@@ -5223,6 +5868,7 @@ textarea:disabled {
   }
 
   .api-provider-grid,
+  .api-model-row,
   .api-extra-env-row,
   .api-agent-binding {
     grid-template-columns: 1fr;

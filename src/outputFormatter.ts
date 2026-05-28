@@ -214,6 +214,9 @@ function renderClaudeJsonEventLine(line: string): RenderedClaudeJsonEvent | unde
   }
 
   const eventType = pickString(event.type);
+  const subtype = pickString(event.subtype);
+  const isError = event.is_error === true;
+  const errorText = pickString(event.error, event.message, event.result);
   const streamEvent = firstObject(event.event);
   const streamEventType = pickString(streamEvent.type);
   const delta = firstObject(streamEvent.delta);
@@ -240,7 +243,18 @@ function renderClaudeJsonEventLine(line: string): RenderedClaudeJsonEvent | unde
     return { text: '' };
   }
 
-  if (eventType === 'assistant' || eventType === 'result' || eventType === 'system' || eventType === 'user') {
+  if (eventType === 'error' || isError) {
+    return { text: errorText ? `Error: ${errorText}\n` : '' };
+  }
+
+  if (eventType === 'result') {
+    if (subtype && subtype !== 'success' && errorText) {
+      return { text: `Error: ${errorText}\n` };
+    }
+    return { text: '' };
+  }
+
+  if (eventType === 'assistant' || eventType === 'system' || eventType === 'user') {
     return { text: '' };
   }
 

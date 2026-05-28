@@ -38,6 +38,19 @@ export interface CliOptionSelection {
   permissionMode?: string;
 }
 
+export type CliSlashCommandKind = 'local' | 'native';
+
+export interface CliSlashCommand {
+  name: string;
+  aliases?: string[];
+  kind: CliSlashCommandKind;
+  /** Local webview action name. Native commands are delegated to provider-specific bridges. */
+  local?: string;
+  descriptionKey: string;
+  /** The extension can execute this native command through a structured provider API. */
+  nativeApi?: boolean;
+}
+
 export type CliTaskIntent =
   | 'planning'
   | 'implementation'
@@ -104,6 +117,8 @@ export interface CliProfile {
   icon: string;
   /** Capability labels shown in the assistant workbench */
   capabilities: string[];
+  /** Provider-owned slash commands and native controls exposed by the webview. */
+  slashCommands?: CliSlashCommand[];
   /** Task-fit scores used by the workbench recommendation engine */
   taskRouting: CliTaskRouting;
   /** Provider-native agent/mode presets shown in the composer */
@@ -116,18 +131,100 @@ export interface CliProfile {
   version?: string;
 }
 
+const CLAUDE_SLASH_COMMANDS: CliSlashCommand[] = [
+  { name: 'model', kind: 'local', local: 'model', descriptionKey: 'slash.model.desc' },
+  {
+    name: 'permissions',
+    aliases: ['permission'],
+    kind: 'local',
+    local: 'permissions',
+    descriptionKey: 'slash.permissions.desc',
+  },
+  {
+    name: 'terminal',
+    aliases: ['terminal-setup'],
+    kind: 'local',
+    local: 'terminal',
+    descriptionKey: 'slash.terminal.desc',
+  },
+];
+
+const OPENCODE_SLASH_COMMANDS: CliSlashCommand[] = [
+  {
+    name: 'sessions',
+    aliases: ['session', 'resume', 'continue'],
+    kind: 'local',
+    local: 'sessions',
+    descriptionKey: 'slash.sessions.desc',
+  },
+  {
+    name: 'models',
+    aliases: ['model'],
+    kind: 'local',
+    local: 'models',
+    descriptionKey: 'slash.models.desc',
+  },
+  {
+    name: 'agents',
+    aliases: ['agent'],
+    kind: 'local',
+    local: 'agents',
+    descriptionKey: 'slash.agents.desc',
+  },
+  {
+    name: 'mcps',
+    aliases: ['mcp'],
+    kind: 'local',
+    local: 'mcp',
+    descriptionKey: 'slash.mcps.desc',
+  },
+  { name: 'variants', kind: 'local', local: 'variants', descriptionKey: 'slash.variants.desc' },
+  { name: 'connect', kind: 'local', local: 'connect', descriptionKey: 'slash.connect.desc' },
+  {
+    name: 'org',
+    aliases: ['orgs', 'switch-org'],
+    kind: 'local',
+    local: 'org',
+    descriptionKey: 'slash.org.desc',
+  },
+  { name: 'status', kind: 'local', local: 'status', descriptionKey: 'slash.status.desc' },
+  {
+    name: 'themes',
+    aliases: ['theme'],
+    kind: 'local',
+    local: 'themes',
+    descriptionKey: 'slash.themes.desc',
+  },
+  {
+    name: 'exit',
+    aliases: ['quit', 'q'],
+    kind: 'local',
+    local: 'exit',
+    descriptionKey: 'slash.exit.desc',
+  },
+  ...['undo', 'redo', 'compact', 'fork', 'share', 'unshare'].map((name) => ({
+    name,
+    kind: 'native' as const,
+    descriptionKey: 'slash.native.desc',
+    nativeApi: true,
+  })),
+];
+
 export const CLI_PROFILES: CliProfile[] = [
   {
     id: 'claude',
     name: 'Claude Code',
     description: 'Strong project-aware coding agent for multi-file implementation and refactors.',
     command: 'claude',
+    contextWindowTokens: 200000,
+    autoCompactsContext: true,
     tokenizer: { provider: 'anthropic', label: 'Claude tokenizer' },
     promptArgs: ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'],
     inputMode: 'argument',
     accent: '#d97757',
     icon: '◆',
     capabilities: ['agent', 'multi-file', 'refactor'],
+    slashCommands: CLAUDE_SLASH_COMMANDS,
     taskRouting: {
       planning: 6,
       implementation: 5,
@@ -158,6 +255,78 @@ export const CLI_PROFILES: CliProfile[] = [
         description: 'Review-focused Claude Code workflow.',
         instruction:
           'Claude Code review workflow: lead with findings, risks, and missing tests before summary.',
+      },
+    ],
+    defaultModel: 'configured',
+    customModelArgPrefix: ['--model'],
+    modelOptions: [
+      {
+        id: 'configured',
+        label: 'Configured',
+        summaryLabel: 'Configured',
+        description: 'Use the Claude Code model configured in settings or environment variables.',
+      },
+      {
+        id: 'sonnet',
+        label: 'Sonnet',
+        description: 'Use Claude Code latest Sonnet alias.',
+        args: ['--model', 'sonnet'],
+      },
+      {
+        id: 'opus',
+        label: 'Opus',
+        description: 'Use Claude Code latest Opus alias.',
+        args: ['--model', 'opus'],
+      },
+      {
+        id: 'custom',
+        label: 'Custom',
+        description: 'Enter a Claude Code model alias or full model id.',
+        custom: true,
+      },
+    ],
+    defaultRuntime: 'defaultEffort',
+    runtimeModes: [
+      {
+        id: 'defaultEffort',
+        label: 'Default effort',
+        summaryLabel: 'Default effort',
+        description: 'Use the Claude Code configured effort level.',
+      },
+      {
+        id: 'effortLow',
+        label: 'Low effort',
+        summaryLabel: 'Effort low',
+        description: 'Use lower reasoning effort for fast/simple tasks.',
+        args: ['--effort', 'low'],
+      },
+      {
+        id: 'effortMedium',
+        label: 'Medium effort',
+        summaryLabel: 'Effort medium',
+        description: 'Use medium reasoning effort.',
+        args: ['--effort', 'medium'],
+      },
+      {
+        id: 'effortHigh',
+        label: 'High effort',
+        summaryLabel: 'Effort high',
+        description: 'Use high reasoning effort for complex changes.',
+        args: ['--effort', 'high'],
+      },
+      {
+        id: 'effortXhigh',
+        label: 'XHigh effort',
+        summaryLabel: 'Effort xhigh',
+        description: 'Use extra-high reasoning effort when the selected model supports it.',
+        args: ['--effort', 'xhigh'],
+      },
+      {
+        id: 'effortMax',
+        label: 'Max effort',
+        summaryLabel: 'Effort max',
+        description: 'Use maximum reasoning effort when the selected model supports it.',
+        args: ['--effort', 'max'],
       },
     ],
     defaultPermissionMode: 'default',
@@ -431,6 +600,7 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#a855f7',
     icon: 'O',
     capabilities: ['agent', 'terminal', 'workspace'],
+    slashCommands: OPENCODE_SLASH_COMMANDS,
     taskRouting: {
       planning: 2,
       implementation: 4,

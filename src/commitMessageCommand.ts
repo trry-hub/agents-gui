@@ -81,7 +81,7 @@ interface CommitMessageGenerationResult {
 
 const DEFAULT_CLI_ID = 'opencode';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
-const COMMIT_MESSAGE_TIMEOUT_MS = 120_000;
+const COMMIT_MESSAGE_TIMEOUT_MS = 90_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
 const STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui.commitMessageStagedRoots';
 const COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui.commitMessageGenerating';
@@ -666,21 +666,31 @@ export class CommitMessageCommand {
       }, COMMIT_MESSAGE_TIMEOUT_MS);
 
       disposables.push(
-        session.onOutput.event((chunk) => {
-          const normalized = normalizeCliOutputChunk(chunk, session.cliId, buffer);
-          buffer = normalized.buffer;
-          output += normalized.text;
-          onPartial(normalizeCliOutput(output, session.cliId));
-        }),
-        session.onStderr.event((chunk) => {
-          stderr += normalizeCliOutput(chunk, session.cliId);
-        }),
-        session.onError.event((message) => {
-          settle(() => reject(new Error(message)));
-        }),
-        session.onEnd.event((exitCode) => {
+        session.onEvent.event((event) => {
+          if (event.type === 'output' && event.stream === 'stdout') {
+            const normalized = normalizeCliOutputChunk(event.text, session.cliId, buffer);
+            buffer = normalized.buffer;
+            output += normalized.text;
+            onPartial(normalizeCliOutput(output, session.cliId));
+            return;
+          }
+
+          if (event.type === 'output' && event.stream === 'stderr') {
+            stderr += normalizeCliOutput(event.text, session.cliId);
+            return;
+          }
+
+          if (event.type === 'error') {
+            settle(() => reject(new Error(event.message)));
+            return;
+          }
+
+          if (event.type !== 'end') {
+            return;
+          }
+
           output += flushCliOutputBuffer(buffer, session.cliId);
-          if (exitCode === 0) {
+          if (event.exitCode === 0) {
             const normalizedOutput = normalizeCliOutput(output, session.cliId);
             const normalizedStderr = normalizeCliOutput(stderr, session.cliId).trim();
             if (!normalizedOutput.trim() && isLikelyCliError(normalizedStderr)) {
@@ -692,7 +702,7 @@ export class CommitMessageCommand {
             return;
           }
 
-          const details = (stderr || output || `CLI exited with code ${exitCode}`).trim();
+          const details = (stderr || output || `CLI exited with code ${event.exitCode}`).trim();
           settle(() => reject(new Error(details)));
         }),
         token.onCancellationRequested(() => {

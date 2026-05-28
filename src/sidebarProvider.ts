@@ -1,10 +1,13 @@
 import * as fs from 'fs';
+import * as http from 'http';
+import * as https from 'https';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   ApiProviderSettings,
   sanitizeApiProviderSettings,
   resolveApiProviderRuntime,
+  type ApiProviderProtocol,
   type CustomApiProviderConfig,
   type ApiProviderRuntimeConfig,
 } from './apiProviders';
@@ -172,8 +175,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'refreshApiProviderSettings':
           await this.sendApiProviderSettings();
           break;
+        case 'fetchApiProviderModels':
+          await this.fetchApiProviderModels(message);
+          break;
         case 'stop':
           this.handleStop(this.resolveCliId(message));
+          break;
+        case 'sendSessionInput':
+          await this.handleSessionInput(message);
           break;
         case 'checkProfiles':
           await this.sendProfiles();
@@ -449,7 +458,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async saveApiProviderSettings(rawSettings: unknown): Promise<void> {
-    const settings = sanitizeApiProviderSettings(rawSettings);
+    const settings = this.filterApiProviderSettingsForInstalledAgents(
+      sanitizeApiProviderSettings(rawSettings)
+    );
     const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
 
     await Promise.all([
@@ -463,6 +474,70 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     ]);
 
     await this.sendApiProviderSettings();
+  }
+
+  private async fetchApiProviderModels(message: {
+    requestId?: unknown;
+    provider?: {
+      protocol?: unknown;
+      baseUrl?: unknown;
+      apiKey?: unknown;
+      apiKeyEnv?: unknown;
+    };
+  }): Promise<void> {
+    const requestId = typeof message.requestId === 'number' ? message.requestId : 0;
+    try {
+      const provider = message.provider && typeof message.provider === 'object'
+        ? message.provider
+        : {};
+      const protocol: ApiProviderProtocol = provider.protocol === 'anthropic' ? 'anthropic' : 'openai';
+      const baseUrl = typeof provider.baseUrl === 'string' ? provider.baseUrl.trim() : '';
+      const explicitApiKey = typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '';
+      const apiKeyEnv = typeof provider.apiKeyEnv === 'string'
+        ? provider.apiKeyEnv.trim().replace(/[^A-Za-z0-9_]/g, '')
+        : '';
+      const apiKey = explicitApiKey || (apiKeyEnv ? process.env[apiKeyEnv] || '' : '');
+      if (!baseUrl) {
+        throw new Error('Base URL is required');
+      }
+
+      const models = await this.requestApiProviderModelList(protocol, baseUrl, apiKey);
+      this.view?.webview.postMessage({
+        command: 'apiProviderModelsResult',
+        requestId,
+        ok: true,
+        models,
+      });
+    } catch (error) {
+      this.view?.webview.postMessage({
+        command: 'apiProviderModelsResult',
+        requestId,
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async requestApiProviderModelList(
+    protocol: ApiProviderProtocol,
+    baseUrl: string,
+    apiKey: string
+  ): Promise<string[]> {
+    const endpoint = `${baseUrl.replace(/\/+$/, '')}/models`;
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+    };
+    if (apiKey) {
+      if (protocol === 'anthropic') {
+        headers['x-api-key'] = apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+      } else {
+        headers.authorization = `Bearer ${apiKey}`;
+      }
+    }
+
+    const response = await requestJson(endpoint, headers);
+    return extractModelIds(response);
   }
 
   private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
@@ -480,11 +555,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private getApiProviderSettings(): ApiProviderSettings {
     const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
-    return sanitizeApiProviderSettings({
-      customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
-      defaultProviderId: config.get<string>('defaultProviderId', ''),
-      agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
-    });
+    return this.filterApiProviderSettingsForInstalledAgents(
+      sanitizeApiProviderSettings({
+        customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
+        defaultProviderId: config.get<string>('defaultProviderId', ''),
+        agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
+      })
+    );
+  }
+
+  private filterApiProviderSettingsForInstalledAgents(
+    settings: ApiProviderSettings
+  ): ApiProviderSettings {
+    if (this.profilesById.size === 0) {
+      return settings;
+    }
+
+    return {
+      ...settings,
+      agentProviderByCliId: Object.fromEntries(
+        Object.entries(settings.agentProviderByCliId).filter(([cliId]) => (
+          this.profilesById.has(cliId)
+        ))
+      ),
+    };
   }
 
   private getHomeAgentSettings(): HomeAgentSettings {
@@ -860,59 +954,64 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     this.wiredSessionIds.add(session.id);
 
-    const outputDisposable = session.onOutput.event((data) => {
+    const eventDisposable = session.onEvent.event((event) => {
       this.clearNoOutputNoticeTimer(session.id);
-      const normalized = normalizeCliOutputChunk(
-        data,
-        session.cliId,
-        this.outputBuffers.get(session.id) ?? ''
-      );
-      this.outputBuffers.set(session.id, normalized.buffer);
-      if (!normalized.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
+
+      if (event.type === 'output' && event.stream === 'stdout') {
+        const normalized = normalizeCliOutputChunk(
+          event.text,
+          session.cliId,
+          this.outputBuffers.get(session.id) ?? ''
+        );
+        this.outputBuffers.set(session.id, normalized.buffer);
+        if (!normalized.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
+          return;
+        }
+
+        this.view?.webview.postMessage({
+          command: 'output',
+          cliId: session.cliId,
+          text: normalized.text,
+          thinking: normalized.thinking,
+          activities: normalized.activities,
+          status: normalized.status,
+          sessionId: session.id,
+          openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
+          stream: event.stream,
+        });
         return;
       }
 
-      this.view?.webview.postMessage({
-        command: 'output',
-        cliId: session.cliId,
-        text: normalized.text,
-        thinking: normalized.thinking,
-        activities: normalized.activities,
-        status: normalized.status,
-        sessionId: session.id,
-        openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),
-        stream: 'stdout',
-      });
-    });
+      if (event.type === 'output' && event.stream === 'stderr') {
+        const text = normalizeCliOutput(event.text, session.cliId);
+        if (!text) {
+          return;
+        }
 
-    const stderrDisposable = session.onStderr.event((data) => {
-      this.clearNoOutputNoticeTimer(session.id);
-      const text = normalizeCliOutput(data, session.cliId);
-      if (!text) {
+        this.view?.webview.postMessage({
+          command: 'output',
+          cliId: session.cliId,
+          text,
+          sessionId: session.id,
+          stream: event.stream,
+        });
         return;
       }
 
-      this.view?.webview.postMessage({
-        command: 'output',
-        cliId: session.cliId,
-        text,
-        sessionId: session.id,
-        stream: 'stderr',
-      });
-    });
+      if (event.type === 'error') {
+        this.view?.webview.postMessage({
+          command: 'error',
+          cliId: session.cliId,
+          text: normalizeCliOutput(event.message, session.cliId),
+          sessionId: session.id,
+        });
+        return;
+      }
 
-    const errorDisposable = session.onError.event((data) => {
-      this.clearNoOutputNoticeTimer(session.id);
-      this.view?.webview.postMessage({
-        command: 'error',
-        cliId: session.cliId,
-        text: normalizeCliOutput(data, session.cliId),
-        sessionId: session.id,
-      });
-    });
+      if (event.type !== 'end') {
+        return;
+      }
 
-    const endDisposable = session.onEnd.event((code) => {
-      this.clearNoOutputNoticeTimer(session.id);
       const buffered = this.outputBuffers.get(session.id);
       const flushed = flushCliOutputBuffer(buffered ?? '', session.cliId);
       this.outputBuffers.delete(session.id);
@@ -922,7 +1021,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           cliId: session.cliId,
           text: flushed,
           sessionId: session.id,
-          openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),
+          openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
           stream: 'stdout',
         });
       }
@@ -930,15 +1029,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.view?.webview.postMessage({
         command: 'sessionEnd',
         cliId: session.cliId,
-        exitCode: code,
+        exitCode: event.exitCode,
         sessionId: session.id,
-        openCodeSessionId: session.openCodeSessionId ?? session.eventStream?.sessionId(),
+        openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
       });
       this.activeSessions.delete(session.cliId);
       this.wiredSessionIds.delete(session.id);
     });
 
-    this.disposables.push(outputDisposable, stderrDisposable, errorDisposable, endDisposable);
+    this.disposables.push(eventDisposable);
   }
 
   private handleStop(cliId: string): void {
@@ -948,6 +1047,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.cleanupSessionState(session);
       this.view?.webview.postMessage({ command: 'stopped', cliId, sessionId: session.id });
     }
+  }
+
+  private async handleSessionInput(message: {
+    cliId?: string;
+    text?: string;
+  }): Promise<void> {
+    const cliId = this.resolveCliId(message);
+    const text = String(message.text || '').trim();
+    const session = this.activeSessions.get(cliId);
+    const ok = Boolean(text && session && this.cliManager.sendInput(session.id, text));
+
+    await this.view?.webview.postMessage({
+      command: 'sessionInputResult',
+      cliId,
+      sessionId: session?.id,
+      ok,
+    });
   }
 
   private cleanupSessionState(session: Session): void {
@@ -1522,6 +1638,100 @@ function extensionForMime(mimeType: string): string {
     default:
       return '.png';
   }
+}
+
+function requestJson(urlText: string, headers: Record<string, string>): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let url: URL;
+    try {
+      url = new URL(urlText);
+    } catch {
+      reject(new Error('Invalid Base URL'));
+      return;
+    }
+
+    const client = url.protocol === 'http:' ? http : https;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      reject(new Error('Base URL must start with http:// or https://'));
+      return;
+    }
+
+    const request = client.request(
+      url,
+      {
+        method: 'GET',
+        headers,
+        timeout: 15000,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8');
+          if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+            reject(new Error(`Models request failed: HTTP ${response.statusCode || 'unknown'}`));
+            return;
+          }
+          try {
+            resolve(body ? JSON.parse(body) : {});
+          } catch {
+            reject(new Error('Models response is not valid JSON'));
+          }
+        });
+      }
+    );
+
+    request.on('timeout', () => {
+      request.destroy(new Error('Models request timed out'));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+function extractModelIds(value: unknown): string[] {
+  const items = modelSourceArray(value);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  items.forEach((item) => {
+    const id = modelIdFromItem(item);
+    if (!id || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    result.push(id);
+  });
+  return result.sort((a, b) => a.localeCompare(b));
+}
+
+function modelSourceArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value && typeof value === 'object' && Array.isArray((value as { data?: unknown }).data)) {
+    return (value as { data: unknown[] }).data;
+  }
+  if (value && typeof value === 'object' && Array.isArray((value as { models?: unknown }).models)) {
+    return (value as { models: unknown[] }).models;
+  }
+  return [];
+}
+
+function modelIdFromItem(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (!value || typeof value !== 'object') {
+    return '';
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.id === 'string'
+    ? record.id.trim()
+    : typeof record.name === 'string'
+      ? record.name.trim()
+      : '';
 }
 
 function getNonce(): string {

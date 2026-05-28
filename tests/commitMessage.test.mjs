@@ -223,7 +223,7 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   const scmTitleActions = manifest.contributes.menus['scm/title'] ?? [];
   const scmIdleAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.generateCommitMessage'
-      && item.when === 'scmProvider == git && scmProviderRootUri in agents-gui.commitMessageStagedRoots && !agents-gui.commitMessageGenerating'
+      && item.when === 'scmProvider == git && scmProviderRootUri not in agents-gui.commitMessageGeneratingRoots'
   );
   const scmCancelAction = scmTitleActions.find(
     (item) => item.command === 'agents-gui.cancelCommitMessageGeneration'
@@ -248,20 +248,13 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   assert.equal(cancelCommand.icon, '$(debug-stop)');
   assert.ok(!scmInputBoxCommands.includes('agents-gui.generateCommitMessage'));
   assert.equal(scmIdleAction.group, 'navigation@-100');
-  assert.match(scmIdleAction.when, /scmProviderRootUri in agents-gui\.commitMessageStagedRoots/);
-  assert.match(scmIdleAction.when, /!agents-gui\.commitMessageGenerating/);
+  assert.match(scmIdleAction.when, /scmProvider == git/);
+  assert.match(scmIdleAction.when, /scmProviderRootUri not in agents-gui\.commitMessageGeneratingRoots/);
+  assert.ok(!scmIdleAction.when.includes('commitMessageStagedRoots'));
   assert.ok(!scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading'));
   assert.equal(scmCancelAction.group, 'navigation@-100');
   assert.match(scmCancelAction.when, /scmProviderRootUri in agents-gui\.commitMessageGeneratingRoots/);
-  assert.deepEqual(properties['agents-gui.commitMessage.provider'].enum, [
-    'default',
-    'claude',
-    'gemini',
-    'codex',
-    'opencode',
-    'goose',
-    'aider',
-  ]);
+  assert.equal(properties['agents-gui.commitMessage.provider'].enum, undefined);
   assert.equal(properties['agents-gui.commitMessage.provider'].default, 'default');
   assert.ok(properties['agents-gui.commitMessage.language']);
   assert.ok(properties['agents-gui.commitMessage.maxDiffChars']);
@@ -292,6 +285,15 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /getRepository\(rootUri\)/);
   assert.match(source, /generateCommitMessageWithCancellation/);
   assert.match(source, /generateCommitMessageWithFallback/);
+  assert.match(source, /session\.onEvent\.event\(\(event\) =>/);
+  assert.match(source, /event\.type === 'output' && event\.stream === 'stdout'/);
+  assert.match(source, /event\.type === 'output' && event\.stream === 'stderr'/);
+  assert.match(source, /event\.type === 'error'/);
+  assert.match(source, /event\.type !== 'end'/);
+  assert.doesNotMatch(source, /session\.onOutput\.event/);
+  assert.doesNotMatch(source, /session\.onStderr\.event/);
+  assert.doesNotMatch(source, /session\.onError\.event/);
+  assert.doesNotMatch(source, /session\.onEnd\.event/);
   assert.match(source, /profile\.id === 'opencode'/);
   assert.match(
     source,
@@ -339,7 +341,13 @@ test('OpenCode server commit generation waits for completed text parts only', ()
   const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
 
   assert.match(source, /onPartial\?: \(text: string\) => void/);
-  assert.match(source, /waitForOpenCodeServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*errorStream\s*\)/s);
+  assert.match(source, /const eventStream = this\.openOpenCodePromptEventStream\(serverUrl, sessionId, onPartial\);/);
+  assert.match(source, /waitForOpenCodeServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*eventStream\s*\)/s);
+  assert.match(source, /OPEN_CODE_PROMPT_FALLBACK_POLL_INTERVAL_MS = 1000/);
+  assert.match(source, /OPEN_CODE_PROMPT_TIMEOUT_MS = 90_000/);
+  assert.match(source, /waitForOpenCodeEventCompletion\(eventStream, token\)/);
+  assert.match(source, /fetchOpenCodeSessionText\(serverUrl, sessionId, directory\)/);
+  assert.match(source, /const \[statusPayload, messages\] = await Promise\.all\(\[/);
   assert.match(source, /const textState = this\.extractOpenCodeAssistantTextState\(messages\);/);
   assert.match(source, /tools:\s*\{ '\*': false \}/);
   assert.match(source, /onPartial\?\.\(textState\.text\);/);

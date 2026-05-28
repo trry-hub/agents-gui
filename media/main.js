@@ -42,6 +42,51 @@
   const THINKING_ICON_SVG = '<svg class="message-thinking-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4.25 4.25 0 0 0-2.35 7.79c.45.3.72.74.72 1.21v.25h3.26v-.25c0-.47.27-.91.72-1.21A4.25 4.25 0 0 0 8 1.75Z"/><path d="M6.5 12.25h3M6.9 14h2.2"/></svg>';
   const THINKING_CHEVRON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>';
   const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const LUCIDE_ICON_DEFS = Object.freeze({
+    hand: [
+      ['path', { d: 'M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2' }],
+      ['path', { d: 'M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2' }],
+      ['path', { d: 'M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8' }],
+      ['path', { d: 'M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15' }],
+    ],
+    'code-xml': [
+      ['path', { d: 'm18 16 4-4-4-4' }],
+      ['path', { d: 'm6 8-4 4 4 4' }],
+      ['path', { d: 'm14.5 4-5 16' }],
+    ],
+    'notebook-tabs': [
+      ['path', { d: 'M2 6h4' }],
+      ['path', { d: 'M2 10h4' }],
+      ['path', { d: 'M2 14h4' }],
+      ['path', { d: 'M2 18h4' }],
+      ['rect', { width: '16', height: '20', x: '4', y: '2', rx: '2' }],
+      ['path', { d: 'M15 2v20' }],
+      ['path', { d: 'M15 7h5' }],
+      ['path', { d: 'M15 12h5' }],
+      ['path', { d: 'M15 17h5' }],
+    ],
+    zap: [
+      ['path', { d: 'M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z' }],
+    ],
+    'sliders-horizontal': [
+      ['path', { d: 'M10 5H3' }],
+      ['path', { d: 'M12 19H3' }],
+      ['path', { d: 'M14 3v4' }],
+      ['path', { d: 'M16 17v4' }],
+      ['path', { d: 'M21 12h-9' }],
+      ['path', { d: 'M21 19h-5' }],
+      ['path', { d: 'M21 5h-7' }],
+      ['path', { d: 'M8 10v4' }],
+      ['path', { d: 'M8 12H3' }],
+    ],
+  });
+  const CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID = Object.freeze({
+    default: 'hand',
+    acceptEdits: 'code-xml',
+    plan: 'notebook-tabs',
+    auto: 'zap',
+  });
   const OPENCODE_OPTION_DIALOG_KINDS = new Set(['sessions', 'models', 'agents']);
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
   const DEFAULT_CONTEXT_OPTIONS = Object.freeze({
@@ -68,9 +113,11 @@
   let commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
   let apiProviderEnvStatusById = {};
   let editingApiProviderId = '';
+  let apiProviderModelFetchRequestId = 0;
   let activeSettingsSection = 'agents';
   const settingsSaveStatusTimers = {};
   let claudeTerminalBannerDismissed = Boolean(saved.claudeTerminalBannerDismissed);
+  let claudeModelMenuExplicit = false;
   let taskBoardDismissed = Boolean(saved.taskBoardDismissed);
   let legacyWorkflowMode = saved.workflowMode || (saved.mode === 'agent' ? 'execute' : undefined);
   let hasAppliedPersistentSelection = false;
@@ -82,6 +129,7 @@
   let streamTargets = {};
   let taskBySessionId = {};
   const stoppedSessionIds = new Set();
+  const dismissedClaudeApprovalKeys = new Set();
   let pendingTaskByProvider = {};
   let runningByProvider = {};
   let pendingByProvider = {};
@@ -94,6 +142,10 @@
   let openCodeDialogKind = '';
   let openCodeDialogQuery = '';
   let openCodeDialogActiveIndex = 0;
+  let openCodeDialogOpenSequence = 0;
+  let openCodeDialogOpenedAt = 0;
+  let openCodeDialogCommandEchoQuery = '';
+  let openCodeDialogEchoCleanupPending = false;
 
   const taskBoard = document.getElementById('taskBoard');
   const sidebar = document.getElementById('sidebar');
@@ -128,7 +180,7 @@
   const slashPalette = document.getElementById('slashPalette');
   const claudeTerminalBanner = document.getElementById('claudeTerminalBanner');
   const claudeTerminalDismiss = document.getElementById('claudeTerminalDismiss');
-  const claudeContextBtn = document.getElementById('claudeContextBtn');
+  const claudeSlashBtn = document.getElementById('claudeSlashBtn');
   const codexTerminalBanner = document.getElementById('codexTerminalBanner');
   const codexTerminalStop = document.getElementById('codexTerminalStop');
   const codexTerminalOpen = document.getElementById('codexTerminalOpen');
@@ -170,10 +222,14 @@
   const apiProviderAdd = document.getElementById('apiProviderAdd');
   const apiProviderForm = document.getElementById('apiProviderForm');
   const apiProviderName = document.getElementById('apiProviderName');
+  const apiProviderProtocol = document.getElementById('apiProviderProtocol');
   const apiProviderBaseUrl = document.getElementById('apiProviderBaseUrl');
   const apiProviderApiKey = document.getElementById('apiProviderApiKey');
   const apiProviderApiKeyEnv = document.getElementById('apiProviderApiKeyEnv');
   const apiProviderModel = document.getElementById('apiProviderModel');
+  const apiProviderModelOptions = document.getElementById('apiProviderModelOptions');
+  const apiProviderFetchModels = document.getElementById('apiProviderFetchModels');
+  const apiProviderModelStatus = document.getElementById('apiProviderModelStatus');
   const apiProviderEnabled = document.getElementById('apiProviderEnabled');
   const apiProviderExtraEnv = document.getElementById('apiProviderExtraEnv');
   const apiProviderAddEnv = document.getElementById('apiProviderAddEnv');
@@ -191,16 +247,6 @@
     { name: 'refresh', kind: 'local', local: 'refresh', descriptionKey: 'slash.refresh.desc' },
     { name: 'stop', kind: 'local', local: 'stop', descriptionKey: 'slash.stop.desc' },
     { name: 'copy', kind: 'local', local: 'copy', descriptionKey: 'slash.copy.desc' },
-    { name: 'sessions', aliases: ['session', 'resume', 'continue'], kind: 'local', local: 'sessions', providers: ['opencode'], descriptionKey: 'slash.sessions.desc' },
-    { name: 'models', aliases: ['model'], kind: 'local', local: 'models', providers: ['opencode'], descriptionKey: 'slash.models.desc' },
-    { name: 'agents', aliases: ['agent'], kind: 'local', local: 'agents', providers: ['opencode'], descriptionKey: 'slash.agents.desc' },
-    { name: 'mcps', aliases: ['mcp'], kind: 'local', local: 'mcp', providers: ['opencode'], descriptionKey: 'slash.mcps.desc' },
-    { name: 'variants', kind: 'local', local: 'variants', providers: ['opencode'], descriptionKey: 'slash.variants.desc' },
-    { name: 'connect', kind: 'local', local: 'connect', providers: ['opencode'], descriptionKey: 'slash.connect.desc' },
-    { name: 'org', aliases: ['orgs', 'switch-org'], kind: 'local', local: 'org', providers: ['opencode'], descriptionKey: 'slash.org.desc' },
-    { name: 'status', kind: 'local', local: 'status', providers: ['opencode'], descriptionKey: 'slash.status.desc' },
-    { name: 'themes', aliases: ['theme'], kind: 'local', local: 'themes', providers: ['opencode'], descriptionKey: 'slash.themes.desc' },
-    { name: 'exit', aliases: ['quit', 'q'], kind: 'local', local: 'exit', providers: ['opencode'], descriptionKey: 'slash.exit.desc' },
     {
       name: 'review',
       action: 'reviewFile',
@@ -239,187 +285,41 @@
       prompt: i18n.t('slash.init.prompt'),
       descriptionKey: 'slash.init.desc',
     },
-    ...[
-      'add-dir',
-      'agents',
-      'bug',
-      'compact',
-      'config',
-      'cost',
-      'doctor',
-      'login',
-      'logout',
-      'mcp',
-      'memory',
-      'model',
-      'permissions',
-      'pr_comments',
-      'sandbox',
-      'status',
-      'terminal-setup',
-      'usage',
-      'vim',
-    ].map((name) => ({ name, kind: 'native', providers: ['claude'], descriptionKey: 'slash.native.desc' })),
-    ...[
-      'permissions',
-      'sandbox-add-read-dir',
-      'agent',
-      'apps',
-      'plugins',
-      'compact',
-      'diff',
-      'exit',
-      'feedback',
-      'logout',
-      'mcp',
-      'mention',
-      'model',
-      'fast',
-      'personality',
-      'ps',
-      'fork',
-      'side',
-      'resume',
-      'quit',
-      'status',
-      'debug-config',
-      'statusline',
-      'title',
-      'keymap',
-    ].map((name) => ({ name, kind: 'native', providers: ['codex'], descriptionKey: 'slash.native.desc' })),
-    ...[
-      'undo',
-      'redo',
-      'compact',
-      'fork',
-      'share',
-      'unshare',
-    ].map((name) => ({ name, kind: 'native', providers: ['opencode'], descriptionKey: 'slash.native.desc' })),
-    ...[
-      'about',
-      'agents',
-      'auth',
-      'bug',
-      'chat',
-      'commands',
-      'compress',
-      'directory',
-      'dir',
-      'docs',
-      'editor',
-      'extensions',
-      'hooks',
-      'ide',
-      'mcp',
-      'memory',
-      'model',
-      'permissions',
-      'policies',
-      'privacy',
-      'quit',
-      'exit',
-      'restore',
-      'rewind',
-      'resume',
-      'settings',
-      'shells',
-      'bashes',
-      'setup-github',
-      'skills',
-      'stats',
-      'terminal-setup',
-      'theme',
-      'tools',
-      'upgrade',
-      'vim',
-    ].map((name) => ({ name, kind: 'native', providers: ['gemini'], descriptionKey: 'slash.native.desc' })),
-    ...[
-      '?',
-      'builtin',
-      'endplan',
-      'exit',
-      'quit',
-      'extension',
-      'mode',
-      'prompt',
-      'prompts',
-      'recipe',
-      'compact',
-      'r',
-      't',
-    ].map((name) => ({ name, kind: 'native', providers: ['goose'], descriptionKey: 'slash.native.desc' })),
-    ...[
-      'add',
-      'architect',
-      'ask',
-      'chat-mode',
-      'code',
-      'commit',
-      'copy-context',
-      'diff',
-      'drop',
-      'edit',
-      'editor',
-      'editor-model',
-      'exit',
-      'git',
-      'lint',
-      'load',
-      'ls',
-      'map',
-      'map-refresh',
-      'model',
-      'models',
-      'multiline-mode',
-      'ok',
-      'paste',
-      'quit',
-      'read-only',
-      'reasoning-effort',
-      'report',
-      'reset',
-      'run',
-      'save',
-      'settings',
-      'test',
-      'think-tokens',
-      'tokens',
-      'undo',
-      'voice',
-      'weak-model',
-      'web',
-    ].map((name) => ({ name, kind: 'native', providers: ['aider'], descriptionKey: 'slash.native.desc' })),
   ];
-  const OPENCODE_SLASH_COMMAND_NAMES = new Set([
-    'new',
-    'help',
-    'sessions',
-    'models',
-    'agents',
-    'mcps',
-    'variants',
-    'connect',
-    'org',
-    'status',
-    'themes',
-    'exit',
-    'undo',
-    'redo',
-    'compact',
-    'fork',
-    'share',
-    'unshare',
-  ]);
-  const OPENCODE_NATIVE_API_COMMAND_NAMES = new Set([
-    'share',
-    'unshare',
-    'compact',
-    'fork',
-    'undo',
-    'redo',
+  const CLAUDE_ACTION_DRAWER_SECTIONS = Object.freeze([
+    {
+      id: 'context',
+      titleKey: 'claude.actions.context',
+      actions: [
+        { id: 'attachFile', labelKey: 'claude.actions.attachFile' },
+        { id: 'mentionFile', labelKey: 'claude.actions.mentionFile' },
+        { id: 'clearConversation', labelKey: 'claude.actions.clearConversation' },
+        { id: 'rewind', labelKey: 'claude.actions.rewind' },
+      ],
+    },
+    {
+      id: 'model',
+      titleKey: 'claude.actions.model',
+      actions: [
+        { id: 'switchModel', labelKey: 'claude.actions.switchModel', trailingKey: 'claude.actions.defaultRecommended' },
+        { id: 'effort', labelKey: 'claude.actions.effort', kind: 'effort' },
+        { id: 'thinking', labelKey: 'claude.actions.thinking', kind: 'toggle' },
+        { id: 'accountUsage', labelKey: 'claude.actions.accountUsage' },
+      ],
+    },
+    {
+      id: 'customize',
+      titleKey: 'claude.actions.customize',
+      actions: [
+        { id: 'permissions', labelKey: 'claude.actions.permissions' },
+        { id: 'settings', labelKey: 'claude.actions.settings' },
+      ],
+    },
   ]);
   let slashMatches = [];
   let slashActiveIndex = 0;
+  let slashPaletteMode = '';
+  let claudeActionQuery = '';
   let forceContextMenuVisible = false;
 
   function normalizeMessageText(text) {
@@ -562,6 +462,10 @@
     return profiles.filter((profile) => profile.installed);
   }
 
+  function configurableAgentProfiles() {
+    return installedProfiles();
+  }
+
   function orderedInstalledProfiles() {
     const installed = installedProfiles();
     const orderIds = normalizeHomeAgentSettings(homeAgentSettings).agentOrder;
@@ -608,6 +512,42 @@
       document.body.classList.contains('vscode-dark') ||
       document.body.classList.contains('vscode-high-contrast');
     return prefersDarkIcon ? icon.dark || icon.light || '' : icon.light || icon.dark || '';
+  }
+
+  function createLucideIcon(iconName) {
+    const iconDef = LUCIDE_ICON_DEFS[iconName];
+    if (!iconDef) {
+      return null;
+    }
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.classList.add('claude-lucide-icon');
+    svg.dataset.iconSource = 'lucide';
+    svg.dataset.iconName = iconName;
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+
+    iconDef.forEach(([tagName, attributes]) => {
+      const node = document.createElementNS(SVG_NS, tagName);
+      Object.entries(attributes).forEach(([name, value]) => {
+        node.setAttribute(name, value);
+      });
+      svg.appendChild(node);
+    });
+
+    return svg;
+  }
+
+  function appendLucideIcon(container, iconName) {
+    const icon = createLucideIcon(iconName);
+    if (icon) {
+      container.appendChild(icon);
+    }
   }
 
   function formatTokenCount(tokens) {
@@ -1274,14 +1214,37 @@
   function localizedPermissionOption(option) {
     const displayOption = localizedCliOption(option, 'permission');
     if (activeProfile()?.id === 'claude' && option?.id === 'default') {
+      const label = i18n.t('claude.permission.default.title');
       return {
         ...displayOption,
-        label: i18n.t('claude.permission.askBeforeEdits'),
-        summaryLabel: i18n.t('claude.permission.askBeforeEdits'),
+        label,
+        summaryLabel: label,
       };
     }
 
     return displayOption;
+  }
+
+  function claudePermissionPanelOption(option) {
+    const key = `claude.permission.${option?.id || 'default'}`;
+    const title = i18n.t(`${key}.title`);
+    const description = i18n.t(`${key}.description`);
+    return {
+      ...localizedPermissionOption(option),
+      label: title === `${key}.title` ? localizedPermissionOption(option).label : title,
+      description: description === `${key}.description`
+        ? localizedPermissionOption(option).description
+        : description,
+    };
+  }
+
+  function claudeEffortValueLabel(runtime) {
+    const key = `claude.effort.${runtime?.id || 'defaultEffort'}`;
+    const label = i18n.t(key);
+    if (label !== key) {
+      return label;
+    }
+    return localizedCliOption(runtime, 'runtime')?.label || i18n.t('claude.effort.defaultEffort');
   }
 
   function activeModelId(cliId = activeId) {
@@ -1834,10 +1797,12 @@
           .map((provider, index) => ({
             id: sanitizeApiProviderId(provider.id || provider.name || `provider-${index + 1}`),
             name: String(provider.name || `Custom Provider ${index + 1}`).trim(),
+            protocol: normalizeApiProviderProtocol(provider.protocol),
             baseUrl: String(provider.baseUrl || '').trim(),
             apiKey: String(provider.apiKey || ''),
             apiKeyEnv: sanitizeEnvName(provider.apiKeyEnv || ''),
             model: String(provider.model || '').trim(),
+            models: normalizeModelList(provider.models),
             extraEnv: normalizeExtraEnv(provider.extraEnv),
             enabled: provider.enabled !== false,
           }))
@@ -1845,10 +1810,16 @@
     const enabledIds = new Set(providers.filter((provider) => provider.enabled).map((provider) => provider.id));
     const defaultProviderId = enabledIds.has(record.defaultProviderId) ? record.defaultProviderId : '';
     const agentProviderByCliId = {};
+    const knownCliIds = profilesLoading
+      ? undefined
+      : new Set(configurableAgentProfiles().map((profile) => profile.id));
     const bindings = record.agentProviderByCliId && typeof record.agentProviderByCliId === 'object'
       ? record.agentProviderByCliId
       : {};
     Object.entries(bindings).forEach(([cliId, providerId]) => {
+      if (knownCliIds && !knownCliIds.has(cliId)) {
+        return;
+      }
       if (providerId === 'inherit' || enabledIds.has(providerId)) {
         agentProviderByCliId[cliId] = providerId;
       }
@@ -1867,6 +1838,27 @@
       }
       return result;
     }, {});
+  }
+
+  function normalizeApiProviderProtocol(value) {
+    return value === 'anthropic' ? 'anthropic' : 'openai';
+  }
+
+  function normalizeModelList(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const seen = new Set();
+    const result = [];
+    value.forEach((item) => {
+      const model = String(item || '').trim();
+      if (!model || seen.has(model)) {
+        return;
+      }
+      seen.add(model);
+      result.push(model);
+    });
+    return result;
   }
 
   function sanitizeApiProviderId(value) {
@@ -1898,10 +1890,12 @@
     return {
       id: id || `custom-${Date.now()}`,
       name: '',
+      protocol: 'openai',
       baseUrl: '',
       apiKey: '',
       apiKeyEnv: '',
       model: '',
+      models: [],
       extraEnv: {},
       enabled: true,
     };
@@ -1958,11 +1952,14 @@
   function renderApiProviderForm() {
     const provider = currentApiProvider();
     const disabled = !provider;
-    [apiProviderName, apiProviderBaseUrl, apiProviderApiKey, apiProviderApiKeyEnv, apiProviderModel].forEach((field) => {
+    [apiProviderName, apiProviderProtocol, apiProviderBaseUrl, apiProviderApiKey, apiProviderApiKeyEnv, apiProviderModel].forEach((field) => {
       if (field) {
         field.disabled = disabled;
       }
     });
+    if (apiProviderFetchModels) {
+      apiProviderFetchModels.disabled = disabled;
+    }
     if (apiProviderEnabled) {
       apiProviderEnabled.disabled = disabled;
     }
@@ -1972,23 +1969,49 @@
 
     if (!provider) {
       if (apiProviderName) apiProviderName.value = '';
+      if (apiProviderProtocol) apiProviderProtocol.value = 'openai';
       if (apiProviderBaseUrl) apiProviderBaseUrl.value = '';
       if (apiProviderApiKey) apiProviderApiKey.value = '';
       if (apiProviderApiKeyEnv) apiProviderApiKeyEnv.value = '';
       if (apiProviderModel) apiProviderModel.value = '';
       if (apiProviderEnabled) apiProviderEnabled.checked = true;
+      renderApiProviderModelOptions([]);
+      setApiProviderModelStatus('');
       renderExtraEnvRows({});
       return;
     }
 
     editingApiProviderId = provider.id;
     if (apiProviderName) apiProviderName.value = provider.name;
+    if (apiProviderProtocol) apiProviderProtocol.value = normalizeApiProviderProtocol(provider.protocol);
     if (apiProviderBaseUrl) apiProviderBaseUrl.value = provider.baseUrl;
     if (apiProviderApiKey) apiProviderApiKey.value = provider.apiKey;
     if (apiProviderApiKeyEnv) apiProviderApiKeyEnv.value = provider.apiKeyEnv;
     if (apiProviderModel) apiProviderModel.value = provider.model;
     if (apiProviderEnabled) apiProviderEnabled.checked = provider.enabled;
+    renderApiProviderModelOptions(provider.models);
+    setApiProviderModelStatus('');
     renderExtraEnvRows(provider.extraEnv);
+  }
+
+  function renderApiProviderModelOptions(models) {
+    if (!apiProviderModelOptions) {
+      return;
+    }
+    apiProviderModelOptions.innerHTML = '';
+    normalizeModelList(models).forEach((model) => {
+      const option = document.createElement('option');
+      option.value = model;
+      apiProviderModelOptions.appendChild(option);
+    });
+  }
+
+  function setApiProviderModelStatus(text, state = '') {
+    if (!apiProviderModelStatus) {
+      return;
+    }
+    apiProviderModelStatus.textContent = text;
+    apiProviderModelStatus.dataset.state = state;
   }
 
   function renderExtraEnvRows(extraEnv) {
@@ -2036,7 +2059,15 @@
       return;
     }
     apiProviderAgentBindings.innerHTML = '';
-    profiles.forEach((profile) => {
+    const availableProfiles = configurableAgentProfiles();
+    if (availableProfiles.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'api-provider-status';
+      empty.textContent = i18n.t('provider.noInstalled');
+      apiProviderAgentBindings.appendChild(empty);
+      return;
+    }
+    availableProfiles.forEach((profile) => {
       const row = document.createElement('label');
       row.className = 'api-agent-binding';
 
@@ -2083,7 +2114,9 @@
 
   function collectApiProviderForm() {
     const provider = currentApiProvider() || createApiProviderDraft(editingApiProviderId);
-    const name = apiProviderName?.value.trim() || '';
+    const protocol = normalizeApiProviderProtocol(apiProviderProtocol?.value);
+    const baseUrl = apiProviderBaseUrl?.value.trim() || '';
+    const name = apiProviderName?.value.trim() || inferApiProviderName(protocol, baseUrl);
     if (!name) {
       showApiSettingsError(i18n.t('apiSettings.nameRequired'));
       return undefined;
@@ -2092,32 +2125,45 @@
     const nextProvider = {
       ...provider,
       name,
-      baseUrl: apiProviderBaseUrl?.value.trim() || '',
+      protocol,
+      baseUrl,
       apiKey: apiProviderApiKey?.value.trim() || '',
-      apiKeyEnv: sanitizeEnvName(apiProviderApiKeyEnv?.value || ''),
+      apiKeyEnv: sanitizeEnvName(apiProviderApiKeyEnv?.value || provider.apiKeyEnv || ''),
       model: apiProviderModel?.value.trim() || '',
-      enabled: Boolean(apiProviderEnabled?.checked),
-      extraEnv: collectExtraEnvRows(),
+      models: normalizeModelList(provider.models),
+      enabled: true,
+      extraEnv: { ...provider.extraEnv },
     };
     const providers = apiProviderSettings.customProviders.some((item) => item.id === nextProvider.id)
       ? apiProviderSettings.customProviders.map((item) => item.id === nextProvider.id ? nextProvider : item)
       : [...apiProviderSettings.customProviders, nextProvider];
     const enabledIds = new Set(providers.filter((item) => item.enabled).map((item) => item.id));
-    const defaultProviderId = enabledIds.has(apiProviderDefaultSelect?.value || '')
-      ? apiProviderDefaultSelect.value
-      : '';
-    const agentProviderByCliId = {};
-    apiProviderAgentBindings?.querySelectorAll('select[data-cli-id]').forEach((select) => {
-      if (select.value === 'inherit' || enabledIds.has(select.value)) {
-        agentProviderByCliId[select.dataset.cliId] = select.value;
-      }
-    });
+    const defaultProviderId = enabledIds.has(apiProviderSettings.defaultProviderId)
+      ? apiProviderSettings.defaultProviderId
+      : (nextProvider.enabled ? nextProvider.id : '');
+    const agentProviderByCliId = Object.fromEntries(
+      Object.entries(apiProviderSettings.agentProviderByCliId || {}).filter(([, providerId]) => (
+        providerId === 'inherit' || enabledIds.has(providerId)
+      ))
+    );
 
     return normalizeApiProviderSettings({
       customProviders: providers,
       defaultProviderId,
       agentProviderByCliId,
     });
+  }
+
+  function inferApiProviderName(protocol, baseUrl) {
+    try {
+      const hostname = new URL(baseUrl).hostname.replace(/^www\./, '');
+      if (hostname) {
+        return hostname;
+      }
+    } catch {
+      // Use the protocol label below when the URL is empty or incomplete.
+    }
+    return protocol === 'anthropic' ? 'Anthropic compatible' : 'OpenAI compatible';
   }
 
   function collectExtraEnvRows() {
@@ -2160,6 +2206,58 @@
     renderApiProviderSettings();
   }
 
+  function requestApiProviderModels() {
+    const provider = currentApiProvider();
+    if (!provider) {
+      return;
+    }
+    const requestId = ++apiProviderModelFetchRequestId;
+    setApiProviderModelStatus(i18n.t('apiSettings.fetchingModels'), 'loading');
+    if (apiProviderFetchModels) {
+      apiProviderFetchModels.disabled = true;
+    }
+    vscode.postMessage({
+      command: 'fetchApiProviderModels',
+      requestId,
+      provider: {
+        protocol: normalizeApiProviderProtocol(apiProviderProtocol?.value),
+        baseUrl: apiProviderBaseUrl?.value.trim() || '',
+        apiKey: apiProviderApiKey?.value.trim() || '',
+        apiKeyEnv: sanitizeEnvName(apiProviderApiKeyEnv?.value || provider.apiKeyEnv || ''),
+      },
+    });
+  }
+
+  function handleApiProviderModelsResult(message) {
+    if (message.requestId !== apiProviderModelFetchRequestId) {
+      return;
+    }
+    if (apiProviderFetchModels) {
+      apiProviderFetchModels.disabled = !currentApiProvider();
+    }
+    if (!message.ok) {
+      const detail = typeof message.message === 'string' ? message.message : '';
+      setApiProviderModelStatus(i18n.t('apiSettings.fetchModelsFailed', { message: detail || 'unknown error' }), 'error');
+      return;
+    }
+    const models = normalizeModelList(message.models);
+    const provider = currentApiProvider();
+    if (provider) {
+      provider.models = models;
+      if (!apiProviderModel?.value && models[0]) {
+        provider.model = models[0];
+        apiProviderModel.value = models[0];
+      }
+    }
+    renderApiProviderModelOptions(models);
+    setApiProviderModelStatus(
+      models.length
+        ? i18n.t('apiSettings.fetchModelsSuccess', { count: String(models.length) })
+        : i18n.t('apiSettings.fetchModelsEmpty'),
+      models.length ? 'success' : 'info'
+    );
+  }
+
   function providerStateLabel(profile) {
     if (!profile?.installed) {
       return i18n.t('provider.missing');
@@ -2183,6 +2281,9 @@
         menu.open = false;
       }
     });
+    if (exceptMenu !== modelMenu) {
+      claudeModelMenuExplicit = false;
+    }
   }
 
   function composerPopoverFor(menu) {
@@ -2260,6 +2361,8 @@
     activeModelId(activeId);
     activeRuntimeId(activeId);
     activePermissionId(activeId);
+    claudeModelMenuExplicit = false;
+    closeComposerMenus();
     persist();
     persistUserSelection();
     renderAll();
@@ -2406,10 +2509,6 @@
   }
 
   function slashCommandMatchesProvider(command, profile) {
-    if (profile?.id === 'opencode' && !OPENCODE_SLASH_COMMAND_NAMES.has(command.name)) {
-      return false;
-    }
-
     return !command.providers || command.providers.includes(profile?.id);
   }
 
@@ -2428,11 +2527,32 @@
     });
   }
 
+  function profileSlashCommands(profile) {
+    if (!Array.isArray(profile?.slashCommands)) {
+      return [];
+    }
+
+    return profile.slashCommands
+      .filter((command) => command && typeof command.name === 'string')
+      .map((command) => ({
+        ...command,
+        kind: command.kind || 'local',
+      }));
+  }
+
+  function nativeApiCommandNames(profile) {
+    return new Set(
+      profileSlashCommands(profile)
+        .filter((command) => command.kind === 'native' && command.nativeApi)
+        .map((command) => command.name)
+    );
+  }
+
   function commandsForActiveProvider() {
     const profile = activeProfile();
     const seen = new Set();
     const commands = [];
-    for (const command of SLASH_COMMANDS) {
+    for (const command of [...SLASH_COMMANDS, ...profileSlashCommands(profile)]) {
       if (!slashCommandMatchesProvider(command, profile) || seen.has(command.name)) {
         continue;
       }
@@ -2444,18 +2564,185 @@
     return commands;
   }
 
+  function claudeActionDrawerSections(profile = activeProfile()) {
+    const runtime = activeRuntime(profile);
+    const runtimeId = runtime?.id || 'defaultEffort';
+    const model = activeModel(profile);
+    return CLAUDE_ACTION_DRAWER_SECTIONS.map((section) => ({
+      ...section,
+      title: i18n.t(section.titleKey),
+      actions: section.actions.map((action) => {
+        const label = action.kind === 'effort'
+          ? i18n.t(action.labelKey, { value: claudeEffortValueLabel(runtime) })
+          : i18n.t(action.labelKey);
+        const trailing = action.id === 'switchModel'
+          ? (model?.id === 'configured'
+              ? i18n.t(action.trailingKey)
+              : localizedCliOption(model, 'model')?.label || model?.label || '')
+          : '';
+        return {
+          ...action,
+          name: action.id,
+          sectionId: section.id,
+          label,
+          trailing,
+          active: action.kind === 'toggle' && runtimeId !== 'defaultEffort',
+        };
+      }),
+    }));
+  }
+
+  function claudeActionMatchesQuery(action, query) {
+    if (!query) {
+      return true;
+    }
+
+    const text = `${action.id} ${action.label} ${action.trailing || ''}`.toLowerCase();
+    return text.includes(query.toLowerCase());
+  }
+
+  function renderClaudeActionDrawer({ focusFilter = false } = {}) {
+    if (!slashPalette) {
+      return;
+    }
+
+    const hadFilterFocus = slashPalette.querySelector('.claude-action-filter') === document.activeElement;
+    const query = claudeActionQuery.trim().toLowerCase();
+    const sections = claudeActionDrawerSections();
+    slashMatches = [];
+    slashActiveIndex = Math.max(0, slashActiveIndex);
+    slashPaletteMode = 'claudeActions';
+    slashPalette.innerHTML = '';
+    slashPalette.classList.add('is-claude-actions');
+    slashPalette.setAttribute('role', 'dialog');
+    slashPalette.setAttribute('aria-label', i18n.t('claude.actions.label'));
+
+    const filter = document.createElement('input');
+    filter.className = 'claude-action-filter';
+    filter.type = 'text';
+    filter.value = claudeActionQuery;
+    filter.autocomplete = 'off';
+    filter.spellcheck = false;
+    filter.placeholder = i18n.t('claude.actions.filterPlaceholder');
+    filter.setAttribute('aria-label', i18n.t('claude.actions.filterLabel'));
+    filter.addEventListener('input', () => {
+      claudeActionQuery = filter.value;
+      slashActiveIndex = 0;
+      renderClaudeActionDrawer({ focusFilter: true });
+    });
+    slashPalette.appendChild(filter);
+
+    const list = document.createElement('div');
+    list.className = 'claude-action-list';
+    slashPalette.appendChild(list);
+
+    sections.forEach((section) => {
+      const matches = section.actions.filter((action) => claudeActionMatchesQuery(action, query));
+      if (matches.length === 0) {
+        return;
+      }
+
+      const group = document.createElement('section');
+      group.className = 'claude-action-section';
+
+      const heading = document.createElement('div');
+      heading.className = 'claude-action-section-title';
+      heading.textContent = section.title;
+      group.appendChild(heading);
+
+      matches.forEach((action) => {
+        const index = slashMatches.length;
+        slashMatches.push(action);
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `slash-command claude-action-item${index === slashActiveIndex ? ' is-active' : ''}`;
+        button.dataset.claudeAction = action.id;
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', index === slashActiveIndex ? 'true' : 'false');
+
+        const label = document.createElement('span');
+        label.className = 'claude-action-label';
+        label.textContent = action.label;
+        button.appendChild(label);
+
+        if (action.kind === 'effort') {
+          const dots = document.createElement('span');
+          dots.className = 'claude-action-effort-dots';
+          dots.setAttribute('aria-hidden', 'true');
+          button.appendChild(dots);
+        } else if (action.kind === 'toggle') {
+          const toggle = document.createElement('span');
+          toggle.className = `claude-action-toggle${action.active ? ' is-on' : ''}`;
+          toggle.setAttribute('aria-hidden', 'true');
+          button.appendChild(toggle);
+        } else if (action.trailing) {
+          const trailing = document.createElement('span');
+          trailing.className = 'claude-action-trailing';
+          trailing.textContent = action.trailing;
+          button.appendChild(trailing);
+        }
+
+        group.appendChild(button);
+      });
+
+      list.appendChild(group);
+    });
+
+    if (slashMatches.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'slash-empty claude-action-empty';
+      empty.textContent = i18n.t('claude.actions.empty');
+      list.appendChild(empty);
+    }
+
+    slashActiveIndex = Math.max(0, Math.min(slashActiveIndex, Math.max(0, slashMatches.length - 1)));
+    slashPalette.querySelectorAll('.claude-action-item').forEach((button, index) => {
+      const active = index === slashActiveIndex;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    slashPalette.hidden = false;
+
+    if (focusFilter || hadFilterFocus) {
+      requestAnimationFrame(() => {
+        filter.focus();
+        filter.setSelectionRange(filter.value.length, filter.value.length);
+      });
+    }
+  }
+
   function renderSlashPalette() {
     if (!slashPalette) {
       return;
     }
 
+    const profile = activeProfile();
     const parsed = parseSlashInput(input.value);
+    if (profile?.id === 'claude') {
+      if (slashPaletteMode === 'claudeActions' && !input.disabled) {
+        renderClaudeActionDrawer();
+        return;
+      }
+      if (parsed && !input.disabled) {
+        slashPaletteMode = 'claudeActions';
+        claudeActionQuery = parsed.query || '';
+        input.value = '';
+        resizePromptInput();
+        renderClaudeActionDrawer({ focusFilter: true });
+        return;
+      }
+    }
+
     if (!parsed || input.disabled) {
       hideSlashPalette();
       return;
     }
 
-    const profile = activeProfile();
+    slashPaletteMode = 'commands';
+    slashPalette.classList.remove('is-claude-actions');
+    slashPalette.setAttribute('role', 'listbox');
+    slashPalette.setAttribute('aria-label', i18n.t('slash.label'));
     slashMatches = commandsForActiveProvider()
       .filter((command) => slashCommandMatchesQuery(command, parsed.query))
       .slice(0, 10);
@@ -2508,9 +2795,14 @@
   function hideSlashPalette() {
     slashMatches = [];
     slashActiveIndex = 0;
+    slashPaletteMode = '';
+    claudeActionQuery = '';
     if (slashPalette) {
       slashPalette.hidden = true;
       slashPalette.innerHTML = '';
+      slashPalette.classList.remove('is-claude-actions');
+      slashPalette.setAttribute('role', 'listbox');
+      slashPalette.setAttribute('aria-label', i18n.t('slash.label'));
     }
   }
 
@@ -2550,7 +2842,7 @@
       ?.text;
   }
 
-  function executeLocalSlashCommand(command, args = '') {
+  function executeLocalSlashCommand(command, args = '', sourceQuery = '') {
     switch (command.local) {
       case 'new':
         startNewThread(activeId);
@@ -2558,7 +2850,7 @@
       case 'help':
         if (activeProfile()?.id === 'opencode') {
           closeComposerMenus();
-          showOpenCodeStatusDialog('help');
+          showOpenCodeStatusDialog('help', { commandQuery: sourceQuery });
           return;
         }
         addMessage(activeId, 'system', buildSlashHelpMessage());
@@ -2571,6 +2863,25 @@
           contextMenu.open = true;
         }
         renderContextSummaryLabel();
+        return;
+      case 'model':
+        claudeModelMenuExplicit = activeProfile()?.id === 'claude';
+        closeComposerMenus(modelMenu);
+        modelMenu?.classList.add('is-visible');
+        if (modelMenu) {
+          modelMenu.open = true;
+        }
+        renderModelSelect();
+        scheduleComposerPopoverPosition();
+        return;
+      case 'permissions':
+        closeComposerMenus(permissionMenu);
+        permissionMenu?.classList.add('is-visible');
+        if (permissionMenu) {
+          permissionMenu.open = true;
+        }
+        renderPermissionSelect();
+        scheduleComposerPopoverPosition();
         return;
       case 'refresh':
         vscode.postMessage({ command: 'checkProfiles' });
@@ -2596,24 +2907,24 @@
         return;
       case 'sessions':
         closeComposerMenus();
-        showOpenCodeStatusDialog('sessions');
+        showOpenCodeStatusDialog('sessions', { commandQuery: sourceQuery });
         return;
       case 'models':
         closeComposerMenus();
-        showOpenCodeStatusDialog('models');
+        showOpenCodeStatusDialog('models', { commandQuery: sourceQuery });
         return;
       case 'agents':
         closeComposerMenus();
-        showOpenCodeStatusDialog('agents');
+        showOpenCodeStatusDialog('agents', { commandQuery: sourceQuery });
         return;
       case 'mcp':
         closeComposerMenus();
-        showOpenCodeStatusDialog('mcp');
+        showOpenCodeStatusDialog('mcp', { commandQuery: sourceQuery });
         vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
         return;
       case 'variants':
         closeComposerMenus();
-        showOpenCodeStatusDialog('variants');
+        showOpenCodeStatusDialog('variants', { commandQuery: sourceQuery });
         return;
       case 'connect':
         closeComposerMenus();
@@ -2621,16 +2932,16 @@
         return;
       case 'org':
         closeComposerMenus();
-        showOpenCodeStatusDialog('org');
+        showOpenCodeStatusDialog('org', { commandQuery: sourceQuery });
         return;
       case 'status':
         closeComposerMenus();
-        showOpenCodeStatusDialog('status');
+        showOpenCodeStatusDialog('status', { commandQuery: sourceQuery });
         vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
         return;
       case 'themes':
         closeComposerMenus();
-        showOpenCodeStatusDialog('themes');
+        showOpenCodeStatusDialog('themes', { commandQuery: sourceQuery });
         return;
       case 'exit':
         closeComposerMenus();
@@ -2648,8 +2959,125 @@
     }
   }
 
+  function setClaudeRuntime(value) {
+    const profile = activeProfile();
+    const options = runtimeModesFor(profile);
+    if (!options.some((option) => option.id === value)) {
+      return;
+    }
+
+    activeRuntimeByProvider[activeId] = value;
+    runtimeSelect.value = value;
+    persist();
+    persistUserSelection();
+    renderAll();
+  }
+
+  function cycleClaudeEffort() {
+    const profile = activeProfile();
+    const effortIds = runtimeModesFor(profile)
+      .map((option) => option.id)
+      .filter((id) => id === 'defaultEffort' || id.startsWith('effort'));
+    if (effortIds.length === 0) {
+      return;
+    }
+
+    const current = activeRuntimeId(activeId);
+    const currentIndex = Math.max(0, effortIds.indexOf(current));
+    const next = effortIds[(currentIndex + 1) % effortIds.length];
+    setClaudeRuntime(next);
+  }
+
+  function toggleClaudeThinking() {
+    const current = activeRuntimeId(activeId);
+    setClaudeRuntime(current === 'defaultEffort' ? 'effortHigh' : 'defaultEffort');
+  }
+
+  function rewindActiveConversation() {
+    const thread = ensureActiveThread(activeId);
+    const messages = thread?.messages || [];
+    if (messages.length === 0) {
+      addMessage(activeId, 'system', i18n.t('claude.actions.rewindEmpty'));
+      renderAll();
+      return;
+    }
+
+    let rewindStart = messages.length - 1;
+    while (rewindStart > 0 && messages[rewindStart]?.role !== 'user') {
+      rewindStart -= 1;
+    }
+
+    thread.messages = messages.slice(0, rewindStart);
+    persist();
+    renderAll();
+  }
+
+  function executeClaudeAction(action) {
+    if (!action) {
+      return;
+    }
+
+    switch (action.id) {
+      case 'attachFile':
+        hideSlashPalette();
+        imageFileInput?.click();
+        return;
+      case 'mentionFile':
+        hideSlashPalette();
+        vscode.postMessage({ command: 'openFilePalette' });
+        return;
+      case 'clearConversation':
+        hideSlashPalette();
+        startNewThread(activeId);
+        return;
+      case 'rewind':
+        hideSlashPalette();
+        rewindActiveConversation();
+        return;
+      case 'switchModel':
+        hideSlashPalette();
+        claudeModelMenuExplicit = true;
+        closeComposerMenus(modelMenu);
+        modelMenu?.classList.add('is-visible');
+        if (modelMenu) {
+          modelMenu.open = true;
+        }
+        renderModelSelect();
+        scheduleComposerPopoverPosition();
+        return;
+      case 'effort':
+        cycleClaudeEffort();
+        renderClaudeActionDrawer();
+        return;
+      case 'thinking':
+        toggleClaudeThinking();
+        renderClaudeActionDrawer();
+        return;
+      case 'accountUsage':
+        hideSlashPalette();
+        vscode.postMessage({ command: 'openProviderExtension', cliId: activeId });
+        return;
+      case 'permissions':
+        hideSlashPalette();
+        closeComposerMenus(permissionMenu);
+        permissionMenu?.classList.add('is-visible');
+        if (permissionMenu) {
+          permissionMenu.open = true;
+        }
+        renderPermissionSelect();
+        scheduleComposerPopoverPosition();
+        return;
+      case 'settings':
+        hideSlashPalette();
+        vscode.postMessage({ command: 'openSettings', section: 'apiProviders' });
+        return;
+      default:
+        return;
+    }
+  }
+
   function executeOpenCodeNativeSlashCommand(command) {
-    if (!OPENCODE_NATIVE_API_COMMAND_NAMES.has(command.name)) {
+    if (!nativeApiCommandNames(activeProfile()).has(command.name)) {
       addMessage(
         activeId,
         'system',
@@ -2737,12 +3165,13 @@
 
     const parsed = parseSlashInput(input.value);
     const args = parsed?.args || '';
+    const sourceQuery = parsed?.query || command.name || '';
     input.value = '';
     resizePromptInput();
     hideSlashPalette();
 
     if (command.kind === 'local') {
-      executeLocalSlashCommand(command, args);
+      executeLocalSlashCommand(command, args, sourceQuery);
       renderComposer();
       return;
     }
@@ -3636,14 +4065,94 @@
     return options[openCodeDialogActiveIndex]?.id || '';
   }
 
-  function closeOpenCodeStatusDialog() {
-    openCodeDialogKind = '';
-    renderOpenCodeStatusDialog();
+  function openCodeDialogCommandAliases(kind) {
+    switch (kind) {
+      case 'sessions':
+        return ['session', 'sessions', 'resume', 'continue'];
+      case 'models':
+        return ['model', 'models'];
+      case 'agents':
+        return ['agent', 'agents'];
+      case 'mcp':
+        return ['mcp', 'mcps'];
+      case 'themes':
+        return ['theme', 'themes'];
+      case 'org':
+        return ['org', 'orgs', 'switch-org'];
+      default:
+        return [kind];
+    }
   }
 
-  function showOpenCodeStatusDialog(kind) {
+  function normalizeOpenCodeDialogCommandQuery(value) {
+    return String(value || '').trim().replace(/^\/+/, '').toLowerCase();
+  }
+
+  function isOpenCodeDialogCommandEcho(kind, value) {
+    const query = normalizeOpenCodeDialogCommandQuery(value);
+    return Boolean(
+      query
+      && (
+        query === openCodeDialogCommandEchoQuery
+        || openCodeDialogCommandAliases(kind).includes(query)
+      )
+    );
+  }
+
+  function configureOpenCodeDialogFilter(filter, kind) {
+    filter.name = `opencode-${kind}-filter-${openCodeDialogOpenSequence}`;
+    filter.autocomplete = 'off';
+    filter.spellcheck = false;
+    filter.setAttribute('autocapitalize', 'off');
+    filter.setAttribute('autocorrect', 'off');
+    filter.setAttribute('data-lpignore', 'true');
+    filter.setAttribute('data-1p-ignore', 'true');
+  }
+
+  function clearInitialOpenCodeDialogCommandEcho(filter, kind, renderOptions) {
+    const isInitialOpen = Date.now() - openCodeDialogOpenedAt < 1000;
+    if (
+      !openCodeDialogEchoCleanupPending
+      || !isInitialOpen
+      || openCodeDialogQuery
+      || !isOpenCodeDialogCommandEcho(kind, filter.value)
+    ) {
+      return false;
+    }
+
+    filter.value = '';
+    openCodeDialogQuery = '';
+    openCodeDialogEchoCleanupPending = false;
+    openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex(kind);
+    renderOptions();
+    return true;
+  }
+
+  function focusPromptInputAfterDialogClose() {
+    requestAnimationFrame(() => {
+      input.focus();
+      resizePromptInput();
+    });
+  }
+
+  function closeOpenCodeStatusDialog({ focusPrompt = true } = {}) {
+    openCodeDialogKind = '';
+    openCodeDialogQuery = '';
+    openCodeDialogCommandEchoQuery = '';
+    openCodeDialogEchoCleanupPending = false;
+    renderOpenCodeStatusDialog();
+    if (focusPrompt) {
+      focusPromptInputAfterDialogClose();
+    }
+  }
+
+  function showOpenCodeStatusDialog(kind, options = {}) {
     openCodeDialogKind = kind;
     openCodeDialogQuery = '';
+    openCodeDialogCommandEchoQuery = normalizeOpenCodeDialogCommandQuery(options.commandQuery);
+    openCodeDialogEchoCleanupPending = Boolean(openCodeDialogCommandEchoQuery);
+    openCodeDialogOpenSequence += 1;
+    openCodeDialogOpenedAt = Date.now();
     openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex(kind);
     renderOpenCodeStatusDialog();
   }
@@ -3749,10 +4258,15 @@
     const filter = document.createElement('input');
     filter.className = 'opencode-dialog-filter';
     filter.type = 'text';
+    configureOpenCodeDialogFilter(filter, kind);
     filter.value = openCodeDialogQuery;
     filter.placeholder = 'Search';
     filter.setAttribute('aria-label', 'Search');
     filter.addEventListener('input', () => {
+      if (clearInitialOpenCodeDialogCommandEcho(filter, kind, () => renderOpenCodeModelGroups(list))) {
+        return;
+      }
+
       openCodeDialogQuery = filter.value;
       openCodeDialogActiveIndex = 0;
       renderOpenCodeModelGroups(list);
@@ -3763,6 +4277,14 @@
     list.className = 'opencode-dialog-grouped-options';
     body.appendChild(list);
     renderOpenCodeModelGroups(list);
+    const openSequence = openCodeDialogOpenSequence;
+    requestAnimationFrame(() => {
+      if (openSequence !== openCodeDialogOpenSequence || openCodeDialogKind !== kind) {
+        return;
+      }
+
+      clearInitialOpenCodeDialogCommandEcho(filter, kind, () => renderOpenCodeModelGroups(list));
+    });
 
     const actions = document.createElement('div');
     actions.className = 'opencode-dialog-footer-actions';
@@ -3772,7 +4294,7 @@
     connect.className = 'opencode-dialog-footer-action';
     connect.textContent = 'Connect provider';
     connect.addEventListener('click', () => {
-      closeOpenCodeStatusDialog();
+      closeOpenCodeStatusDialog({ focusPrompt: false });
       openSettingsPage('apiProviders');
     });
     actions.appendChild(connect);
@@ -3804,10 +4326,15 @@
     const filter = document.createElement('input');
     filter.className = 'opencode-dialog-filter';
     filter.type = 'text';
+    configureOpenCodeDialogFilter(filter, 'mcp');
     filter.value = openCodeDialogQuery;
     filter.placeholder = i18n.t('opencode.dialog.mcp.search');
     filter.setAttribute('aria-label', i18n.t('opencode.dialog.mcp.searchAria'));
     filter.addEventListener('input', () => {
+      if (clearInitialOpenCodeDialogCommandEcho(filter, 'mcp', () => renderOpenCodeMcpOptions(list))) {
+        return;
+      }
+
       openCodeDialogQuery = filter.value;
       openCodeDialogActiveIndex = 0;
       renderOpenCodeMcpOptions(list);
@@ -3820,6 +4347,14 @@
     list.setAttribute('aria-label', i18n.t('opencode.dialog.mcp.title'));
     body.appendChild(list);
     renderOpenCodeMcpOptions(list);
+    const openSequence = openCodeDialogOpenSequence;
+    requestAnimationFrame(() => {
+      if (openSequence !== openCodeDialogOpenSequence || openCodeDialogKind !== 'mcp') {
+        return;
+      }
+
+      clearInitialOpenCodeDialogCommandEcho(filter, 'mcp', () => renderOpenCodeMcpOptions(list));
+    });
 
     const actions = document.createElement('div');
     actions.className = 'opencode-dialog-footer-actions';
@@ -4371,9 +4906,18 @@
         return;
       }
 
-      appendEmptyState(i18n.t('empty.title'), i18n.t('empty.subtitle'));
+      if (selectedProfile.id === 'claude') {
+        appendClaudeCodeHeader();
+        appendClaudeEmptyState();
+      } else {
+        appendEmptyState(i18n.t('empty.title'), i18n.t('empty.subtitle'));
+      }
       restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
       return;
+    }
+
+    if (selectedProfile.id === 'claude') {
+      appendClaudeCodeHeader();
     }
 
     let hasVisibleRunningMessage = false;
@@ -4776,6 +5320,44 @@
     messages.appendChild(empty);
   }
 
+  function appendClaudeCodeHeader() {
+    const header = document.createElement('div');
+    header.className = 'claude-code-header';
+
+    const mark = document.createElement('span');
+    mark.className = 'claude-code-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    header.appendChild(mark);
+
+    const label = document.createElement('span');
+    label.textContent = i18n.t('claude.header');
+    header.appendChild(label);
+
+    messages.appendChild(header);
+  }
+
+  function appendClaudeEmptyState() {
+    const empty = document.createElement('div');
+    empty.className = 'claude-empty-state';
+
+    const mark = document.createElement('div');
+    mark.className = 'claude-empty-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    empty.appendChild(mark);
+
+    const title = document.createElement('div');
+    title.className = 'claude-empty-title';
+    title.textContent = i18n.t('claude.empty.title');
+    empty.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.className = 'claude-empty-subtitle';
+    subtitle.textContent = i18n.t('claude.empty.subtitle');
+    empty.appendChild(subtitle);
+
+    messages.appendChild(empty);
+  }
+
   function appendProviderLoadingState() {
     const empty = document.createElement('div');
     empty.className = 'empty-state is-loading';
@@ -4931,17 +5513,44 @@
 
     permissionOptionList.innerHTML = '';
     const profile = activeProfile();
+    const isClaude = profile?.id === 'claude';
+    permissionMenu?.classList.toggle('is-claude-panel', isClaude);
+    const popover = permissionOptionList.closest('.option-popover');
+    popover?.querySelectorAll('.claude-permission-panel-header, .claude-permission-effort-row').forEach((node) => {
+      node.remove();
+    });
+
+    if (isClaude && popover) {
+      const header = document.createElement('div');
+      header.className = 'claude-permission-panel-header';
+
+      const title = document.createElement('span');
+      title.textContent = i18n.t('claude.permissionPanel.title');
+      header.appendChild(title);
+
+      const shortcut = document.createElement('span');
+      shortcut.className = 'claude-permission-panel-shortcut';
+      shortcut.innerHTML = '<kbd>⇧</kbd><span>+</span><kbd>tab</kbd><span></span>';
+      shortcut.lastElementChild.textContent = i18n.t('claude.permissionPanel.shortcut');
+      header.appendChild(shortcut);
+
+      popover.insertBefore(header, permissionOptionList);
+    }
+
+    const claudeVisibleIds = new Set(['default', 'acceptEdits', 'plan', 'auto']);
     const visibleOptions = options.filter((option) => (
-      profile?.id !== 'codex' || option.id !== 'readOnly' || option.id === selectedId
+      (profile?.id !== 'codex' || option.id !== 'readOnly' || option.id === selectedId)
+      && (!isClaude || claudeVisibleIds.has(option.id))
     ));
 
     visibleOptions.forEach((option) => {
-      const displayOption = localizedPermissionOption(option);
+      const displayOption = isClaude ? claudePermissionPanelOption(option) : localizedPermissionOption(option);
       const button = document.createElement('button');
       button.type = 'button';
       button.className = [
         'option-list-item',
         'permission-option-item',
+        isClaude ? 'claude-permission-option-item' : '',
         option.id === selectedId ? 'is-selected' : '',
         option.dangerous ? 'is-danger' : '',
       ].filter(Boolean).join(' ');
@@ -4953,11 +5562,31 @@
       const icon = document.createElement('span');
       icon.className = 'permission-option-icon';
       icon.setAttribute('aria-hidden', 'true');
+      if (isClaude) {
+        appendLucideIcon(icon, CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID[option.id]);
+      }
       button.appendChild(icon);
 
-      const label = document.createElement('span');
-      label.textContent = displayOption.label;
-      button.appendChild(label);
+      if (isClaude) {
+        const copy = document.createElement('span');
+        copy.className = 'claude-permission-option-copy';
+
+        const label = document.createElement('span');
+        label.className = 'claude-permission-option-title';
+        label.textContent = displayOption.label;
+        copy.appendChild(label);
+
+        const description = document.createElement('span');
+        description.className = 'claude-permission-option-description';
+        description.textContent = displayOption.description || '';
+        copy.appendChild(description);
+
+        button.appendChild(copy);
+      } else {
+        const label = document.createElement('span');
+        label.textContent = displayOption.label;
+        button.appendChild(label);
+      }
 
       const check = document.createElement('span');
       check.className = 'permission-option-check';
@@ -4967,6 +5596,32 @@
 
       permissionOptionList.appendChild(button);
     });
+
+    if (isClaude && popover) {
+      const effort = document.createElement('button');
+      effort.type = 'button';
+      effort.className = 'claude-permission-effort-row';
+      effort.tabIndex = -1;
+
+      const icon = document.createElement('span');
+      icon.className = 'claude-effort-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      appendLucideIcon(icon, 'sliders-horizontal');
+      effort.appendChild(icon);
+
+      const label = document.createElement('span');
+      label.textContent = i18n.t('claude.effort.label', {
+        value: claudeEffortValueLabel(activeRuntime(profile)),
+      });
+      effort.appendChild(label);
+
+      const dots = document.createElement('span');
+      dots.className = 'claude-effort-dots';
+      dots.setAttribute('aria-hidden', 'true');
+      effort.appendChild(dots);
+
+      popover.appendChild(effort);
+    }
   }
 
   function renderModelOptionList(options, selectedId) {
@@ -5015,7 +5670,18 @@
       ? activeCustomModel(activeId)
       : displayModel.summaryLabel || displayModel.label || i18n.t('model.short');
     modelSummaryLabel.closest('.option-summary')?.setAttribute('title', displayModel.description || i18n.t('model.label'));
-    modelMenu?.classList.toggle('is-visible', Boolean(profile && options.length > 1));
+    if ((profile?.id === 'opencode' || (profile?.id === 'claude' && !claudeModelMenuExplicit)) && modelMenu) {
+      modelMenu.open = false;
+    }
+    modelMenu?.classList.toggle(
+      'is-visible',
+      Boolean(
+        profile &&
+        profile.id !== 'opencode' &&
+        options.length > 1 &&
+        (profile.id !== 'claude' || (claudeModelMenuExplicit && modelMenu?.open))
+      )
+    );
     customModelField.hidden = !model.custom;
     customModelInput.value = activeCustomModel(activeId);
     customModelInput.disabled = !profile || !profile.installed;
@@ -5793,6 +6459,201 @@
     return cnMap[halfWidth] || halfWidth;
   }
 
+  function extractClaudeApprovalRequest(text) {
+    const source = normalizeMessageText(text).trim();
+    if (!source) {
+      return undefined;
+    }
+
+    const lines = source
+      .split('\n')
+      .map((line) => stripInlineMarkdown(line).trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      return undefined;
+    }
+
+    const titleIndex = lines.findIndex((line) => isClaudeApprovalTitle(line));
+    const choices = extractClaudeApprovalChoices(lines);
+    const hasDefaultChoiceSet = choices.some((choice) => choice.normalized === 'yes') &&
+      choices.some((choice) => choice.normalized === 'yes, allow all edits this session') &&
+      choices.some((choice) => choice.normalized === 'no');
+    const hasPermissionSignal = /\b(?:permission|approval|approve|allow|edit|write|run|execute)\b/i.test(source) ||
+      /(?:确认|允许|批准|修改|编辑|执行|运行)/.test(source);
+
+    if (titleIndex < 0 && !(hasDefaultChoiceSet && hasPermissionSignal)) {
+      return undefined;
+    }
+
+    const title = titleIndex >= 0
+      ? lines[titleIndex]
+      : i18n.t('claude.approval.defaultTitle');
+    const normalizedChoices = normalizeClaudeApprovalChoices(choices);
+    const key = [
+      'claude-approval',
+      title,
+      ...normalizedChoices.map((choice) => choice.label),
+    ].join('|');
+
+    return {
+      key,
+      title,
+      choices: normalizedChoices,
+    };
+  }
+
+  function isClaudeApprovalTitle(line) {
+    const source = String(line || '').trim();
+    return /^Make this edit(?:\s+to\s+.+)?\?$/i.test(source) ||
+      /^(?:Approve|Allow|Run|Execute|Write|Edit)\b.+\?$/i.test(source) ||
+      /\b(?:permission|approval)\b.+\?$/i.test(source) ||
+      /^(?:确认|允许|批准|执行|运行|修改|编辑).+[？?]$/.test(source);
+  }
+
+  function extractClaudeApprovalChoices(lines) {
+    const choices = [];
+    for (const line of lines) {
+      const match = /^(?:([1-9])[\).、]?\s+)?(Yes, allow all edits this session|Yes|No)$/i.exec(line);
+      if (!match) {
+        continue;
+      }
+
+      const label = match[2].replace(/\s+/g, ' ').trim();
+      choices.push({
+        index: match[1] || String(choices.length + 1),
+        label,
+        normalized: label.toLowerCase(),
+        prompt: label,
+      });
+    }
+
+    return choices;
+  }
+
+  function normalizeClaudeApprovalChoices(choices) {
+    const byLabel = new Map((choices || []).map((choice) => [choice.normalized, choice]));
+    return [
+      { index: '1', label: i18n.t('claude.approval.yes'), normalized: 'yes', prompt: 'Yes' },
+      {
+        index: '2',
+        label: i18n.t('claude.approval.yesSession'),
+        normalized: 'yes, allow all edits this session',
+        prompt: 'Yes, allow all edits this session',
+      },
+      { index: '3', label: i18n.t('claude.approval.no'), normalized: 'no', prompt: 'No' },
+    ].map((fallback) => {
+      const matched = byLabel.get(fallback.normalized);
+      return matched
+        ? { ...fallback, index: matched.index || fallback.index, label: matched.label || fallback.label }
+        : fallback;
+    });
+  }
+
+  function appendClaudeApprovalPanel(container, approval) {
+    const panel = document.createElement('div');
+    panel.className = 'claude-approval-panel';
+    panel.dataset.claudeApprovalKey = approval.key;
+    panel.tabIndex = -1;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', approval.title);
+    panel.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        dismissClaudeApproval(approval.key);
+      }
+    });
+
+    const title = document.createElement('div');
+    title.className = 'claude-approval-title';
+    title.textContent = approval.title;
+    panel.appendChild(title);
+
+    const choices = document.createElement('div');
+    choices.className = 'claude-approval-choices';
+    choices.setAttribute('role', 'listbox');
+    choices.setAttribute('aria-label', i18n.t('claude.approval.choices'));
+
+    approval.choices.forEach((choice, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `claude-approval-choice${index === 0 ? ' is-selected' : ''}`;
+      button.dataset.claudeApprovalPrompt = choice.prompt;
+      button.dataset.claudeApprovalKey = approval.key;
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', index === 0 ? 'true' : 'false');
+
+      const number = document.createElement('span');
+      number.className = 'claude-approval-choice-number';
+      number.textContent = choice.index;
+
+      const label = document.createElement('span');
+      label.className = 'claude-approval-choice-label';
+      label.textContent = choice.label;
+
+      button.append(number, label);
+      choices.appendChild(button);
+    });
+    panel.appendChild(choices);
+
+    const fallback = document.createElement('input');
+    fallback.className = 'claude-approval-input';
+    fallback.type = 'text';
+    fallback.autocomplete = 'off';
+    fallback.spellcheck = false;
+    fallback.placeholder = i18n.t('claude.approval.placeholder');
+    fallback.dataset.claudeApprovalKey = approval.key;
+    fallback.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        dismissClaudeApproval(approval.key);
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        const value = fallback.value.trim();
+        if (value) {
+          event.preventDefault();
+          submitClaudeApprovalPrompt(value, approval.key);
+        }
+      }
+    });
+    panel.appendChild(fallback);
+
+    const hint = document.createElement('div');
+    hint.className = 'claude-approval-hint';
+    hint.textContent = i18n.t('claude.approval.cancelHint');
+    panel.appendChild(hint);
+
+    container.appendChild(panel);
+  }
+
+  function dismissClaudeApproval(key) {
+    if (key) {
+      dismissedClaudeApprovalKeys.add(key);
+    }
+    renderMessages();
+    requestAnimationFrame(() => input.focus());
+  }
+
+  function submitClaudeApprovalPrompt(prompt, key) {
+    const text = normalizeMessageText(prompt).trim();
+    if (!text) {
+      return;
+    }
+
+    if (key) {
+      dismissedClaudeApprovalKeys.add(key);
+    }
+
+    if (runningByProvider[activeId] || pendingByProvider[activeId]) {
+      vscode.postMessage({ command: 'sendSessionInput', cliId: activeId, text });
+      renderMessages();
+    } else {
+      send('freeform', text);
+    }
+    requestAnimationFrame(() => input.focus());
+  }
+
   function appendMessageThinking(bubble, text, options = {}) {
     const thinking = createMessageThinkingElement(text, options);
     if (thinking) {
@@ -6121,6 +6982,14 @@
 
   function renderMarkdownWithActivity(container, text, activity, activityTimeline, running, baseDetailKey = '') {
     const normalized = normalizeMessageText(text);
+    const claudeApproval = activeId === 'claude' ? extractClaudeApprovalRequest(normalized) : undefined;
+    if (claudeApproval) {
+      if (!dismissedClaudeApprovalKeys.has(claudeApproval.key)) {
+        appendClaudeApprovalPanel(container, claudeApproval);
+      }
+      return;
+    }
+
     const timeline = normalizeOpenCodeActivityTimeline(activityTimeline);
     const fallbackTimeline = timeline.length > 0
       ? []
@@ -7452,7 +8321,29 @@
     return actionSelect.value || 'freeform';
   }
 
+  function openSlashCommandPalette() {
+    if (activeProfile()?.id === 'claude') {
+      closeComposerMenus();
+      slashPaletteMode = 'claudeActions';
+      claudeActionQuery = '';
+      renderClaudeActionDrawer({ focusFilter: true });
+      return;
+    }
+
+    closeComposerMenus();
+    input.value = '/';
+    resizePromptInput();
+    renderComposer();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
   function sendSelectedAction() {
+    if (slashPaletteMode === 'claudeActions' && slashPaletteVisible()) {
+      executeClaudeAction(slashMatches[slashActiveIndex]);
+      return;
+    }
+
     const slash = parseSlashInput(input.value);
     if (slash && slashMatches.length > 0) {
       executeSlashCommand(slashMatches[slashActiveIndex]);
@@ -7506,6 +8397,28 @@
 
   input.addEventListener('keydown', (event) => {
     if (slashPaletteVisible()) {
+      if (slashPaletteMode === 'claudeActions') {
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          moveSlashSelection(1);
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          moveSlashSelection(-1);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          hideSlashPalette();
+          return;
+        }
+        if (slashMatches.length > 0 && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
+          event.preventDefault();
+          executeClaudeAction(slashMatches[slashActiveIndex]);
+          return;
+        }
+      }
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         moveSlashSelection(1);
@@ -7535,10 +8448,51 @@
   });
 
   slashPalette?.addEventListener('mousedown', (event) => {
+    if (event.target instanceof Element && event.target.closest('.claude-action-filter')) {
+      return;
+    }
     event.preventDefault();
   });
 
+  slashPalette?.addEventListener('keydown', (event) => {
+    if (slashPaletteMode !== 'claudeActions') {
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveSlashSelection(1);
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveSlashSelection(-1);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      hideSlashPalette();
+      input.focus();
+      return;
+    }
+    if (slashMatches.length > 0 && (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) {
+      event.preventDefault();
+      executeClaudeAction(slashMatches[slashActiveIndex]);
+    }
+  });
+
   slashPalette?.addEventListener('click', (event) => {
+    if (slashPaletteMode === 'claudeActions') {
+      const button = event.target.closest('.claude-action-item');
+      if (!button) {
+        return;
+      }
+
+      const action = slashMatches.find((item) => item.id === button.dataset.claudeAction);
+      executeClaudeAction(action);
+      return;
+    }
+
     const button = event.target.closest('.slash-command');
     if (!button) {
       return;
@@ -7568,9 +8522,8 @@
     imageFileInput?.click();
   });
 
-  claudeContextBtn.addEventListener('click', () => {
-    executeLocalSlashCommand({ local: 'context' });
-    input.focus();
+  claudeSlashBtn?.addEventListener('click', () => {
+    openSlashCommandPalette();
   });
 
   claudeTerminalDismiss.addEventListener('click', () => {
@@ -7672,6 +8625,8 @@
     }
   });
 
+  apiProviderFetchModels?.addEventListener('click', requestApiProviderModels);
+
   apiProviderDelete?.addEventListener('click', () => {
     const provider = currentApiProvider();
     if (!provider) {
@@ -7726,6 +8681,8 @@
     activeModelId(activeId);
     activeRuntimeId(activeId);
     activePermissionId(activeId);
+    claudeModelMenuExplicit = false;
+    closeComposerMenus();
     persist();
     persistUserSelection();
     renderAll();
@@ -7798,6 +8755,7 @@
       modelMenu.open = true;
       customModelInput.focus();
     } else {
+      claudeModelMenuExplicit = false;
       modelMenu.open = false;
     }
   });
@@ -7902,6 +8860,17 @@
       if (prompt && !runningByProvider[activeId] && !pendingByProvider[activeId]) {
         send('freeform', prompt);
       }
+      return;
+    }
+
+    const claudeApprovalButton = event.target.closest('[data-claude-approval-prompt]');
+    if (claudeApprovalButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      submitClaudeApprovalPrompt(
+        claudeApprovalButton.dataset.claudeApprovalPrompt,
+        claudeApprovalButton.dataset.claudeApprovalKey
+      );
       return;
     }
 
@@ -8016,6 +8985,7 @@
       case 'profiles':
         profilesLoading = false;
         profiles = message.profiles || [];
+        apiProviderSettings = normalizeApiProviderSettings(apiProviderSettings);
         {
           const availableProfiles = visibleInstalledProfiles();
           const storedAgentModes = persistedSelectionMap(message.activeAgentModeByProvider);
@@ -8095,6 +9065,9 @@
           editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
         }
         renderSettingsPage();
+        break;
+      case 'apiProviderModelsResult':
+        handleApiProviderModelsResult(message);
         break;
       case 'settingsSaveResult': {
         if (message.ok) {
@@ -8193,6 +9166,19 @@
         break;
       case 'sessionNotice':
         updateSessionNotice(message);
+        break;
+      case 'sessionInputResult':
+        if (!message.ok) {
+          addMessage(
+            message.cliId || activeId,
+            'system',
+            i18n.t('claude.approval.unavailable'),
+            undefined,
+            false,
+            activeThreadId(message.cliId || activeId)
+          );
+          renderAll();
+        }
         break;
       case 'sessionEnd':
         markSessionEnded(message);

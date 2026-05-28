@@ -579,6 +579,14 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /os\.tmpdir\(\)/);
   assert.match(source, /getOpenCodeEventStreamUrl/);
   assert.match(source, /openOpenCodeEventStream/);
+  assert.match(source, /openOpenCodeSseConnection/);
+  assert.match(source, /export type AgentRunEvent =/);
+  assert.match(source, /onEvent: vscode\.EventEmitter<AgentRunEvent>/);
+  assert.match(source, /const onEvent = new vscode\.EventEmitter<AgentRunEvent>\(\)/);
+  assert.match(source, /onEvent\.fire\(\{ type: 'output', text, stream, transport, openCodeSessionId \}\)/);
+  assert.match(source, /onEvent\.fire\(\{ type: 'error', message \}\)/);
+  assert.match(source, /onEvent\.fire\(\{ type: 'end', exitCode, openCodeSessionId \}\)/);
+  assert.match(source, /emitOutput\(text, 'stdout', 'sse', openCodeSessionId\)/);
   assert.match(source, /new URL\('\/event', serverUrl\)/);
   assert.match(source, /new URL\('\/mcp', serverUrl\)/);
   assert.match(source, /normalizeOpenCodeMcpStatus/);
@@ -586,6 +594,7 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /const pendingBySession = new Map<string, string\[\]>\(\)/);
   assert.match(source, /renderStateForSession\(blockSessionId\)/);
   assert.match(source, /eventStream\?\.setSessionId\(detectedOpenCodeSessionId\)/);
+  assert.match(source, /eventStream\?\.hasOutput\(\) && !eventStream\.failed\(\)/);
   assert.match(source, /message\.part\.updated/);
   assert.match(source, /message\.part\.delta/);
   assert.match(source, /line\.startsWith\('event:'\)/);
@@ -628,7 +637,12 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /process\.kill\(-proc\.pid,\s*signal\)/);
   assert.match(source, /spawn\('taskkill', args, \{ stdio: 'ignore', windowsHide: true \}\)/);
   assert.match(sidebarSource, /const newSession = await this\.cliManager\.startPrompt/);
-  assert.match(sidebarSource, /openCodeSessionId: session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
+  assert.match(sidebarSource, /session\.onEvent\.event\(\(event\) =>/);
+  assert.match(sidebarSource, /openCodeSessionId: event\.openCodeSessionId \?\? session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
+  assert.doesNotMatch(sidebarSource, /session\.onOutput\.event/);
+  assert.doesNotMatch(sidebarSource, /session\.onStderr\.event/);
+  assert.doesNotMatch(sidebarSource, /session\.onError\.event/);
+  assert.doesNotMatch(sidebarSource, /session\.onEnd\.event/);
   assert.match(sidebarSource, /case 'openCodeNativeCommand':/);
   assert.match(sidebarSource, /this\.cliManager\.executeOpenCodeNativeCommand/);
   assert.match(sidebarSource, /command: 'openCodeNativeCommandResult'/);
@@ -675,6 +689,8 @@ test('claude profile exposes native permission modes', () => {
   const profile = getCliProfile('claude');
 
   assert.equal(profile.inputMode, 'argument');
+  assert.equal(profile.contextWindowTokens, 200000);
+  assert.equal(profile.autoCompactsContext, true);
   assert.deepEqual(profile.promptArgs, [
     '-p',
     '--output-format',
@@ -686,6 +702,13 @@ test('claude profile exposes native permission modes', () => {
     '--permission-mode',
     'plan',
   ]);
+  assert.equal(profile.defaultModel, 'configured');
+  assert.equal(profile.customModelArgPrefix.join(' '), '--model');
+  assert.deepEqual(profile.modelOptions.find((mode) => mode.id === 'sonnet').args, ['--model', 'sonnet']);
+  assert.deepEqual(profile.modelOptions.find((mode) => mode.id === 'opus').args, ['--model', 'opus']);
+  assert.equal(profile.modelOptions.find((mode) => mode.id === 'custom').custom, true);
+  assert.deepEqual(profile.runtimeModes.find((mode) => mode.id === 'effortHigh').args, ['--effort', 'high']);
+  assert.deepEqual(profile.runtimeModes.find((mode) => mode.id === 'effortMax').args, ['--effort', 'max']);
   assert.ok(profile.permissionModes.some((mode) => mode.id === 'acceptEdits'));
   assert.equal(profile.agentModes.find((mode) => mode.id === 'plan').args, undefined);
 });
@@ -787,6 +810,7 @@ test('CLI profiles include detected agent version status', () => {
   assert.match(profilesSource, /modelOptions\?: CliModelOption\[\]/);
   assert.match(profilesSource, /runtimeModes\?: CliRuntimeMode\[\]/);
   assert.match(profilesSource, /permissionModes\?: CliPermissionMode\[\]/);
+  assert.match(profilesSource, /slashCommands\?: CliSlashCommand\[\]/);
   assert.match(profilesSource, /provider: 'openai'/);
   assert.match(profilesSource, /provider: 'anthropic'/);
   assert.match(managerSource, /version: installed \? await this\.getCommandVersion\(p\) : undefined/);
@@ -832,7 +856,7 @@ test('extension defaults to OpenCode as the active provider', () => {
   const defaultProvider = manifest.contributes.configuration.properties['agents-gui.defaultProvider'];
 
   assert.equal(defaultProvider.default, 'opencode');
-  assert.ok(defaultProvider.enum.includes('opencode'));
+  assert.equal(defaultProvider.enum, undefined);
   assert.match(sidebarSource, /const DEFAULT_CLI_ID = 'opencode';/);
   assert.match(sidebarSource, /get<string>\('defaultProvider', DEFAULT_CLI_ID\)/);
   assert.match(sidebarSource, /getCliProfile\(DEFAULT_CLI_ID\)\?\.id/);
@@ -1088,8 +1112,9 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /body\[data-provider="opencode"\] \.composer\s*\{\s*[^}]*padding:\s*5px 8px;/s);
   assert.match(css, /body\[data-provider="opencode"\] textarea\s*\{\s*[^}]*min-height:\s*38px;/s);
   assert.match(css, /body\[data-provider="opencode"\] textarea\s*\{\s*[^}]*padding:\s*6px 8px 2px;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible,\s*body\[data-provider="opencode"\] \.mode-menu\.is-visible/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.model-menu \.option-summary::before\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(script, /profile\.id !== 'opencode'[\s\S]*options\.length > 1[\s\S]*profile\.id !== 'claude'/);
+  assert.doesNotMatch(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible/);
+  assert.match(css, /body\[data-provider="opencode"\] \.mode-menu\.is-visible,\s*body\[data-provider="opencode"\] \.context-menu\.is-visible/s);
   assert.match(html, /class="context-row"[\s\S]*class="context-menu"/);
   assert.match(css, /\.context-row\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(html, /<aside class="sidebar" id="sidebar"/);
@@ -1103,11 +1128,9 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /body\[data-provider="opencode"\] \.context-row\s*\{\s*[^}]*padding:\s*0;/s);
   assert.match(css, /body\[data-provider="opencode"\] #contextSummaryLabel\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.mode-menu\.is-visible\s*\{\s*[^}]*order:\s*2;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible\s*\{\s*[^}]*order:\s*3;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.composer-settings-button\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.composer-meta\s*\{\s*[^}]*order:\s*4;/s);
   assert.match(css, /body\[data-provider="opencode"\] #contextBudgetLabel\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible\s*\{\s*[^}]*flex:\s*0 1 auto;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.mode-menu\.is-visible\s*\{\s*[^}]*max-width:\s*104px;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.mode-summary,\s*body\[data-provider="opencode"\] \.option-summary,\s*body\[data-provider="opencode"\] \.context-summary\s*\{[^}]*border:\s*1px solid transparent;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.mode-summary,\s*body\[data-provider="opencode"\] \.option-summary,\s*body\[data-provider="opencode"\] \.context-summary\s*\{[^}]*background:\s*transparent;/s);
@@ -1354,24 +1377,84 @@ test('webview renders a Claude Code style composer when Claude is selected', () 
 
   assert.match(html, /class="claude-terminal-banner"/);
   assert.match(html, /id="claudeTerminalDismiss"/);
-  assert.match(html, /id="claudeContextBtn"/);
+  assert.match(html, /id="claudeSlashBtn"/);
+  assert.match(html, /class="claude-slash-glyph"/);
   assert.match(html, /class="claude-permission-icon"/);
   assert.match(script, /let claudeTerminalBannerDismissed = Boolean\(saved\.claudeTerminalBannerDismissed\);/);
   assert.match(script, /i18n\.t\('claude\.placeholder'\)/);
-  assert.match(script, /i18n\.t\('claude\.permission\.askBeforeEdits'\)/);
-  assert.match(script, /claudeContextBtn\.addEventListener\('click'/);
+  assert.match(script, /const label = i18n\.t\('claude\.permission\.default\.title'\);/);
+  assert.match(script, /function claudePermissionPanelOption\(option\)/);
+  assert.match(script, /function claudeEffortValueLabel\(runtime\)/);
+  assert.match(script, /const LUCIDE_ICON_DEFS = Object\.freeze\(/);
+  assert.match(script, /const CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID = Object\.freeze\(/);
+  assert.match(script, /appendLucideIcon\(icon, CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID\[option\.id\]\);/);
+  assert.match(script, /appendLucideIcon\(icon, 'sliders-horizontal'\);/);
+  assert.match(script, /const CLAUDE_ACTION_DRAWER_SECTIONS = Object\.freeze\(/);
+  assert.match(script, /function renderClaudeActionDrawer/);
+  assert.match(script, /slashPaletteMode = 'claudeActions';/);
+  assert.match(script, /claudeActionQuery = parsed\.query \|\| '';\s*input\.value = '';/s);
+  assert.match(script, /header\.className = 'claude-permission-panel-header';/);
+  assert.match(script, /effort\.className = 'claude-permission-effort-row';/);
+  assert.match(script, /function openSlashCommandPalette\(\)/);
+  assert.match(script, /function appendClaudeCodeHeader\(\)/);
+  assert.match(script, /function appendClaudeEmptyState\(\)/);
+  assert.match(script, /let claudeModelMenuExplicit = false;/);
+  assert.match(script, /claudeSlashBtn\?\.addEventListener\('click'/);
   assert.match(i18nScript, /'claude\.terminalPreference': 'Prefer the Terminal experience\? Switch back in Settings\.'/);
+  assert.match(i18nScript, /'claude\.header': 'Claude Code'/);
+  assert.match(i18nScript, /'claude\.empty\.title': 'Ready to code\?'/);
+  assert.match(i18nScript, /'claude\.permissionPanel\.title': 'Modes'/);
+  assert.match(i18nScript, /'claude\.permission\.acceptEdits\.title': 'Edit automatically'/);
+  assert.match(i18nScript, /'claude\.permission\.auto\.description': 'Claude will automatically choose the best permission mode for each task'/);
+  assert.match(i18nScript, /'claude\.effort\.label': 'Effort \(\{value\}\)'/);
+  assert.match(i18nScript, /'claude\.actions\.filterPlaceholder': 'Filter actions\.\.\.'/);
+  assert.match(i18nScript, /'claude\.actions\.attachFile': 'Attach file\.\.\.'/);
+  assert.match(i18nScript, /'claude\.actions\.switchModel': 'Switch model\.\.\.'/);
   assert.match(i18nScript, /'claude\.placeholder': '⌘ Esc to focus or unfocus Claude'/);
   assert.match(i18nScript, /'claude\.permission\.askBeforeEdits': 'Ask before edits'/);
   assert.match(css, /body\[data-provider="claude"\] \.claude-terminal-banner\s*\{\s*[^}]*display:\s*flex;/s);
-  assert.match(css, /body\[data-provider="claude"\] \.prompt-shell\s*\{\s*[^}]*border-color:\s*#d97757;/s);
+  assert.match(css, /body\[data-provider="claude"\] \.prompt-shell:focus-within\s*\{\s*[^}]*border-color:\s*color-mix\(in srgb,\s*#d97757 58%,\s*var\(--assistant-border\)\);/s);
   assert.match(css, /body\[data-provider="claude"\] \.prompt-shell\s*\{\s*[^}]*border-radius:\s*8px;/s);
-  assert.match(css, /body\[data-provider="claude"\] \.composer-meta,\s*body\[data-provider="claude"\] \.model-menu,\s*body\[data-provider="claude"\] \.mode-menu,\s*body\[data-provider="claude"\] \.context-menu\s*\{\s*[^}]*display:\s*none;/s);
-  assert.doesNotMatch(css, /body\[data-provider="claude"\] \.composer-footer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\[data-provider="claude"\] \.composer-meta,\s*body\[data-provider="claude"\] \.mode-menu,\s*body\[data-provider="claude"\] \.context-menu,\s*body\[data-provider="claude"\] \.composer-settings-button\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\[data-provider="claude"\] \.composer-footer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\[data-provider="claude"\] \.permission-menu\.is-claude-panel \.option-popover\s*\{\s*[^}]*width:\s*min\(300px,\s*calc\(100vw - 16px\)\);/s);
+  assert.match(css, /\.claude-permission-panel-header\s*\{/);
+  assert.match(css, /\.claude-permission-effort-row\s*\{/);
+  assert.match(css, /\.claude-lucide-icon\s*\{/);
+  assert.match(css, /body\[data-provider="claude"\] \.slash-palette\.is-claude-actions\s*\{/);
+  assert.match(css, /\.claude-action-filter\s*\{/);
+  assert.match(css, /\.claude-action-section-title\s*\{/);
+  assert.match(css, /\.claude-action-toggle\.is-on::after\s*\{/);
+  assert.doesNotMatch(css, /body\[data-provider="claude"\] \.permission-menu\.is-claude-panel \[data-value="default"\] \.permission-option-icon::before/);
+  assert.match(script, /profile\.id !== 'claude' \|\| \(claudeModelMenuExplicit && modelMenu\?\.open\)/);
+  assert.match(css, /body\[data-provider="claude"\] \.model-menu\.is-visible\s*\{\s*[^}]*display:\s*block;/s);
+  assert.match(css, /body\[data-provider="claude"\] \.claude-slash-glyph\s*\{\s*[^}]*border:\s*1\.4px solid currentColor;/s);
   assert.doesNotMatch(css, /body\[data-provider="claude"\] \.compact-select,\s*body\[data-provider="claude"\] \.composer-meta/s);
   assert.match(css, /body\[data-provider="claude"\] \.permission-menu\.is-visible\s*\{\s*[^}]*display:\s*block;/s);
   assert.match(css, /body\[data-provider="claude"\] \.claude-permission-icon\s*\{\s*[^}]*display:\s*block;/s);
   assert.match(css, /body\[data-provider="claude"\] \.send-button\s*\{\s*[^}]*border-radius:\s*6px;/s);
+});
+
+test('Claude slash commands expose only locally supported controls', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const claudeSlashBlock = profilesSource.slice(
+    profilesSource.indexOf('const CLAUDE_SLASH_COMMANDS'),
+    profilesSource.indexOf('const OPENCODE_SLASH_COMMANDS')
+  );
+
+  assert.match(profilesSource, /const CLAUDE_SLASH_COMMANDS: CliSlashCommand\[\] = \[/);
+  assert.match(profilesSource, /name: 'model', kind: 'local', local: 'model'/);
+  assert.match(profilesSource, /name: 'permissions',\s*aliases: \['permission'\],\s*kind: 'local',\s*local: 'permissions'/);
+  assert.match(profilesSource, /name: 'terminal',\s*aliases: \['terminal-setup'\],\s*kind: 'local',\s*local: 'terminal'/);
+  assert.match(script, /profileSlashCommands\(profile\)/);
+  assert.match(script, /case 'model':[\s\S]*modelMenu\.open = true;[\s\S]*renderModelSelect\(\);/);
+  assert.match(script, /case 'permissions':[\s\S]*permissionMenu\.open = true;[\s\S]*renderPermissionSelect\(\);/);
+  assert.doesNotMatch(claudeSlashBlock, /nativeApi: true/);
+  assert.match(i18nScript, /'slash\.model\.desc'/);
+  assert.match(i18nScript, /'slash\.permissions\.desc'/);
+  assert.match(i18nScript, /'slash\.terminal\.desc'/);
 });
 
 test('webview supports pasted image attachments in the composer', () => {
@@ -1575,6 +1658,14 @@ test('manifest exposes title actions and custom API provider settings', () => {
     properties['agents-gui.apiProviders.customProviders'].items.properties.apiKey.type,
     'string'
   );
+  assert.deepEqual(
+    properties['agents-gui.apiProviders.customProviders'].items.properties.protocol.enum,
+    ['openai', 'anthropic']
+  );
+  assert.equal(
+    properties['agents-gui.apiProviders.customProviders'].items.properties.models.items.type,
+    'string'
+  );
   assert.ok(properties['agents-gui.home.visibleAgentIds']);
   assert.ok(properties['agents-gui.home.agentOrder']);
   assert.equal(manifest.scripts['package:vsix'], 'npm run package');
@@ -1598,14 +1689,28 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(html, /id="apiProviderSaveStatus"[^>]*aria-live="polite"/);
   assert.match(html, /id="commitMessageSaveStatus"[^>]*aria-live="polite"/);
   assert.match(html, /id="apiProviderApiKey"[^>]*type="password"/);
-  assert.match(html, /id="apiProviderApiKeyEnv"/);
+  assert.match(html, /id="apiProviderProtocol"/);
+  assert.match(html, /id="apiProviderFetchModels"/);
+  assert.match(html, /id="apiProviderModelOptions"/);
+  assert.match(html, /id="apiProviderApiKeyEnv"[^>]*type="hidden"/);
   assert.match(script, /const apiProviderApiKey = document\.getElementById\('apiProviderApiKey'\)/);
+  assert.match(script, /const apiProviderProtocol = document\.getElementById\('apiProviderProtocol'\)/);
+  assert.match(script, /command:\s*'fetchApiProviderModels'/);
+  assert.match(script, /apiKeyEnv:\s*sanitizeEnvName\(apiProviderApiKeyEnv\?\.value \|\| provider\.apiKeyEnv \|\| ''\)/);
+  assert.match(script, /case 'apiProviderModelsResult':/);
+  assert.match(sidebarSource, /case 'fetchApiProviderModels':/);
+  assert.match(sidebarSource, /const apiKey = explicitApiKey \|\| \(apiKeyEnv \? process\.env\[apiKeyEnv\] \|\| '' : ''\);/);
+  assert.match(sidebarSource, /headers\['anthropic-version'\] = '2023-06-01'/);
   assert.match(script, /apiKey: String\(provider\.apiKey \|\| ''\)/);
   assert.match(script, /apiKey: apiProviderApiKey\?\.value\.trim\(\) \|\| ''/);
   assert.match(script, /function visibleInstalledProfiles\(\)/);
+  assert.match(script, /function configurableAgentProfiles\(\)/);
   assert.match(script, /function orderedInstalledProfiles\(\)/);
   assert.match(script, /function renderHomeAgentSettings\(\)/);
   assert.match(script, /function renderCommitMessageSettings\(\)/);
+  assert.match(script, /const knownCliIds = profilesLoading\s*\?\s*undefined\s*:\s*new Set\(configurableAgentProfiles\(\)\.map\(\(profile\) => profile\.id\)\);/);
+  assert.match(script, /const availableProfiles = configurableAgentProfiles\(\);[\s\S]*availableProfiles\.forEach\(\(profile\) => \{/);
+  assert.match(script, /apiProviderSettings = normalizeApiProviderSettings\(apiProviderSettings\);/);
   assert.match(script, /function saveCommitMessageSettings\(\)/);
   assert.match(script, /function setSettingsSaveStatus\(section,\s*state,\s*message\)/);
   assert.match(script, /const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;/);
@@ -1618,6 +1723,8 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /agentOrder/);
   assert.match(sidebarSource, /config\.get<string\[]>\('agentOrder', \[]\)/);
   assert.match(sidebarSource, /config\.update\('agentOrder', settings\.agentOrder/);
+  assert.match(sidebarSource, /private filterApiProviderSettingsForInstalledAgents/);
+  assert.match(sidebarSource, /this\.profilesById\.has\(cliId\)/);
   assert.match(sidebarSource, /saveCommitMessageSettings/);
   assert.match(sidebarSource, /command:\s*'settingsSaveResult'/);
   assert.match(sidebarSource, /section,\s*ok:\s*true/);
@@ -1680,12 +1787,15 @@ test('custom API provider settings can sync explicit keys without leaking them',
       {
         id: 'Open Router',
         name: 'OpenRouter',
+        protocol: 'openai',
         baseUrl: 'https://openrouter.ai/api/v1',
         apiKey: 'sk-should-sync',
         apiKeyEnv: 'OPENROUTER_API_KEY',
         model: 'anthropic/claude-sonnet',
+        models: ['anthropic/claude-sonnet', 'anthropic/claude-sonnet', 'openai/gpt-4o'],
         extraEnv: {
-          OPENAI_BASE_URL: 'https://openrouter.ai/api/v1',
+          OPENAI_BASE_URL: 'https://legacy.example/v1',
+          OPENAI_API_KEY: 'legacy-key',
           'bad-name': 'ignored',
         },
         enabled: true,
@@ -1706,9 +1816,11 @@ test('custom API provider settings can sync explicit keys without leaking them',
   });
 
   assert.equal(settings.customProviders[0].id, 'open-router');
+  assert.equal(settings.customProviders[0].protocol, 'openai');
   assert.equal(settings.customProviders[0].apiKey, 'sk-should-sync');
   assert.equal(settings.customProviders[0].apiKeyEnv, 'OPENROUTER_API_KEY');
-  assert.equal(settings.customProviders[0].extraEnv.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
+  assert.deepEqual(settings.customProviders[0].models, ['anthropic/claude-sonnet', 'openai/gpt-4o']);
+  assert.equal(settings.customProviders[0].extraEnv.OPENAI_BASE_URL, 'https://legacy.example/v1');
   assert.equal(settings.customProviders[0].extraEnv.badname, 'ignored');
   assert.equal(settings.defaultProviderId, 'open-router');
   assert.equal(settings.agentProviderByCliId.opencode, 'open-router');
@@ -1719,8 +1831,11 @@ test('custom API provider settings can sync explicit keys without leaking them',
     OPENROUTER_API_KEY: 'actual-secret',
   });
   assert.equal(runtime.env.AGENTS_HUB_API_BASE_URL, 'https://openrouter.ai/api/v1');
+  assert.equal(runtime.env.AGENTS_HUB_API_PROTOCOL, 'openai');
   assert.equal(runtime.env.AGENTS_HUB_API_MODEL, 'anthropic/claude-sonnet');
   assert.equal(runtime.env.AGENTS_HUB_API_KEY, 'sk-should-sync');
+  assert.equal(runtime.env.OPENAI_API_KEY, 'sk-should-sync');
+  assert.equal(runtime.env.OPENAI_MODEL, 'anthropic/claude-sonnet');
   assert.equal(runtime.env.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
   assert.equal(runtime.selectionKey.includes('sk-should-sync'), false);
   assert.equal(runtime.selectionKey.includes('actual-secret'), false);
@@ -1761,9 +1876,11 @@ test('webview composer popovers avoid viewport clipping', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
   assert.match(css, /\.composer\s*\{\s*[^}]*overflow:\s*visible;/s);
+  assert.match(css, /\.composer\s*\{\s*[^}]*position:\s*relative;/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*align-content:\s*start;/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*align-items:\s*start;/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*grid-auto-rows:\s*max-content;/s);
+  assert.match(css, /\.prompt-shell\s*\{\s*[^}]*z-index:\s*3;/s);
   assert.match(css, /\.prompt-shell\s*\{\s*[^}]*overflow:\s*visible;/s);
   assert.match(css, /\.prompt-shell\s*\{\s*[^}]*align-self:\s*start;/s);
   assert.match(script, /function positionContextBudgetPopover\(\)/);
@@ -2255,12 +2372,18 @@ test('webview does not persist transient running message state', () => {
   assert.match(providerSource, /const NO_OUTPUT_NOTICE_MS = 45_000;/);
   assert.match(providerSource, /private noOutputNoticeTimers = new Map/);
   assert.match(providerSource, /command:\s*'sessionNotice'/);
+  assert.match(providerSource, /case 'sendSessionInput':\s*await this\.handleSessionInput\(message\);/);
+  assert.match(providerSource, /private async handleSessionInput/);
+  assert.match(providerSource, /this\.cliManager\.sendInput\(session\.id, text\)/);
+  assert.match(providerSource, /command:\s*'sessionInputResult'/);
   assert.match(providerSource, /runtimeT\(this\.locale,\s*'warning\.noOutput'/);
   assert.match(script, /threadsByProvider: serializeThreadsForState\(threadsByProvider\)/);
   assert.match(script, /const \{ startedAt, \.\.\.rest \} = message;/);
   assert.match(script, /return \{ \.\.\.rest, running: false \};/);
   assert.match(script, /running: false,\s*text: filterInternalPromptEcho\(message\.text\)\.text/s);
   assert.match(script, /case 'sessionNotice':\s*updateSessionNotice\(message\);/);
+  assert.match(script, /case 'sessionInputResult':/);
+  assert.match(script, /i18n\.t\('claude\.approval\.unavailable'\)/);
   assert.match(script, /item\.runningNotice = normalizeMessageText\(message\.text\);/);
   assert.match(script, /delete item\.runningNotice;/);
   assert.match(providerSource, /normalized\.status !== 'thinking'/);
@@ -2296,41 +2419,48 @@ test('webview exposes a provider-aware slash command palette', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
 
   assert.match(html, /id="slashPalette"[^>]*role="listbox"/);
   assert.match(script, /const SLASH_COMMANDS = \[/);
-  assert.match(script, /providers:\s*\['claude'\]/);
-  assert.match(script, /providers:\s*\['codex'\]/);
-  assert.match(script, /providers:\s*\['opencode'\]/);
-  assert.match(script, /providers:\s*\['gemini'\]/);
-  assert.match(script, /providers:\s*\['goose'\]/);
-  assert.match(script, /providers:\s*\['aider'\]/);
+  assert.match(script, /function profileSlashCommands\(profile\)/);
+  assert.match(script, /\[\.\.\.SLASH_COMMANDS, \.\.\.profileSlashCommands\(profile\)\]/);
+  assert.match(script, /function nativeApiCommandNames\(profile\)/);
+  assert.doesNotMatch(script, /providers:\s*\['codex'\]/);
+  assert.doesNotMatch(script, /providers:\s*\['gemini'\]/);
+  assert.doesNotMatch(script, /providers:\s*\['goose'\]/);
+  assert.doesNotMatch(script, /providers:\s*\['aider'\]/);
   assert.match(script, /function slashCommandMatchesProvider/);
   assert.match(script, /name:\s*'new',\s*aliases:\s*\['clear'\]/);
-  assert.match(script, /name:\s*'sessions',\s*aliases:\s*\['session',\s*'resume',\s*'continue'\],\s*kind:\s*'local',\s*local:\s*'sessions',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'models',\s*aliases:\s*\['model'\],\s*kind:\s*'local',\s*local:\s*'models',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'agents',\s*aliases:\s*\['agent'\],\s*kind:\s*'local',\s*local:\s*'agents',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'mcps',\s*aliases:\s*\['mcp'\],\s*kind:\s*'local',\s*local:\s*'mcp',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'variants',\s*kind:\s*'local',\s*local:\s*'variants',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'connect',\s*kind:\s*'local',\s*local:\s*'connect',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'org',\s*aliases:\s*\['orgs',\s*'switch-org'\],\s*kind:\s*'local',\s*local:\s*'org',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'status',\s*kind:\s*'local',\s*local:\s*'status',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'themes',\s*aliases:\s*\['theme'\],\s*kind:\s*'local',\s*local:\s*'themes',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /name:\s*'exit',\s*aliases:\s*\['quit',\s*'q'\],\s*kind:\s*'local',\s*local:\s*'exit',\s*providers:\s*\['opencode'\]/);
-  assert.match(script, /const OPENCODE_SLASH_COMMAND_NAMES = new Set/);
+  assert.match(profilesSource, /const OPENCODE_SLASH_COMMANDS: CliSlashCommand\[\] = \[/);
+  assert.match(profilesSource, /name:\s*'sessions',\s*aliases:\s*\['session',\s*'resume',\s*'continue'\],\s*kind:\s*'local',\s*local:\s*'sessions'/);
+  assert.match(profilesSource, /name:\s*'models',\s*aliases:\s*\['model'\],\s*kind:\s*'local',\s*local:\s*'models'/);
+  assert.match(profilesSource, /name:\s*'agents',\s*aliases:\s*\['agent'\],\s*kind:\s*'local',\s*local:\s*'agents'/);
+  assert.match(profilesSource, /name:\s*'mcps',\s*aliases:\s*\['mcp'\],\s*kind:\s*'local',\s*local:\s*'mcp'/);
+  assert.match(profilesSource, /name:\s*'variants',\s*kind:\s*'local',\s*local:\s*'variants'/);
+  assert.match(profilesSource, /name:\s*'connect',\s*kind:\s*'local',\s*local:\s*'connect'/);
+  assert.match(profilesSource, /name:\s*'org',\s*aliases:\s*\['orgs',\s*'switch-org'\],\s*kind:\s*'local',\s*local:\s*'org'/);
+  assert.match(profilesSource, /name:\s*'status',\s*kind:\s*'local',\s*local:\s*'status'/);
+  assert.match(profilesSource, /name:\s*'themes',\s*aliases:\s*\['theme'\],\s*kind:\s*'local',\s*local:\s*'themes'/);
+  assert.match(profilesSource, /name:\s*'exit',\s*aliases:\s*\['quit',\s*'q'\],\s*kind:\s*'local',\s*local:\s*'exit'/);
+  assert.match(profilesSource, /nativeApi: true/);
   assert.match(script, /seen\.has\(command\.name\)/);
+  assert.match(script, /function executeLocalSlashCommand\(command, args = '', sourceQuery = ''\)/);
+  assert.match(script, /const sourceQuery = parsed\?\.query \|\| command\.name \|\| '';/);
+  assert.match(script, /executeLocalSlashCommand\(command, args, sourceQuery\);/);
   assert.match(script, /case 'sessions':/);
-  assert.match(script, /case 'sessions':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('sessions'\);\s*return;/s);
+  assert.match(script, /case 'sessions':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('sessions', \{ commandQuery: sourceQuery \}\);\s*return;/s);
   assert.match(script, /case 'models':/);
-  assert.match(script, /case 'models':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('models'\);\s*return;/s);
+  assert.match(script, /case 'models':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('models', \{ commandQuery: sourceQuery \}\);\s*return;/s);
   assert.match(script, /case 'agents':/);
-  assert.match(script, /case 'agents':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('agents'\);\s*return;/s);
+  assert.match(script, /case 'agents':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('agents', \{ commandQuery: sourceQuery \}\);\s*return;/s);
+  assert.match(script, /case 'mcp':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('mcp', \{ commandQuery: sourceQuery \}\);/s);
   assert.match(script, /case 'variants':/);
-  assert.match(script, /showOpenCodeStatusDialog\('variants'\)/);
+  assert.match(script, /showOpenCodeStatusDialog\('variants', \{ commandQuery: sourceQuery \}\)/);
   assert.match(script, /case 'status':/);
-  assert.match(script, /showOpenCodeStatusDialog\('status'\)/);
+  assert.match(script, /showOpenCodeStatusDialog\('status', \{ commandQuery: sourceQuery \}\)/);
   assert.match(script, /case 'themes':/);
-  assert.match(script, /showOpenCodeStatusDialog\('themes'\)/);
+  assert.match(script, /showOpenCodeStatusDialog\('themes', \{ commandQuery: sourceQuery \}\)/);
   assert.match(script, /case 'connect':/);
   assert.match(script, /openSettingsPage\('apiProviders'\)/);
   assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
@@ -2344,7 +2474,29 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
   assert.match(script, /selectOpenCodeDialogOption\(openCodeDialogKind, option\.id\)/);
   assert.match(script, /openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex\(kind\);/);
+  assert.match(script, /openCodeDialogOpenSequence \+= 1;/);
   assert.match(script, /option\.id === openCodeDialogActiveOptionId\(kind\) \? 'is-active' : ''/);
+  assert.match(script, /function configureOpenCodeDialogFilter\(filter, kind\)/);
+  assert.match(script, /filter\.name = `opencode-\$\{kind\}-filter-\$\{openCodeDialogOpenSequence\}`;/);
+  assert.match(script, /filter\.autocomplete = 'off';/);
+  assert.match(script, /filter\.setAttribute\('data-1p-ignore', 'true'\);/);
+  assert.match(script, /let openCodeDialogCommandEchoQuery = '';/);
+  assert.match(script, /let openCodeDialogEchoCleanupPending = false;/);
+  assert.match(script, /function normalizeOpenCodeDialogCommandQuery\(value\)/);
+  assert.match(script, /query === openCodeDialogCommandEchoQuery/);
+  assert.match(script, /function clearInitialOpenCodeDialogCommandEcho\(filter, kind, renderOptions\)/);
+  assert.match(script, /!openCodeDialogEchoCleanupPending/);
+  assert.match(script, /openCodeDialogEchoCleanupPending = false;\s*openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex\(kind\);/s);
+  assert.match(script, /function focusPromptInputAfterDialogClose\(\)/);
+  assert.match(script, /input\.focus\(\);\s*resizePromptInput\(\);/s);
+  assert.match(script, /function closeOpenCodeStatusDialog\(\{ focusPrompt = true \} = \{\}\)/);
+  assert.match(script, /openCodeDialogCommandEchoQuery = '';\s*openCodeDialogEchoCleanupPending = false;/s);
+  assert.match(script, /focusPromptInputAfterDialogClose\(\);/);
+  assert.match(script, /function showOpenCodeStatusDialog\(kind, options = \{\}\)/);
+  assert.match(script, /openCodeDialogCommandEchoQuery = normalizeOpenCodeDialogCommandQuery\(options\.commandQuery\);/);
+  assert.match(script, /openCodeDialogEchoCleanupPending = Boolean\(openCodeDialogCommandEchoQuery\);/);
+  assert.match(script, /case 'models':\s*return \['model', 'models'\];/);
+  assert.match(script, /clearInitialOpenCodeDialogCommandEcho\(filter, kind, \(\) => renderOpenCodeModelGroups\(list\)\)/);
   assert.match(script, /openCodeDialogQuery = filter\.value;\s*openCodeDialogActiveIndex = 0;\s*renderOpenCodeModelGroups\(list\);/);
   assert.match(script, /function renderOpenCodeMcpDialogBody\(body\)/);
   assert.match(script, /function openCodeMcpDialogOptions\(\)/);
@@ -2379,7 +2531,7 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /function executeOpenCodeNativeSlashCommand/);
   assert.match(script, /command: 'openCodeNativeCommand'/);
   assert.match(script, /openCodeSessionId: activeOpenCodeSessionId\(\)/);
-  assert.match(script, /const OPENCODE_NATIVE_API_COMMAND_NAMES = new Set\(\[[\s\S]*'fork'/);
+  assert.match(script, /nativeApiCommandNames\(activeProfile\(\)\)\.has\(command\.name\)/);
   assert.match(script, /function handleOpenCodeForkResult/);
   assert.match(script, /message\.newOpenCodeSessionId/);
   assert.match(script, /case 'openCodeNativeCommandResult':/);
@@ -2397,21 +2549,40 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /parseSlashInput\(input\.value\)/);
   assert.match(script, /send\(command\.action,\s*command\.prompt/);
   assert.match(script, /setActiveThread/);
+  assert.ok(
+    html.indexOf('<div class="slash-palette"') < html.indexOf('<div class="prompt-shell">'),
+    'slash command drawer should render as a composer-level layer above the prompt shell'
+  );
+  assert.doesNotMatch(css, /\.prompt-shell:has\(\.slash-palette:not\(\[hidden\]\)\)/);
   assert.match(css, /\.slash-palette\s*\{/);
   assert.match(css, /\.slash-command\.is-active\s*\{/);
   assert.match(script, /title\.className = 'slash-command-label';/);
   assert.match(css, /\.slash-palette\s*\{[^}]*font-family:\s*var\(--vscode-editor-font-family/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*position:\s*static;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*100%;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*border-bottom:\s*1px solid var\(--assistant-border\);/);
-  assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*\n\s*bottom:/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*position:\s*absolute;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*z-index:\s*2;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*bottom:\s*calc\(100% - 8px\);/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*auto;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*max-height:\s*min\(56vh,\s*430px\);/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*box-shadow:\s*[\s\S]*?0 6px 18px color-mix\(in srgb, #000 5%, transparent\);/);
+  assert.doesNotMatch(css, /0 18px 44px color-mix\(in srgb, #000 10%, transparent\);/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*border:\s*1px solid color-mix\(in srgb, var\(--assistant-border\) 48%, transparent\);/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*border-radius:\s*4px 4px 0 0;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*transform-origin:\s*bottom center;/);
+  assert.match(css, /\.slash-palette\s*\{[^}]*animation:\s*slash-drawer-enter 120ms ease-out;/);
+  assert.match(css, /\.slash-command\s*\{[^}]*min-height:\s*18px;/);
   assert.match(css, /\.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(160px,\s*240px\) minmax\(0,\s*1fr\);/);
-  assert.match(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*width:\s*100%;/);
-  assert.match(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*box-shadow:\s*none;/);
+  assert.match(css, /\.slash-command\s*\{[^}]*border-radius:\s*0;/);
+  assert.match(css, /\.slash-command:hover\s*\{[^}]*background:\s*var\(--assistant-hover\);/);
+  assert.doesNotMatch(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*width:\s*100%;/);
+  assert.doesNotMatch(css, /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*box-shadow:\s*none;/);
+  assert.match(css, /@keyframes slash-drawer-enter/);
+  assert.match(css, /transform:\s*translateY\(8px\) scaleY\(0\.98\);/);
   assert.match(css, /body\[data-provider="opencode"\] \.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(238px,\s*260px\) minmax\(0,\s*1fr\);/);
+  assert.match(css, /body\[data-provider="opencode"\] \.slash-command\.is-active\s*\{[^}]*var\(--vscode-terminal-selectionBackground/);
   assert.match(css, /\.slash-command\.is-active\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/);
   assert.match(css, /\.slash-footer\s*\{/);
-  assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*border-radius:\s*7px;/);
+  assert.doesNotMatch(css, /\.slash-footer span\s*\{/);
+  assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*width:\s*100%;/);
   assert.match(css, /\.opencode-dialog-option\s*\{/);
   assert.match(css, /\.opencode-dialog-option\.is-selected\s*\{/);
   assert.match(css, /\.opencode-dialog-option\.is-active\s*\{/);
@@ -2509,11 +2680,20 @@ test('webview keeps visible streaming affordances and quick choices', () => {
   assert.match(script, /dataset\.messageChoicePrompt = choice\.prompt/);
   assert.match(script, /event\.target\.closest\('\[data-message-choice-prompt\]'\)/);
   assert.match(script, /send\('freeform', prompt\)/);
+  assert.match(script, /function extractClaudeApprovalRequest\(text\)/);
+  assert.match(script, /className = 'claude-approval-panel'/);
+  assert.match(script, /dataset\.claudeApprovalPrompt = choice\.prompt/);
+  assert.match(script, /event\.target\.closest\('\[data-claude-approval-prompt\]'\)/);
+  assert.match(script, /command:\s*'sendSessionInput'/);
   assert.match(css, /\.message-choice-actions\s*\{/);
   assert.match(css, /\.message-choice-button\s*\{/);
+  assert.match(css, /\.message\.assistant:has\(\.claude-approval-panel\)\s*\{/);
+  assert.match(css, /\.claude-approval-panel\s*\{/);
+  assert.match(css, /\.claude-approval-choice\.is-selected\s*\{/);
   assert.match(css, /\.message-streaming-cursor\s*\{/);
   assert.match(i18nScript, /'message\.choice\.label'/);
   assert.match(i18nScript, /'message\.choice\.prompt'/);
+  assert.match(i18nScript, /'claude\.approval\.placeholder': 'Tell Claude what to do instead'/);
   assert.match(promptSource, /Option N — label/);
   assert.match(promptSource, /选项 N — 标签/);
 });
@@ -2870,6 +3050,24 @@ test('normalizeCliOutputChunk hides Claude Code final JSON messages after partia
   );
 });
 
+test('normalizeCliOutputChunk surfaces Claude Code stream errors', () => {
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"Maximum turns reached"}\n',
+      'claude'
+    ),
+    { text: 'Error: Maximum turns reached\n', buffer: '' }
+  );
+
+  assert.deepEqual(
+    normalizeCliOutputChunk(
+      '{"type":"error","message":"Authentication required"}\n',
+      'claude'
+    ),
+    { text: 'Error: Authentication required\n', buffer: '' }
+  );
+});
+
 test('normalizeCliOutputChunk streams OpenCode thinking details separately from answer text', () => {
   assert.deepEqual(
     normalizeCliOutputChunk(
@@ -3179,10 +3377,16 @@ test('cli manager can run OpenCode prompts through the server API and detect ret
 test('OpenCode server commit generation listens for current-session provider errors', () => {
   const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /interface OpenCodeErrorStream/);
-  assert.match(source, /openOpenCodeSessionErrorStream\(serverUrl, sessionId\)/);
-  assert.match(source, /await errorStream\?\.ready/);
-  assert.match(source, /errorStream\?\.error\(\)/);
+  assert.match(source, /interface OpenCodePromptEventStream/);
+  assert.doesNotMatch(source, /interface OpenCodeErrorStream/);
+  assert.match(source, /interface OpenCodeSseConnection/);
+  assert.match(source, /openOpenCodePromptEventStream\(serverUrl, sessionId, onPartial\)/);
+  assert.match(source, /const connection = this\.openOpenCodeSseConnection\(serverUrl\);/);
+  assert.match(source, /connection\.onEvent\(\(event, block\) =>/);
+  assert.match(source, /openCodeEventBelongsToSession\(event, sessionId\)/);
+  assert.match(source, /openCodeEventErrorMessage\(event\)/);
+  assert.match(source, /eventStream\?\.error\(\)/);
+  assert.match(source, /openCodeEventIsAssistantCompleted\(event\)/);
   assert.match(source, /FreeUsageLimitError/);
   assert.match(source, /rate limit exceeded/i);
 });

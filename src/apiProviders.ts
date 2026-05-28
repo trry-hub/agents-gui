@@ -1,10 +1,14 @@
+export type ApiProviderProtocol = 'openai' | 'anthropic';
+
 export interface CustomApiProviderConfig {
   id: string;
   name: string;
+  protocol: ApiProviderProtocol;
   baseUrl: string;
   apiKey: string;
   apiKeyEnv: string;
   model: string;
+  models: string[];
   extraEnv: Record<string, string>;
   enabled: boolean;
 }
@@ -73,21 +77,44 @@ export function resolveApiProviderRuntime(
   const env: Record<string, string> = {
     AGENTS_HUB_API_PROVIDER: provider.name,
     AGENTS_HUB_API_PROVIDER_ID: provider.id,
+    AGENTS_HUB_API_PROTOCOL: provider.protocol,
   };
+  Object.assign(env, provider.extraEnv);
+
   if (provider.baseUrl) {
     env.AGENTS_HUB_API_BASE_URL = provider.baseUrl;
+    if (provider.protocol === 'anthropic') {
+      env.ANTHROPIC_BASE_URL = provider.baseUrl;
+    } else {
+      env.OPENAI_BASE_URL = provider.baseUrl;
+    }
   }
   if (provider.model) {
     env.AGENTS_HUB_API_MODEL = provider.model;
+    if (provider.protocol === 'anthropic') {
+      env.ANTHROPIC_MODEL = provider.model;
+    } else {
+      env.OPENAI_MODEL = provider.model;
+    }
   }
 
   const warnings: ApiProviderRuntimeWarning[] = [];
   if (provider.apiKey) {
     env.AGENTS_HUB_API_KEY = provider.apiKey;
+    if (provider.protocol === 'anthropic') {
+      env.ANTHROPIC_API_KEY = provider.apiKey;
+    } else {
+      env.OPENAI_API_KEY = provider.apiKey;
+    }
   } else if (provider.apiKeyEnv) {
     const apiKey = sourceEnv[provider.apiKeyEnv];
     if (apiKey) {
       env.AGENTS_HUB_API_KEY = apiKey;
+      if (provider.protocol === 'anthropic') {
+        env.ANTHROPIC_API_KEY = apiKey;
+      } else {
+        env.OPENAI_API_KEY = apiKey;
+      }
     } else {
       warnings.push({
         code: 'missingApiKeyEnv',
@@ -97,8 +124,6 @@ export function resolveApiProviderRuntime(
     }
   }
 
-  Object.assign(env, provider.extraEnv);
-
   return {
     provider,
     env,
@@ -106,8 +131,10 @@ export function resolveApiProviderRuntime(
     selectionKey: [
       'api-provider',
       provider.id,
+      provider.protocol,
       provider.baseUrl,
       provider.model,
+      stableListKey(provider.models),
       provider.apiKey ? 'configured-key' : '',
       provider.apiKeyEnv,
       stableRecordKey(provider.extraEnv),
@@ -153,10 +180,12 @@ function normalizeProviders(value: unknown): CustomApiProviderConfig[] {
     providers.push({
       id,
       name,
+      protocol: protocolValue(item.protocol),
       baseUrl: stringValue(item.baseUrl),
       apiKey: stringValue(item.apiKey),
       apiKeyEnv: envNameValue(item.apiKeyEnv),
       model: stringValue(item.model),
+      models: stringArrayValue(item.models),
       extraEnv: normalizeExtraEnv(item.extraEnv),
       enabled: item.enabled !== false,
     });
@@ -218,6 +247,27 @@ function envNameValue(value: unknown): string {
   return stringValue(value).replace(/[^A-Za-z0-9_]/g, '');
 }
 
+function protocolValue(value: unknown): ApiProviderProtocol {
+  return value === 'anthropic' ? 'anthropic' : 'openai';
+}
+
+function stringArrayValue(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  value.forEach((item) => {
+    const text = stringValue(item);
+    if (!text || seen.has(text)) {
+      return;
+    }
+    seen.add(text);
+    result.push(text);
+  });
+  return result;
+}
+
 function sanitizeId(value: string): string {
   return value
     .trim()
@@ -242,4 +292,8 @@ function stableRecordKey(value: Record<string, string>): string {
     .sort()
     .map((key) => `${key}=${value[key]}`)
     .join('&');
+}
+
+function stableListKey(values: string[]): string {
+  return values.join(',');
 }

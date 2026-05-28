@@ -150,7 +150,7 @@
         },
         {
           "command": "agents-gui.generateCommitMessage",
-          "when": "scmProvider == git && scmProviderRootUri in agents-gui.commitMessageStagedRoots && !agents-gui.commitMessageGenerating",
+          "when": "scmProvider == git && scmProviderRootUri not in agents-gui.commitMessageGeneratingRoots",
           "group": "navigation@-100"
         }
       ],
@@ -181,14 +181,6 @@
         "agents-gui.defaultProvider": {
           "type": "string",
           "default": "opencode",
-          "enum": [
-            "claude",
-            "gemini",
-            "codex",
-            "opencode",
-            "goose",
-            "aider"
-          ],
           "description": "%config.defaultProvider.description%"
         },
         "agents-gui.context.includeWorkspace": {
@@ -278,6 +270,14 @@
               "name": {
                 "type": "string"
               },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "openai",
+                  "anthropic"
+                ],
+                "default": "openai"
+              },
               "baseUrl": {
                 "type": "string"
               },
@@ -290,6 +290,13 @@
               },
               "model": {
                 "type": "string"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
               },
               "extraEnv": {
                 "type": "object",
@@ -320,15 +327,6 @@
         "agents-gui.commitMessage.provider": {
           "type": "string",
           "default": "default",
-          "enum": [
-            "default",
-            "claude",
-            "gemini",
-            "codex",
-            "opencode",
-            "goose",
-            "aider"
-          ],
           "description": "%config.commitMessage.provider.description%"
         },
         "agents-gui.commitMessage.language": {
