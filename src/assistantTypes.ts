@@ -93,12 +93,22 @@ export interface AssistantPromptRequest {
   provider: AssistantProviderRef;
   mode: AssistantMode;
   agentMode: AssistantAgentModeRef;
+  runtime?: AssistantRuntimeSelection;
   action: AssistantActionId;
   message: string;
   attachments?: AssistantImageAttachment[];
   conversationHistory?: AssistantConversationHistoryMessage[];
   context: AssistantContextSnapshot;
   locale?: string;
+}
+
+export interface AssistantRuntimeSelection {
+  modelId?: string;
+  modelLabel?: string;
+  runtimeId?: string;
+  runtimeLabel?: string;
+  permissionModeId?: string;
+  permissionModeLabel?: string;
 }
 
 export interface AssistantWebviewRequest {

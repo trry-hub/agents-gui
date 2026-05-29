@@ -1,8 +1,7 @@
 import * as fs from 'fs';
-import * as http from 'http';
-import * as https from 'https';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { ApiProviderClient } from './apiProviderClient';
 import {
   ApiProviderSettings,
   sanitizeApiProviderSettings,
@@ -24,7 +23,7 @@ import {
   AssistantWebviewRequest,
 } from './assistantTypes';
 import { actionRequiresActiveFile, actionRequiresSelection } from './actionGuards';
-import { CliManager, Session } from './cliManager';
+import type { AgentRuntime, AgentSession } from './agentRuntime';
 import {
   buildCliOptionArgs,
   CLI_PROFILES,
@@ -34,6 +33,7 @@ import {
   getCliProfile,
   getCliRuntimeMode,
   inferContextWindowTokens,
+  type CliModelOption,
   type CliProfile,
 } from './cliProfiles';
 import { AssistantContextCollector } from './contextCollector';
@@ -50,7 +50,9 @@ import {
   runtimeDefaultActionText,
   runtimeT,
 } from './localization';
+import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
 import { getProviderExtensionBridge } from './providerExtensions';
+import type { HostToWebviewMessage, WebviewToHostMessage } from './webviewProtocol';
 import {
   AGENT_MODE_STATE_KEY,
   CLAUDE_TERMINAL_BANNER_STATE_KEY,
@@ -76,8 +78,10 @@ const PROVIDER_ICON_PATHS = {
 } as const;
 
 interface SidebarProviderOptions {
+  apiProviderClient?: ApiProviderClient;
   contextCollector?: AssistantContextCollector;
   extensionMode?: vscode.ExtensionMode;
+  openCodeCapability?: OpenCodeAgentCapability;
   state?: vscode.Memento;
   storageUri?: vscode.Uri;
 }
@@ -105,7 +109,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'agents-gui.sidebar';
 
   private view?: vscode.WebviewView;
-  private activeSessions = new Map<string, Session>();
+  private activeSessions = new Map<string, AgentSession>();
   private wiredSessionIds = new Set<string>();
   private pendingRequests: AssistantWebviewRequest[] = [];
   private disposables: vscode.Disposable[] = [];
@@ -119,16 +123,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly locale = resolveRuntimeLocale(vscode.env.language);
   private readonly contextCollector: AssistantContextCollector;
   private readonly extensionMode: vscode.ExtensionMode;
+  private readonly openCodeCapability?: OpenCodeAgentCapability;
   private readonly attachmentStorageUri: vscode.Uri;
+  private readonly apiProviderClient: ApiProviderClient;
   private readonly state?: vscode.Memento;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly cliManager: CliManager,
+    private readonly agentRuntime: AgentRuntime,
     options: SidebarProviderOptions = {}
   ) {
+    this.apiProviderClient = options.apiProviderClient ?? new ApiProviderClient();
     this.contextCollector = options.contextCollector ?? new AssistantContextCollector();
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
+    this.openCodeCapability = options.openCodeCapability;
     this.state = options.state;
     this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui');
     this.registerDevelopmentWebviewWatcher();
@@ -154,7 +162,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     void this.sendCommitMessageSettings();
     void this.flushPendingRequests();
 
-    webviewView.webview.onDidReceiveMessage(async (message) => {
+    webviewView.webview.onDidReceiveMessage(async (message: WebviewToHostMessage) => {
       switch (message.command) {
         case 'send':
         case 'quickAction':
@@ -257,15 +265,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const result: AssistantOpenCodeNativeCommandResult = await this.cliManager.executeOpenCodeNativeCommand(
-      nativeCommand,
-      message.openCodeSessionId
-    ).catch((error) => ({
-      command: nativeCommand,
-      ok: false,
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    await this.view?.webview.postMessage({
+    const result: AssistantOpenCodeNativeCommandResult = this.openCodeCapability
+      ? await this.openCodeCapability.executeNativeCommand(
+        nativeCommand,
+        message.openCodeSessionId
+      ).catch((error) => ({
+        command: nativeCommand,
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      }))
+      : {
+        command: nativeCommand,
+        ok: false,
+        message: 'OpenCode capability is not available.',
+      };
+    await this.postToWebview({
       command: 'openCodeNativeCommandResult',
       nativeCommand: result.command,
       ok: result.ok,
@@ -280,8 +294,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private async handleDeleteOpenCodeSession(message: {
     openCodeSessionId?: string;
   }): Promise<void> {
-    const ok = await this.cliManager.deleteOpenCodeSession(message.openCodeSessionId)
-      .catch(() => false);
+    const ok = this.openCodeCapability
+      ? await this.openCodeCapability.deleteSession(message.openCodeSessionId).catch(() => false)
+      : false;
     if (ok) {
       await this.sendContextSummary(undefined, 'opencode');
     }
@@ -330,20 +345,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
     await this.sendCommitMessageSettings();
-    await this.view?.webview.postMessage({ command: 'openProviderSettings', section });
+    await this.postToWebview({ command: 'openProviderSettings', section });
   }
 
   private async postSwitchProviderMessage(providerId: string): Promise<void> {
-    await this.view?.webview.postMessage({ command: 'switchProvider', providerId });
+    await this.postToWebview({ command: 'switchProvider', providerId });
+  }
+
+  private postToWebview(message: HostToWebviewMessage): Thenable<boolean> | undefined {
+    return this.view?.webview.postMessage(message);
   }
 
   stopAll(): void {
     for (const [cliId, session] of this.activeSessions) {
-      this.cliManager.stop(session.id);
+      this.agentRuntime.stop(session.id);
       this.cleanupSessionState(session);
-      this.view?.webview.postMessage({ command: 'stopped', cliId, sessionId: session.id });
+      this.postToWebview({ command: 'stopped', cliId, sessionId: session.id });
     }
-    this.cliManager.stopAll();
+    this.agentRuntime.stopAll();
     this.activeSessions.clear();
     this.wiredSessionIds.clear();
     this.clearNoOutputNoticeTimers();
@@ -359,7 +378,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendProfiles(): Promise<void> {
-    const profiles = await this.cliManager.getProfilesWithStatus();
+    const profiles = await this.agentRuntime.getProfilesWithStatus();
     const installedProfiles = profiles.filter((profile) => profile.installed);
     this.profilesById.clear();
     installedProfiles.forEach((profile) => {
@@ -371,7 +390,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       : installedProfiles[0]?.id || '';
     const storedProviderId = this.getStoredProviderId(installedProfiles);
     await this.updateProviderTitleContexts(profiles, storedProviderId ?? defaultProviderId);
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'profiles',
       profiles: installedProfiles.map((profile) => ({
         ...profile,
@@ -406,7 +425,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ])
     );
 
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'apiProviderSettings',
       settings,
       envStatusByProviderId,
@@ -414,14 +433,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendHomeAgentSettings(): Promise<void> {
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'homeAgentSettings',
       settings: this.getHomeAgentSettings(),
     });
   }
 
   private async sendCommitMessageSettings(): Promise<void> {
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'commitMessageSettings',
       settings: this.getCommitMessageSettings(),
     });
@@ -433,13 +452,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   ): Promise<void> {
     try {
       await save();
-      this.view?.webview.postMessage({
+      this.postToWebview({
         command: 'settingsSaveResult',
         section,
         ok: true,
       });
     } catch (error) {
-      this.view?.webview.postMessage({
+      this.postToWebview({
         command: 'settingsSaveResult',
         section,
         ok: false,
@@ -501,43 +520,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         throw new Error('Base URL is required');
       }
 
-      const models = await this.requestApiProviderModelList(protocol, baseUrl, apiKey);
-      this.view?.webview.postMessage({
+      const models = await this.apiProviderClient.listModels({ protocol, baseUrl, apiKey });
+      this.postToWebview({
         command: 'apiProviderModelsResult',
         requestId,
         ok: true,
         models,
       });
     } catch (error) {
-      this.view?.webview.postMessage({
+      this.postToWebview({
         command: 'apiProviderModelsResult',
         requestId,
         ok: false,
         message: error instanceof Error ? error.message : String(error),
       });
     }
-  }
-
-  private async requestApiProviderModelList(
-    protocol: ApiProviderProtocol,
-    baseUrl: string,
-    apiKey: string
-  ): Promise<string[]> {
-    const endpoint = `${baseUrl.replace(/\/+$/, '')}/models`;
-    const headers: Record<string, string> = {
-      accept: 'application/json',
-    };
-    if (apiKey) {
-      if (protocol === 'anthropic') {
-        headers['x-api-key'] = apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-      } else {
-        headers.authorization = `Bearer ${apiKey}`;
-      }
-    }
-
-    const response = await requestJson(endpoint, headers);
-    return extractModelIds(response);
   }
 
   private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
@@ -703,7 +700,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const profile = getCliProfile(cliId) ?? getCliProfile(this.getDefaultCliId());
     const baseSummary = this.contextCollector.summarize(snapshot);
     const openCodeStatus = profile?.id === 'opencode'
-      ? await this.cliManager.getOpenCodeStatus()
+      ? await this.openCodeCapability?.getStatus()
       : undefined;
     const mcpStatusPending = this.shouldRetryOpenCodeStatus(profile?.id, openCodeStatus);
     const workspaceBranch = await this.getWorkspaceBranch(
@@ -724,7 +721,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ...baseSummary,
           workspaceBranch,
         };
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'contextSummary',
       summary,
     });
@@ -821,6 +818,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const modelOption = getCliModelOption(profile, message.model);
     const runtimeMode = getCliRuntimeMode(profile, message.runtime);
     const permissionMode = getCliPermissionMode(profile, message.permissionMode);
+    const effectiveModel = effectiveCliModelSelection(modelOption, message.customModel);
     const apiProviderRuntime = resolveApiProviderRuntime(
       this.getApiProviderSettings(),
       cliId,
@@ -848,7 +846,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const baseContextSummary: AssistantContextSummary = this.contextCollector.summarize(snapshot);
     const contextSummary = {
       ...baseContextSummary,
-      tokenUsage: countContextTokens(snapshot, profile, modelOption.id),
+      tokenUsage: countContextTokens(snapshot, profile, effectiveModel.id),
     };
     if (actionRequiresActiveFile(action) && !snapshot.activeFile) {
       this.postError(cliId, runtimeT(this.locale, 'error.missingActiveFile'));
@@ -868,6 +866,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         id: agentMode.id,
         label: agentMode.label,
         instruction: agentMode.instruction,
+      },
+      runtime: {
+        modelId: effectiveModel.id,
+        modelLabel: effectiveModel.label,
+        runtimeId: runtimeMode.id,
+        runtimeLabel: runtimeMode.summaryLabel || runtimeMode.label,
+        permissionModeId: permissionMode.id,
+        permissionModeLabel: permissionMode.summaryLabel || permissionMode.label,
       },
       action,
       message: userText,
@@ -896,7 +902,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ...(agentMode.args ?? []),
         ...optionArgs,
       ];
-      const newSession = await this.cliManager.startPrompt(
+      const newSession = await this.agentRuntime.startPrompt(
         cliId,
         profile.inputMode === 'argument' ? prompt : undefined,
         agentArgs,
@@ -923,7 +929,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'requestStarted',
       cliId,
       sessionId: session.id,
@@ -931,6 +937,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       mode,
       agentMode: agentMode.id,
       agentModeLabel: agentMode.label,
+      modelId: effectiveModel.id,
+      modelLabel: effectiveModel.label,
+      runtimeId: runtimeMode.id,
+      runtimeLabel: runtimeMode.summaryLabel || runtimeMode.label,
+      permissionModeId: permissionMode.id,
+      permissionModeLabel: permissionMode.summaryLabel || permissionMode.label,
       action,
       actionLabel: runtimeActionLabel(this.locale, action),
       attachments,
@@ -940,14 +952,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.armNoOutputNotice(session);
 
     if (profile.inputMode === 'stdin') {
-      const sent = this.cliManager.sendInput(session.id, prompt, !profile.keepStdinOpen);
+      const sent = this.agentRuntime.sendInput(session.id, prompt, !profile.keepStdinOpen);
       if (!sent) {
         this.postError(cliId, runtimeT(this.locale, 'error.sendFailed'));
       }
     }
   }
 
-  private wireSession(session: Session): void {
+  private wireSession(session: AgentSession): void {
     if (this.wiredSessionIds.has(session.id)) {
       return;
     }
@@ -968,7 +980,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           return;
         }
 
-        this.view?.webview.postMessage({
+        this.postToWebview({
           command: 'output',
           cliId: session.cliId,
           text: normalized.text,
@@ -988,7 +1000,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           return;
         }
 
-        this.view?.webview.postMessage({
+        this.postToWebview({
           command: 'output',
           cliId: session.cliId,
           text,
@@ -999,7 +1011,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
 
       if (event.type === 'error') {
-        this.view?.webview.postMessage({
+        this.postToWebview({
           command: 'error',
           cliId: session.cliId,
           text: normalizeCliOutput(event.message, session.cliId),
@@ -1016,7 +1028,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const flushed = flushCliOutputBuffer(buffered ?? '', session.cliId);
       this.outputBuffers.delete(session.id);
       if (flushed) {
-        this.view?.webview.postMessage({
+        this.postToWebview({
           command: 'output',
           cliId: session.cliId,
           text: flushed,
@@ -1026,7 +1038,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         });
       }
 
-      this.view?.webview.postMessage({
+      this.postToWebview({
         command: 'sessionEnd',
         cliId: session.cliId,
         exitCode: event.exitCode,
@@ -1043,9 +1055,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private handleStop(cliId: string): void {
     const session = this.activeSessions.get(cliId);
     if (session) {
-      this.cliManager.stop(session.id);
+      this.agentRuntime.stop(session.id);
       this.cleanupSessionState(session);
-      this.view?.webview.postMessage({ command: 'stopped', cliId, sessionId: session.id });
+      this.postToWebview({ command: 'stopped', cliId, sessionId: session.id });
     }
   }
 
@@ -1056,9 +1068,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const cliId = this.resolveCliId(message);
     const text = String(message.text || '').trim();
     const session = this.activeSessions.get(cliId);
-    const ok = Boolean(text && session && this.cliManager.sendInput(session.id, text));
+    const ok = Boolean(text && session && this.agentRuntime.sendInput(session.id, text));
 
-    await this.view?.webview.postMessage({
+    await this.postToWebview({
       command: 'sessionInputResult',
       cliId,
       sessionId: session?.id,
@@ -1066,14 +1078,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private cleanupSessionState(session: Session): void {
+  private cleanupSessionState(session: AgentSession): void {
     this.clearNoOutputNoticeTimer(session.id);
     this.outputBuffers.delete(session.id);
     this.activeSessions.delete(session.cliId);
     this.wiredSessionIds.delete(session.id);
   }
 
-  private armNoOutputNotice(session: Session): void {
+  private armNoOutputNotice(session: AgentSession): void {
     this.clearNoOutputNoticeTimer(session.id);
     const timer = setTimeout(() => {
       this.noOutputNoticeTimers.delete(session.id);
@@ -1081,7 +1093,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      this.view?.webview.postMessage({
+      this.postToWebview({
         command: 'sessionNotice',
         cliId: session.cliId,
         sessionId: session.id,
@@ -1335,7 +1347,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postError(cliId: string, text: string): void {
-    this.view?.webview.postMessage({
+    this.postToWebview({
       command: 'error',
       cliId,
       text,
@@ -1386,7 +1398,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const pattern = new vscode.RelativePattern(
       this.extensionUri,
-      'media/{main.html,main.css,main.js,i18n.js}'
+      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,conversationStore.js,slashCommands.js,openCodeDialogState.js,claudeActions.js}'
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
@@ -1466,6 +1478,34 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.getWebviewUri(webview, 'media', 'i18n.js')
     );
     html = html.replace(
+      /__MESSAGE_TEXT_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'messageText.js')
+    );
+    html = html.replace(
+      /__MESSAGE_CHOICES_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'messageChoices.js')
+    );
+    html = html.replace(
+      /__PROVIDER_RUN_STATE_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'providerRunState.js')
+    );
+    html = html.replace(
+      /__CONVERSATION_STORE_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'conversationStore.js')
+    );
+    html = html.replace(
+      /__SLASH_COMMANDS_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'slashCommands.js')
+    );
+    html = html.replace(
+      /__OPEN_CODE_DIALOG_STATE_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'openCodeDialogState.js')
+    );
+    html = html.replace(
+      /__CLAUDE_ACTIONS_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'claudeActions.js')
+    );
+    html = html.replace(
       /__MAIN_JS_URI__/g,
       this.getWebviewUri(webview, 'media', 'main.js')
     );
@@ -1482,7 +1522,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openCodeStatusRefreshAttempts.clear();
     this.outputBuffers.clear();
     for (const [, session] of this.activeSessions) {
-      this.cliManager.stop(session.id);
+      this.agentRuntime.stop(session.id);
     }
     if (options.disposeContextCollector) {
       this.contextCollector.dispose();
@@ -1530,6 +1570,18 @@ function preferredReadOnlyPermission(profile?: CliProfile): string | undefined {
   const mode = profile.permissionModes?.find((item) => item.id === 'readOnly')
     ?? profile.permissionModes?.find((item) => item.id === 'plan');
   return mode?.id;
+}
+
+function effectiveCliModelSelection(
+  model: CliModelOption,
+  customModel: string | undefined
+): { id: string; label: string } {
+  const customId = model.custom ? String(customModel || '').trim() : '';
+  const id = customId || model.id;
+  const label = model.custom && customId
+    ? customId
+    : model.summaryLabel || model.label || id;
+  return { id, label };
 }
 
 function isImageAttachmentInput(value: unknown): value is AssistantImageAttachmentInput {
@@ -1638,100 +1690,6 @@ function extensionForMime(mimeType: string): string {
     default:
       return '.png';
   }
-}
-
-function requestJson(urlText: string, headers: Record<string, string>): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let url: URL;
-    try {
-      url = new URL(urlText);
-    } catch {
-      reject(new Error('Invalid Base URL'));
-      return;
-    }
-
-    const client = url.protocol === 'http:' ? http : https;
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      reject(new Error('Base URL must start with http:// or https://'));
-      return;
-    }
-
-    const request = client.request(
-      url,
-      {
-        method: 'GET',
-        headers,
-        timeout: 15000,
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on('data', (chunk: Buffer | string) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        response.on('end', () => {
-          const body = Buffer.concat(chunks).toString('utf8');
-          if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
-            reject(new Error(`Models request failed: HTTP ${response.statusCode || 'unknown'}`));
-            return;
-          }
-          try {
-            resolve(body ? JSON.parse(body) : {});
-          } catch {
-            reject(new Error('Models response is not valid JSON'));
-          }
-        });
-      }
-    );
-
-    request.on('timeout', () => {
-      request.destroy(new Error('Models request timed out'));
-    });
-    request.on('error', reject);
-    request.end();
-  });
-}
-
-function extractModelIds(value: unknown): string[] {
-  const items = modelSourceArray(value);
-  const seen = new Set<string>();
-  const result: string[] = [];
-  items.forEach((item) => {
-    const id = modelIdFromItem(item);
-    if (!id || seen.has(id)) {
-      return;
-    }
-    seen.add(id);
-    result.push(id);
-  });
-  return result.sort((a, b) => a.localeCompare(b));
-}
-
-function modelSourceArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) {
-    return value;
-  }
-  if (value && typeof value === 'object' && Array.isArray((value as { data?: unknown }).data)) {
-    return (value as { data: unknown[] }).data;
-  }
-  if (value && typeof value === 'object' && Array.isArray((value as { models?: unknown }).models)) {
-    return (value as { models: unknown[] }).models;
-  }
-  return [];
-}
-
-function modelIdFromItem(value: unknown): string {
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-  if (!value || typeof value !== 'object') {
-    return '';
-  }
-  const record = value as Record<string, unknown>;
-  return typeof record.id === 'string'
-    ? record.id.trim()
-    : typeof record.name === 'string'
-      ? record.name.trim()
-      : '';
 }
 
 function getNonce(): string {

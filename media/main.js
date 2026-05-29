@@ -1,6 +1,15 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const i18n = window.AssistantI18n;
+  const messageText = window.AgentsGuiMessageText;
+  const messageChoices = window.AgentsGuiMessageChoices;
+  const providerRunState = window.AgentsGuiProviderRunState;
+  const conversationStore = window.AgentsGuiConversationStore;
+  const slashCommands = window.AgentsGuiSlashCommands;
+  const openCodeDialogState = window.AgentsGuiOpenCodeDialogState;
+  const claudeActions = window.AgentsGuiClaudeActions;
+  const normalizeMessageText = messageText.normalizeMessageText;
+  const stripInlineMarkdown = messageText.stripInlineMarkdown;
   i18n.apply();
 
   // Inject critical styles via JS to bypass webview CSS caching
@@ -15,8 +24,6 @@
     document.head.appendChild(style);
   })();
 
-  const ORPHAN_ANSI_PATTERN = /(?:^|(?<=\s))\[(?:\??25[hl]|[0-9;]*[ABCDEFGJKSTfimnsu]|[0-9;]*[hl])(?![A-Za-z0-9_-])/g;
-  const CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
   const INTERNAL_PROMPT_START = 'You are an AI coding assistant embedded in VS Code.';
   const INTERNAL_PROMPT_END_MARKER = '- Risks and caveats: call out assumptions, follow-up work, and edge cases.';
   const INTERNAL_PROMPT_START_MARKERS = [
@@ -87,7 +94,7 @@
     plan: 'notebook-tabs',
     auto: 'zap',
   });
-  const OPENCODE_OPTION_DIALOG_KINDS = new Set(['sessions', 'models', 'agents']);
+  const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState.optionDialogKinds();
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
   const DEFAULT_CONTEXT_OPTIONS = Object.freeze({
     includeWorkspace: true,
@@ -130,10 +137,11 @@
   let taskBySessionId = {};
   const stoppedSessionIds = new Set();
   const dismissedClaudeApprovalKeys = new Set();
-  let pendingTaskByProvider = {};
-  let runningByProvider = {};
-  let pendingByProvider = {};
-  let pendingThreadByProvider = {};
+  const providerRunStore = providerRunState.createProviderRunState();
+  let pendingTaskByProvider = providerRunStore.pendingTaskByProvider;
+  let runningByProvider = providerRunStore.runningByProvider;
+  let pendingByProvider = providerRunStore.pendingByProvider;
+  let pendingThreadByProvider = providerRunStore.pendingThreadByProvider;
   let messageStatusTimer = undefined;
   let renderedMessageThreadKey = '';
   let persistUserSelectionTimer = undefined;
@@ -185,6 +193,7 @@
   const codexTerminalStop = document.getElementById('codexTerminalStop');
   const codexTerminalOpen = document.getElementById('codexTerminalOpen');
   const modelMenu = document.querySelector('.model-menu');
+  const modelSummary = modelMenu?.querySelector('.option-summary');
   const runtimeMenu = document.querySelector('.runtime-menu');
   const permissionMenu = document.querySelector('.permission-menu');
   const modeMenu = document.querySelector('.mode-menu');
@@ -239,98 +248,12 @@
   const apiProviderSaveStatus = document.getElementById('apiProviderSaveStatus');
   const apiProviderDelete = document.getElementById('apiProviderDelete');
   const apiProviderCancel = document.getElementById('apiProviderCancel');
-  const SLASH_COMMANDS = [
-    { name: 'new', aliases: ['clear'], kind: 'local', local: 'new', descriptionKey: 'slash.new.desc' },
-    { name: 'clear', kind: 'local', local: 'new', descriptionKey: 'slash.clear.desc' },
-    { name: 'help', kind: 'local', local: 'help', descriptionKey: 'slash.help.desc' },
-    { name: 'context', kind: 'local', local: 'context', descriptionKey: 'slash.context.desc' },
-    { name: 'refresh', kind: 'local', local: 'refresh', descriptionKey: 'slash.refresh.desc' },
-    { name: 'stop', kind: 'local', local: 'stop', descriptionKey: 'slash.stop.desc' },
-    { name: 'copy', kind: 'local', local: 'copy', descriptionKey: 'slash.copy.desc' },
-    {
-      name: 'review',
-      action: 'reviewFile',
-      prompt: i18n.t('quick.review.text'),
-      descriptionKey: 'slash.review.desc',
-    },
-    {
-      name: 'explain',
-      action: 'explainSelection',
-      prompt: i18n.t('quick.explain.text'),
-      descriptionKey: 'slash.explain.desc',
-    },
-    {
-      name: 'tests',
-      aliases: ['test'],
-      action: 'generateTests',
-      prompt: i18n.t('quick.tests.text'),
-      descriptionKey: 'slash.tests.desc',
-    },
-    {
-      name: 'refactor',
-      action: 'refactorSelection',
-      prompt: i18n.t('quick.refactor.text'),
-      descriptionKey: 'slash.refactor.desc',
-    },
-    {
-      name: 'plan',
-      action: 'freeform',
-      prompt: i18n.t('slash.plan.prompt'),
-      modeByProvider: { claude: 'plan', codex: 'plan', opencode: 'plan', gemini: 'plan', goose: 'plan' },
-      descriptionKey: 'slash.plan.desc',
-    },
-    {
-      name: 'init',
-      action: 'freeform',
-      prompt: i18n.t('slash.init.prompt'),
-      descriptionKey: 'slash.init.desc',
-    },
-  ];
-  const CLAUDE_ACTION_DRAWER_SECTIONS = Object.freeze([
-    {
-      id: 'context',
-      titleKey: 'claude.actions.context',
-      actions: [
-        { id: 'attachFile', labelKey: 'claude.actions.attachFile' },
-        { id: 'mentionFile', labelKey: 'claude.actions.mentionFile' },
-        { id: 'clearConversation', labelKey: 'claude.actions.clearConversation' },
-        { id: 'rewind', labelKey: 'claude.actions.rewind' },
-      ],
-    },
-    {
-      id: 'model',
-      titleKey: 'claude.actions.model',
-      actions: [
-        { id: 'switchModel', labelKey: 'claude.actions.switchModel', trailingKey: 'claude.actions.defaultRecommended' },
-        { id: 'effort', labelKey: 'claude.actions.effort', kind: 'effort' },
-        { id: 'thinking', labelKey: 'claude.actions.thinking', kind: 'toggle' },
-        { id: 'accountUsage', labelKey: 'claude.actions.accountUsage' },
-      ],
-    },
-    {
-      id: 'customize',
-      titleKey: 'claude.actions.customize',
-      actions: [
-        { id: 'permissions', labelKey: 'claude.actions.permissions' },
-        { id: 'settings', labelKey: 'claude.actions.settings' },
-      ],
-    },
-  ]);
+  const SLASH_COMMANDS = slashCommands.createBaseSlashCommands((key, params) => i18n.t(key, params));
   let slashMatches = [];
   let slashActiveIndex = 0;
   let slashPaletteMode = '';
   let claudeActionQuery = '';
   let forceContextMenuVisible = false;
-
-  function normalizeMessageText(text) {
-    return String(text || '')
-      .replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g, '')
-      .replace(ORPHAN_ANSI_PATTERN, '')
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(CONTROL_PATTERN, '')
-      .replace(/\n{4,}/g, '\n\n\n');
-  }
 
   function filterInternalPromptEcho(text) {
     const normalized = normalizeMessageText(text);
@@ -381,7 +304,7 @@
       activePermissionByProvider,
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
-      threadsByProvider: serializeThreadsForState(threadsByProvider),
+      threadsByProvider: conversationStore.serializeThreadsForState(threadsByProvider),
       tasks: serializeTasksForState(tasks),
       activeThreadByProvider,
       contextOptions: defaultContextOptions(),
@@ -427,23 +350,6 @@
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
     });
-  }
-
-  function serializeThreadsForState(source) {
-    const serialized = {};
-    Object.entries(source || {}).forEach(([cliId, threads]) => {
-      serialized[cliId] = (threads || []).map((thread) => ({
-        ...thread,
-        messages: (thread.messages || []).map((message) => {
-          if (!message || typeof message !== 'object') {
-            return message;
-          }
-          const { startedAt, ...rest } = message;
-          return { ...rest, running: false };
-        }),
-      }));
-    });
-    return serialized;
   }
 
   function serializeTasksForState(source) {
@@ -749,7 +655,7 @@
   }
 
   function makeThreadId(cliId) {
-    return `${cliId || 'thread'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return conversationStore.makeThreadId(cliId);
   }
 
   function makeTaskId(providerId) {
@@ -757,34 +663,16 @@
   }
 
   function createThread(cliId, messages) {
-    const now = Date.now();
-    const initialMessages = Array.isArray(messages) ? messages : [];
-    return {
-      id: makeThreadId(cliId),
-      title: deriveThreadTitle(initialMessages) || i18n.t('history.newThread'),
-      createdAt: now,
-      updatedAt: now,
-      openCodeSessionId: undefined,
-      messages: initialMessages,
-    };
+    return conversationStore.createThread(cliId, messages, {
+      deriveThreadTitle,
+      newThreadTitle: i18n.t('history.newThread'),
+    });
   }
 
   function normalizeThreadMessages(threadMessages) {
-    return (threadMessages || []).map((message) => {
-      if (!message || typeof message !== 'object') {
-        return message;
-      }
-
-      if (message.role !== 'assistant' && message.role !== 'error') {
-        return message;
-      }
-
-      return {
-        ...message,
-        running: false,
-        text: filterInternalPromptEcho(message.text).text,
-        thinking: sanitizeThinkingText(message.thinking),
-      };
+    return conversationStore.normalizeThreadMessages(threadMessages, {
+      normalizeAssistantText: (text) => filterInternalPromptEcho(text).text,
+      sanitizeThinkingText,
     });
   }
 
@@ -800,51 +688,24 @@
   }
 
   function ensureThreadList(cliId) {
-    if (!cliId) {
-      return [];
-    }
-    if (!threadsByProvider[cliId]) {
-      threadsByProvider[cliId] = [];
-    }
-    return threadsByProvider[cliId];
+    return conversationStore.ensureThreadList(threadsByProvider, cliId);
   }
 
   function findThread(cliId, threadId) {
-    return ensureThreadList(cliId).find((thread) => thread.id === threadId);
+    return conversationStore.findThread(threadsByProvider, cliId, threadId);
   }
 
   function ensureActiveThread(cliId) {
-    if (!cliId) {
-      return null;
-    }
-
-    const threads = ensureThreadList(cliId);
-    let thread = findThread(cliId, activeThreadByProvider[cliId]);
-
-    if (!thread) {
-      thread = threads[0];
-    }
-
-    if (!thread) {
-      thread = createThread(cliId);
-      threads.unshift(thread);
-    }
-
-    activeThreadByProvider[cliId] = thread.id;
-    return thread;
+    return conversationStore.ensureActiveThread(
+      threadsByProvider,
+      activeThreadByProvider,
+      cliId,
+      createThread
+    );
   }
 
   function setActiveThread(cliId, thread) {
-    if (!cliId || !thread) {
-      return null;
-    }
-
-    const threads = ensureThreadList(cliId);
-    if (!threads.includes(thread)) {
-      threads.unshift(thread);
-    }
-    activeThreadByProvider[cliId] = thread.id;
-    return thread;
+    return conversationStore.setActiveThread(threadsByProvider, activeThreadByProvider, cliId, thread);
   }
 
   function startNewThread(cliId = activeId) {
@@ -859,9 +720,7 @@
   }
 
   function latestThread(threads) {
-    return (threads || [])
-      .slice()
-      .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))[0] || null;
+    return conversationStore.latestThread(threads);
   }
 
   function canDeleteActiveThread(cliId = activeId) {
@@ -2484,41 +2343,19 @@
   }
 
   function parseSlashInput(value) {
-    const text = String(value || '');
-    if (!text.startsWith('/') || text.includes('\n')) {
-      return null;
-    }
-
-    const match = /^\/([^\s]*)\s*([\s\S]*)$/.exec(text);
-    if (!match) {
-      return null;
-    }
-
-    const query = match[1].toLowerCase();
-    return slashInputLooksLikeCommand(query)
-      ? { query, args: (match[2] || '').trim() }
-      : null;
+    return slashCommands.parseSlashInput(value);
   }
 
   function slashInputLooksLikeCommand(query) {
-    if (!query) {
-      return true;
-    }
-
-    return !query.includes('/') && /^[a-z0-9_-]+$/.test(query);
+    return slashCommands.slashInputLooksLikeCommand(query);
   }
 
   function slashCommandMatchesProvider(command, profile) {
-    return !command.providers || command.providers.includes(profile?.id);
+    return slashCommands.slashCommandMatchesProvider(command, profile);
   }
 
   function slashCommandMatchesQuery(command, query) {
-    if (!query) {
-      return true;
-    }
-
-    const names = [command.name, ...(command.aliases || [])];
-    return names.some((name) => name.toLowerCase().startsWith(query));
+    return slashCommands.slashCommandMatchesQuery(command, query);
   }
 
   function slashCommandDescription(command, profile = activeProfile()) {
@@ -2528,77 +2365,32 @@
   }
 
   function profileSlashCommands(profile) {
-    if (!Array.isArray(profile?.slashCommands)) {
-      return [];
-    }
-
-    return profile.slashCommands
-      .filter((command) => command && typeof command.name === 'string')
-      .map((command) => ({
-        ...command,
-        kind: command.kind || 'local',
-      }));
+    return slashCommands.profileSlashCommands(profile);
   }
 
   function nativeApiCommandNames(profile) {
-    return new Set(
-      profileSlashCommands(profile)
-        .filter((command) => command.kind === 'native' && command.nativeApi)
-        .map((command) => command.name)
-    );
+    return slashCommands.nativeApiCommandNames(profile);
   }
 
   function commandsForActiveProvider() {
-    const profile = activeProfile();
-    const seen = new Set();
-    const commands = [];
-    for (const command of [...SLASH_COMMANDS, ...profileSlashCommands(profile)]) {
-      if (!slashCommandMatchesProvider(command, profile) || seen.has(command.name)) {
-        continue;
-      }
-
-      seen.add(command.name);
-      commands.push(command);
-    }
-
-    return commands;
+    return slashCommands.commandsForProvider(SLASH_COMMANDS, activeProfile());
   }
 
   function claudeActionDrawerSections(profile = activeProfile()) {
     const runtime = activeRuntime(profile);
     const runtimeId = runtime?.id || 'defaultEffort';
     const model = activeModel(profile);
-    return CLAUDE_ACTION_DRAWER_SECTIONS.map((section) => ({
-      ...section,
-      title: i18n.t(section.titleKey),
-      actions: section.actions.map((action) => {
-        const label = action.kind === 'effort'
-          ? i18n.t(action.labelKey, { value: claudeEffortValueLabel(runtime) })
-          : i18n.t(action.labelKey);
-        const trailing = action.id === 'switchModel'
-          ? (model?.id === 'configured'
-              ? i18n.t(action.trailingKey)
-              : localizedCliOption(model, 'model')?.label || model?.label || '')
-          : '';
-        return {
-          ...action,
-          name: action.id,
-          sectionId: section.id,
-          label,
-          trailing,
-          active: action.kind === 'toggle' && runtimeId !== 'defaultEffort',
-        };
-      }),
-    }));
+    return claudeActions.actionSections({
+      translate: (key, params) => i18n.t(key, params),
+      runtimeId,
+      effortValueLabel: claudeEffortValueLabel(runtime),
+      modelId: model?.id || '',
+      modelLabel: localizedCliOption(model, 'model')?.label || model?.label || '',
+    });
   }
 
   function claudeActionMatchesQuery(action, query) {
-    if (!query) {
-      return true;
-    }
-
-    const text = `${action.id} ${action.label} ${action.trailing || ''}`.toLowerCase();
-    return text.includes(query.toLowerCase());
+    return claudeActions.actionMatchesQuery(action, query);
   }
 
   function renderClaudeActionDrawer({ focusFilter = false } = {}) {
@@ -2820,11 +2612,7 @@
   }
 
   function buildSlashCommandPrompt(command, args) {
-    if (!args) {
-      return command.prompt || '';
-    }
-
-    return command.prompt ? `${command.prompt}\n\n${args}` : args;
+    return slashCommands.buildSlashCommandPrompt(command, args);
   }
 
   function buildSlashHelpMessage() {
@@ -3631,17 +3419,15 @@
   }
 
   function normalizedModelMemory(value) {
-    return Array.isArray(value) ? value.filter(Boolean).map(String) : [];
+    return openCodeDialogState.normalizedModelMemory(value);
   }
 
   function recentModelIds(cliId = activeId) {
-    const selected = activeModelId(cliId);
-    const recent = normalizedModelMemory(recentModelByProvider[cliId]);
-    return [selected, ...recent.filter((item) => item !== selected)].slice(0, 6);
+    return openCodeDialogState.recentModelIds(activeModelId(cliId), recentModelByProvider[cliId]);
   }
 
   function favoriteModelIds(cliId = activeId) {
-    return normalizedModelMemory(favoriteModelByProvider[cliId]);
+    return openCodeDialogState.favoriteModelIds(favoriteModelByProvider[cliId]);
   }
 
   function rememberRecentModel(cliId, modelId) {
@@ -3667,78 +3453,23 @@
   }
 
   function openCodeModelProviderId(modelId) {
-    const value = String(modelId || '');
-    return value.includes('/') ? value.split('/')[0] : 'configured';
+    return openCodeDialogState.modelProviderId(modelId);
   }
 
   function openCodeModelProviderName(providerId) {
-    const names = {
-      anthropic: 'Anthropic',
-      google: 'Google',
-      groq: 'Groq',
-      mistral: 'Mistral',
-      mimo: 'Xiaomi MiMo',
-      ollama: 'Ollama',
-      openai: 'OpenAI',
-      opencode: 'OpenCode Zen',
-      openrouter: 'OpenRouter',
-      xai: 'xAI',
-    };
-    if (names[providerId]) {
-      return names[providerId];
-    }
-    return String(providerId || 'Configured')
-      .split(/[-_\s]+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
+    return openCodeDialogState.modelProviderName(providerId);
   }
 
   function openCodeModelTokenTitle(token) {
-    const known = {
-      chatgpt: 'ChatGPT',
-      claude: 'Claude',
-      codestral: 'Codestral',
-      deepseek: 'DeepSeek',
-      gemini: 'Gemini',
-      gpt: 'GPT',
-      llama: 'Llama',
-      minimax: 'MiniMax',
-      mimo: 'MiMo',
-      nemotron: 'Nemotron',
-      qwen: 'Qwen',
-    };
-    const value = String(token || '');
-    const lower = value.toLowerCase();
-    if (known[lower]) {
-      return known[lower];
-    }
-    if (/^v?\d/.test(lower)) {
-      return lower.toUpperCase();
-    }
-    return lower.charAt(0).toUpperCase() + lower.slice(1);
+    return openCodeDialogState.modelTokenTitle(token);
   }
 
   function openCodeModelTitle(modelId, fallback) {
-    const id = String(modelId || '');
-    const raw = id.includes('/') ? id.split('/').pop() : id;
-    const label = String(fallback || '').trim();
-    if (label && label !== id) {
-      return label;
-    }
-    return raw
-      .split('-')
-      .filter(Boolean)
-      .map(openCodeModelTokenTitle)
-      .join(' ') || id;
+    return openCodeDialogState.modelTitle(modelId, fallback);
   }
 
   function openCodeModelFooter(option, providerId) {
-    const id = String(option?.id || '');
-    if (providerId === 'opencode' || /(?:^|-)free$/.test(id)) {
-      return 'Free';
-    }
-    return '';
+    return openCodeDialogState.modelFooter(option, providerId);
   }
 
   function openCodeDialogModelOptions() {
@@ -3765,63 +3496,11 @@
   }
 
   function openCodeModelOptionGroups() {
-    const options = openCodeDialogModelOptions();
-    const needle = openCodeDialogQuery.trim().toLowerCase();
-    if (needle) {
-      return [{
-        title: '',
-        options: options.filter((option) => [
-          option.label,
-          option.meta,
-          option.category,
-          option.id,
-        ].some((value) => String(value || '').toLowerCase().includes(needle))),
-      }];
-    }
-
-    const byId = new Map(options.map((option) => [option.id, option]));
-    const favoriteIds = favoriteModelIds(activeId);
-    const recentIds = recentModelIds(activeId).filter((id) => !favoriteIds.includes(id));
-    const usedIds = new Set();
-    const groups = [];
-    const favoriteOptions = favoriteIds.map((id) => byId.get(id)).filter(Boolean);
-    const recentOptions = recentIds.map((id) => byId.get(id)).filter(Boolean);
-
-    if (favoriteOptions.length > 0) {
-      groups.push({ title: 'Favorites', options: favoriteOptions });
-      favoriteOptions.forEach((option) => usedIds.add(option.id));
-    }
-    if (recentOptions.length > 0) {
-      groups.push({ title: 'Recent', options: recentOptions });
-      recentOptions.forEach((option) => usedIds.add(option.id));
-    }
-
-    const grouped = new Map();
-    options
-      .filter((option) => !usedIds.has(option.id))
-      .forEach((option) => {
-        if (!grouped.has(option.category)) {
-          grouped.set(option.category, []);
-        }
-        grouped.get(option.category).push(option);
-      });
-
-    grouped.forEach((items, title) => {
-      groups.push({
-        title,
-        options: items.sort((a, b) => {
-          if (a.footer === 'Free' && b.footer !== 'Free') {
-            return -1;
-          }
-          if (a.footer !== 'Free' && b.footer === 'Free') {
-            return 1;
-          }
-          return a.label.localeCompare(b.label);
-        }),
-      });
+    return openCodeDialogState.groupModelOptions(openCodeDialogModelOptions(), {
+      query: openCodeDialogQuery,
+      favoriteIds: favoriteModelIds(activeId),
+      recentIds: recentModelIds(activeId),
     });
-
-    return groups;
   }
 
   function openCodeSessionOptions() {
@@ -4030,73 +3709,37 @@
   }
 
   function openCodeDialogKeyboardOptions(kind) {
-    if (kind === 'models') {
-      return openCodeModelOptionGroups()
-        .flatMap((group) => group.options)
-        .filter((option) => !option.disabled);
-    }
-
-    if (OPENCODE_OPTION_DIALOG_KINDS.has(kind)) {
-      return openCodeDialogOptions(kind).filter((option) => !option.disabled);
-    }
-
-    return [];
+    return openCodeDialogState.keyboardOptions(kind, {
+      modelGroups: kind === 'models' ? openCodeModelOptionGroups() : [],
+      options: OPENCODE_OPTION_DIALOG_KINDS.has(kind) ? openCodeDialogOptions(kind) : [],
+    });
   }
 
   function initialOpenCodeDialogActiveIndex(kind) {
-    const options = openCodeDialogKeyboardOptions(kind);
-    const selectedIndex = options.findIndex((option) => option.selected);
-    return selectedIndex >= 0 ? selectedIndex : 0;
+    return openCodeDialogState.initialActiveIndex(openCodeDialogKeyboardOptions(kind));
   }
 
   function syncOpenCodeDialogActiveIndex(kind) {
     const options = openCodeDialogKeyboardOptions(kind);
-    if (options.length === 0) {
-      openCodeDialogActiveIndex = 0;
-      return options;
-    }
-
-    openCodeDialogActiveIndex = Math.min(Math.max(openCodeDialogActiveIndex, 0), options.length - 1);
+    openCodeDialogActiveIndex = openCodeDialogState.clampActiveIndex(openCodeDialogActiveIndex, options);
     return options;
   }
 
   function openCodeDialogActiveOptionId(kind) {
     const options = syncOpenCodeDialogActiveIndex(kind);
-    return options[openCodeDialogActiveIndex]?.id || '';
+    return openCodeDialogState.activeOptionId(options, openCodeDialogActiveIndex);
   }
 
   function openCodeDialogCommandAliases(kind) {
-    switch (kind) {
-      case 'sessions':
-        return ['session', 'sessions', 'resume', 'continue'];
-      case 'models':
-        return ['model', 'models'];
-      case 'agents':
-        return ['agent', 'agents'];
-      case 'mcp':
-        return ['mcp', 'mcps'];
-      case 'themes':
-        return ['theme', 'themes'];
-      case 'org':
-        return ['org', 'orgs', 'switch-org'];
-      default:
-        return [kind];
-    }
+    return openCodeDialogState.commandAliases(kind);
   }
 
   function normalizeOpenCodeDialogCommandQuery(value) {
-    return String(value || '').trim().replace(/^\/+/, '').toLowerCase();
+    return openCodeDialogState.normalizeCommandQuery(value);
   }
 
   function isOpenCodeDialogCommandEcho(kind, value) {
-    const query = normalizeOpenCodeDialogCommandQuery(value);
-    return Boolean(
-      query
-      && (
-        query === openCodeDialogCommandEchoQuery
-        || openCodeDialogCommandAliases(kind).includes(query)
-      )
-    );
+    return openCodeDialogState.isCommandEcho(kind, value, openCodeDialogCommandEchoQuery);
   }
 
   function configureOpenCodeDialogFilter(filter, kind) {
@@ -4452,7 +4095,7 @@
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const delta = event.key === 'ArrowDown' ? 1 : -1;
-      openCodeDialogActiveIndex = (openCodeDialogActiveIndex + delta + options.length) % options.length;
+      openCodeDialogActiveIndex = openCodeDialogState.moveActiveIndex(openCodeDialogActiveIndex, options, delta);
       renderOpenCodeStatusDialog();
       requestAnimationFrame(focusOpenCodeMcpActiveOption);
       return;
@@ -4484,7 +4127,7 @@
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const delta = event.key === 'ArrowDown' ? 1 : -1;
-      openCodeDialogActiveIndex = (openCodeDialogActiveIndex + delta + options.length) % options.length;
+      openCodeDialogActiveIndex = openCodeDialogState.moveActiveIndex(openCodeDialogActiveIndex, options, delta);
       renderOpenCodeStatusDialog();
       requestAnimationFrame(focusOpenCodeOptionDialogActiveTarget);
       return;
@@ -4947,11 +4590,16 @@
       const hasAssistantThinking = item.role === 'assistant' && Boolean(normalizeMessageText(item.thinking).trim());
       const hasAssistantActivity = hasOpenCodeActivity(item.activity);
       const hasInlineAssistantActivity = hasOpenCodeActivityTimeline(item.activityTimeline);
-      if (item.role === 'assistant' && (hasAssistantThinking || hasAssistantActivity)) {
+      const showAssistantThinkingDetails = shouldShowAssistantThinkingDetails(
+        hasAssistantThinking,
+        hasAssistantActivity,
+        hasInlineAssistantActivity
+      );
+      if (item.role === 'assistant' && showAssistantThinkingDetails) {
         appendMessageThinking(bubble, item.thinking, {
           activity: item.activity,
           suppressActivityDetails: hasInlineAssistantActivity,
-          running: itemRunning,
+          running: shouldShowThinkingRunningTimer(itemRunning, item),
           startedAt: item.startedAt,
           durationMs: item.durationMs,
           detailKey: messageDetailKey(activeId, activeThread?.id, index, 'thinking'),
@@ -5071,7 +4719,7 @@
 
     const text = openCodeThinkingSummaryText(
       item.activity,
-      itemRunning,
+      shouldShowThinkingRunningTimer(itemRunning, item),
       item.startedAt,
       item.durationMs
     );
@@ -5109,6 +4757,14 @@
     });
 
     return hasVisibleRunningMessage;
+  }
+
+  function shouldShowAssistantThinkingDetails(hasThinking, hasActivity, hasInlineActivity) {
+    return Boolean(hasThinking || (hasActivity && !hasInlineActivity));
+  }
+
+  function shouldShowThinkingRunningTimer(itemRunning, item) {
+    return Boolean(itemRunning && !normalizeMessageText(item?.text).trim());
   }
 
   function assistantCopyGroupStart(conversation, index) {
@@ -5669,17 +5325,32 @@
     modelSummaryLabel.textContent = model.custom && activeCustomModel(activeId)
       ? activeCustomModel(activeId)
       : displayModel.summaryLabel || displayModel.label || i18n.t('model.short');
-    modelSummaryLabel.closest('.option-summary')?.setAttribute('title', displayModel.description || i18n.t('model.label'));
-    if ((profile?.id === 'opencode' || (profile?.id === 'claude' && !claudeModelMenuExplicit)) && modelMenu) {
+    modelSummary?.setAttribute('title', displayModel.description || i18n.t('model.label'));
+    const readonlyModel = profile?.id === 'opencode';
+    modelMenu?.classList.toggle('is-readonly', Boolean(readonlyModel));
+    if (modelSummary) {
+      if (readonlyModel) {
+        modelSummary.setAttribute('aria-disabled', 'true');
+        modelSummary.tabIndex = -1;
+      } else {
+        modelSummary.removeAttribute('aria-disabled');
+        modelSummary.removeAttribute('tabindex');
+      }
+    }
+    if ((readonlyModel || (profile?.id === 'claude' && !claudeModelMenuExplicit)) && modelMenu) {
       modelMenu.open = false;
     }
     modelMenu?.classList.toggle(
       'is-visible',
       Boolean(
         profile &&
-        profile.id !== 'opencode' &&
-        options.length > 1 &&
-        (profile.id !== 'claude' || (claudeModelMenuExplicit && modelMenu?.open))
+        (
+          readonlyModel ||
+          (
+            options.length > 1 &&
+            (profile.id !== 'claude' || (claudeModelMenuExplicit && modelMenu?.open))
+          )
+        )
       )
     );
     customModelField.hidden = !model.custom;
@@ -5971,7 +5642,7 @@
       addMessage(providerId || activeId, 'error', providerUnavailableMessage(profile || providerId));
       return false;
     }
-    if (runningByProvider[providerId] || pendingByProvider[providerId]) {
+    if (providerRunState.isProviderBusy(providerRunStore, providerId)) {
       return false;
     }
 
@@ -5984,9 +5655,7 @@
     }
 
     const task = createRunTask(providerId, action, text, preferredWorkflowMode);
-    pendingTaskByProvider[providerId] = task.id;
-    pendingByProvider[providerId] = true;
-    pendingThreadByProvider[providerId] = activeThreadId(providerId);
+    providerRunState.setProviderPending(providerRunStore, providerId, activeThreadId(providerId), task.id);
     renderAll();
 
     vscode.postMessage({
@@ -6198,9 +5867,7 @@
       status: wasStopped ? 'stopped' : (Number(message.exitCode) === 0 ? 'completed' : 'failed'),
     });
     delete taskBySessionId[message.sessionId];
-    runningByProvider[message.cliId] = false;
-    pendingByProvider[message.cliId] = false;
-    delete pendingThreadByProvider[message.cliId];
+    providerRunState.clearProviderRunState(providerRunStore, message.cliId);
     if (Number(message.exitCode) !== 0 && !wasStopped) {
       addMessage(
         message.cliId,
@@ -6253,6 +5920,18 @@
     }
 
     return parts.length ? `${i18n.t('context.prefix')}: ${parts.join(', ')}` : undefined;
+  }
+
+  function summarizeRuntimeSelection(message) {
+    const model = normalizeMessageText(message?.modelLabel || message?.modelId);
+    return model ? i18n.t('message.modelMeta', { model }) : undefined;
+  }
+
+  function mergeMessageMeta(...values) {
+    return values
+      .map((value) => normalizeMessageText(value))
+      .filter(Boolean)
+      .join(i18n.t('message.metaSeparator')) || undefined;
   }
 
   function messageDetailKey(cliId, threadId, index, kind, localKey = '') {
@@ -6312,14 +5991,19 @@
     const hasAssistantThinking = item.role === 'assistant' && Boolean(normalizeMessageText(item.thinking).trim());
     const hasAssistantActivity = hasOpenCodeActivity(item.activity);
     const hasInlineAssistantActivity = hasOpenCodeActivityTimeline(item.activityTimeline);
+    const showAssistantThinkingDetails = shouldShowAssistantThinkingDetails(
+      hasAssistantThinking,
+      hasAssistantActivity,
+      hasInlineAssistantActivity
+    );
     const baseDetailKey = messageDetailKey(target.cliId, target.threadId, target.index, 'message');
 
     wrapper.className = `message ${item.role}${itemRunning ? ' is-running' : ''}`;
-    if (item.role === 'assistant' && (hasAssistantThinking || hasAssistantActivity)) {
+    if (item.role === 'assistant' && showAssistantThinkingDetails) {
       syncMessageThinkingElement(bubble, item.thinking, {
         activity: item.activity,
         suppressActivityDetails: hasInlineAssistantActivity,
-        running: itemRunning,
+        running: shouldShowThinkingRunningTimer(itemRunning, item),
         startedAt: item.startedAt,
         durationMs: item.durationMs,
         detailKey: messageDetailKey(target.cliId, target.threadId, target.index, 'thinking'),
@@ -6361,7 +6045,11 @@
   }
 
   function appendMessageChoiceActions(bubble, text) {
-    const choices = extractMessageChoices(text);
+    const choices = messageChoices?.extractMessageChoices
+      ? messageChoices.extractMessageChoices(text, {
+        promptForChoice: (index, label) => i18n.t('message.choice.prompt', { index, label }),
+      })
+      : [];
     bubble.querySelector(':scope > .message-choice-actions')?.remove();
     if (choices.length === 0) {
       return;
@@ -6389,74 +6077,6 @@
     }
 
     bubble.appendChild(actions);
-  }
-
-  function extractMessageChoices(text) {
-    const source = normalizeMessageText(text);
-    if (!source.trim()) {
-      return [];
-    }
-
-    const choices = [];
-    let inFence = false;
-    for (const rawLine of source.split('\n')) {
-      const trimmed = rawLine.trim();
-      if (/^```/.test(trimmed)) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence || !trimmed) {
-        continue;
-      }
-
-      const cleaned = stripInlineMarkdown(trimmed)
-        .replace(/^[-*+]\s+/, '')
-        .replace(/^#{1,6}\s+/, '')
-        .trim();
-      const match = /^(?:选项|方案|Option)\s*([0-9０-９一二三四五六七八九十]+)\s*(?:[—\-:：]|--)\s*(.+)$/i.exec(cleaned);
-      if (!match) {
-        continue;
-      }
-
-      const index = normalizeChoiceIndex(match[1]);
-      const label = match[2]
-        .replace(/\s+/g, ' ')
-        .replace(/[。；;:：]+$/, '')
-        .trim();
-      if (!index || !label) {
-        continue;
-      }
-
-      choices.push({
-        index,
-        label,
-        prompt: i18n.t('message.choice.prompt', { index, label }),
-      });
-      if (choices.length >= 5) {
-        break;
-      }
-    }
-
-    return choices;
-  }
-
-  function normalizeChoiceIndex(value) {
-    const text = String(value || '').trim();
-    const fullWidth = '０１２３４５６７８９';
-    const halfWidth = text.replace(/[０-９]/g, (char) => String(fullWidth.indexOf(char)));
-    const cnMap = {
-      一: '1',
-      二: '2',
-      三: '3',
-      四: '4',
-      五: '5',
-      六: '6',
-      七: '7',
-      八: '8',
-      九: '9',
-      十: '10',
-    };
-    return cnMap[halfWidth] || halfWidth;
   }
 
   function extractClaudeApprovalRequest(text) {
@@ -7341,13 +6961,6 @@
     }
 
     return output.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{4,}/g, '\n\n\n').trim();
-  }
-
-  function stripInlineMarkdown(text) {
-    return String(text || '')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/\*\*([^*]+)\*\*/g, '$1')
-      .replace(/`([^`]+)`/g, '$1');
   }
 
   function renderedMessagePlainText(container) {
@@ -8729,6 +8342,25 @@
     modeMenu.open = false;
   });
 
+  modelSummary?.addEventListener('click', (event) => {
+    if (!modelMenu?.classList.contains('is-readonly')) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    modelMenu.open = false;
+  });
+
+  modelSummary?.addEventListener('keydown', (event) => {
+    if (!modelMenu?.classList.contains('is-readonly')) {
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      modelMenu.open = false;
+    }
+  });
+
   modelSelect.addEventListener('change', () => {
     activeModelByProvider[activeId] = modelSelect.value;
     rememberRecentModel(activeId, modelSelect.value);
@@ -9097,18 +8729,16 @@
         if (!activeId || !installedProfiles().some((profile) => profile.id === activeId)) {
           activeId = message.cliId;
         }
-        pendingByProvider[message.cliId] = false;
-        runningByProvider[message.cliId] = true;
+        providerRunState.markProviderRunning(providerRunStore, message.cliId);
         activeAgentModeByProvider[message.cliId] = message.agentMode || activeAgentModeId(message.cliId);
         {
-          const threadId = pendingThreadByProvider[message.cliId] || activeThreadId(message.cliId);
-          const taskId = pendingTaskByProvider[message.cliId] || createRunTask(
+          const threadId = providerRunState.pendingThreadId(providerRunStore, message.cliId) || activeThreadId(message.cliId);
+          const taskId = providerRunState.takePendingTaskId(providerRunStore, message.cliId) || createRunTask(
             message.cliId,
             message.action,
             message.text,
             message.agentMode
           ).id;
-          delete pendingTaskByProvider[message.cliId];
           taskBySessionId[message.sessionId] = taskId;
           updateTaskStatus(taskId, {
             status: 'running',
@@ -9130,7 +8760,10 @@
             message.cliId,
             'assistant',
             '',
-            summarizeRequestContext(message.contextSummary),
+            mergeMessageMeta(
+              summarizeRuntimeSelection(message),
+              summarizeRequestContext(message.contextSummary)
+            ),
             true,
             threadId
           );
@@ -9184,22 +8817,18 @@
         markSessionEnded(message);
         break;
       case 'stopped':
-        runningByProvider[message.cliId] = false;
-        pendingByProvider[message.cliId] = false;
+        providerRunState.clearProviderRunState(providerRunStore, message.cliId);
         {
           stoppedSessionIds.add(message.sessionId);
           const target = finishStreamTarget(message);
           updateTaskStatus(taskBySessionId[message.sessionId], { status: 'stopped' });
           delete taskBySessionId[message.sessionId];
-          delete pendingThreadByProvider[message.cliId];
           addMessage(message.cliId, 'system', i18n.t('message.runStopped'), undefined, false, target?.threadId);
         }
         renderAll();
         break;
       case 'error':
-        runningByProvider[message.cliId || activeId] = false;
-        pendingByProvider[message.cliId || activeId] = false;
-        delete pendingThreadByProvider[message.cliId || activeId];
+        providerRunState.clearProviderRunState(providerRunStore, message.cliId || activeId);
         updateTaskStatus(taskBySessionId[message.sessionId], { status: 'failed' });
         delete taskBySessionId[message.sessionId];
         addMessage(

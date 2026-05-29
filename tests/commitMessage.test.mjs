@@ -323,7 +323,16 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui\.commitMessageGenerating'/);
   assert.match(source, /STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui\.commitMessageStagedRoots'/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui\.commitMessageGeneratingRoots'/);
-  assert.match(source, /setGeneratingContext\(true,\s*repository\.rootUri\)/);
+  assert.match(source, /private readonly cancellationsByRoot = new Map<string, vscode\.CancellationTokenSource>\(\)/);
+  assert.match(source, /repositoryRootKey = repository\.rootUri\.toString\(\)/);
+  assert.match(source, /this\.cancellationsByRoot\.has\(repositoryRootKey\)/);
+  assert.match(source, /this\.cancellationsByRoot\.set\(repositoryRootKey, cancellation\)/);
+  assert.match(source, /await this\.setGeneratingContext\(\)/);
+  assert.match(source, /this\.cancellationsByRoot\.delete\(repositoryRootKey\)/);
+  assert.match(source, /Array\.from\(this\.cancellationsByRoot\.keys\(\)\)/);
+  assert.match(source, /generatingRoots\.length > 0/);
+  assert.doesNotMatch(source, /private isGenerating = false/);
+  assert.doesNotMatch(source, /currentCancellation/);
   assert.match(source, /rootUri\.toString\(\)/);
   assert.match(source, /setContext',\s*HAS_STAGED_CHANGES_CONTEXT,\s*stagedRoots\.length > 0/s);
   assert.match(source, /setContext',\s*STAGED_CHANGE_ROOTS_CONTEXT,\s*stagedRoots/s);
@@ -332,26 +341,30 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /ProgressLocation\.SourceControl/);
   assert.match(source, /let completedGeneration = false;/);
   assert.match(source, /if \(!completedGeneration && streamingRepository\)/);
-  assert.match(source, /cancel\(\): void/);
+  assert.match(source, /cancel\(rootUri\?: vscode\.Uri \| \{ readonly rootUri\?: vscode\.Uri \}\): void/);
+  assert.match(source, /this\.cancellationsByRoot\.get\(rootKey\)\?\.cancel\(\)/);
+  assert.match(source, /for \(const cancellation of this\.cancellationsByRoot\.values\(\)\)/);
   assert.match(source, /isLikelyCliError\(normalizedStderr\)/);
   assert.doesNotMatch(source, /diff\(false\)/);
 });
 
 test('OpenCode server commit generation waits for completed text parts only', () => {
-  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
 
   assert.match(source, /onPartial\?: \(text: string\) => void/);
-  assert.match(source, /const eventStream = this\.openOpenCodePromptEventStream\(serverUrl, sessionId, onPartial\);/);
-  assert.match(source, /waitForOpenCodeServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*eventStream\s*\)/s);
+  assert.match(cliSource, /this\.openCodeClient\.runPrompt\(prompt, token, directory, modelId, onPartial\)/);
+  assert.match(source, /const eventStream = this\.openPromptEventStream\(serverUrl, sessionId, onPartial\);/);
+  assert.match(source, /waitForServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*eventStream\s*\)/s);
   assert.match(source, /OPEN_CODE_PROMPT_FALLBACK_POLL_INTERVAL_MS = 1000/);
   assert.match(source, /OPEN_CODE_PROMPT_TIMEOUT_MS = 90_000/);
-  assert.match(source, /waitForOpenCodeEventCompletion\(eventStream, token\)/);
-  assert.match(source, /fetchOpenCodeSessionText\(serverUrl, sessionId, directory\)/);
+  assert.match(source, /waitForEventCompletion\(eventStream, token\)/);
+  assert.match(source, /fetchSessionText\(serverUrl, sessionId, directory\)/);
   assert.match(source, /const \[statusPayload, messages\] = await Promise\.all\(\[/);
-  assert.match(source, /const textState = this\.extractOpenCodeAssistantTextState\(messages\);/);
+  assert.match(source, /const textState = this\.extractAssistantTextState\(messages\);/);
   assert.match(source, /tools:\s*\{ '\*': false \}/);
   assert.match(source, /onPartial\?\.\(textState\.text\);/);
-  assert.match(source, /const completed = this\.isOpenCodeAssistantMessageCompleted\(info\);/);
+  assert.match(source, /const completed = this\.isAssistantMessageCompleted\(info\);/);
   assert.match(source, /this\.pickString\(partRecord\.type\) === 'text'/);
   assert.match(source, /if \(textState\.completed\) \{/);
   assert.doesNotMatch(source, /\.map\(\(part\) => this\.pickString\(this\.objectRecord\(part\)\.text\) \?\? ''\)/);
@@ -380,8 +393,8 @@ test('extension registers SCM title generation and cancel commands', () => {
   assert.match(source, /setContext', 'agents-gui\.commitMessageStagedRoots', \[\]/);
   assert.match(source, /registerCommand\('agents-gui\.generateCommitMessage', \(rootUri, _resourceGroups, token\) =>/);
   assert.match(source, /return commitMessageCommand\.run\(rootUri, token\)/);
-  assert.match(source, /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(\) =>/);
-  assert.match(source, /commitMessageCommand\.cancel\(\)/);
+  assert.match(source, /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(rootUri\) =>/);
+  assert.match(source, /commitMessageCommand\.cancel\(rootUri\)/);
   assert.match(source, /registerCommand\('agents-gui\.setupCommitMessage', \(\) =>/);
   assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);
   assert.doesNotMatch(source, /registerCommand\('agents-gui\.generateCommitMessage\.loading'/);

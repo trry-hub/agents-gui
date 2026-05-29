@@ -8,7 +8,19 @@ const outputPath = path.join(previewRoot, 'agents-gui-preview.html');
 let html = fs.readFileSync(path.join(root, 'media/main.html'), 'utf8');
 
 fs.mkdirSync(previewRoot, { recursive: true });
-for (const file of ['main.css', 'main.js', 'i18n.js']) {
+const webviewAssets = [
+  'main.css',
+  'i18n.js',
+  'messageText.js',
+  'messageChoices.js',
+  'providerRunState.js',
+  'conversationStore.js',
+  'slashCommands.js',
+  'openCodeDialogState.js',
+  'claudeActions.js',
+  'main.js',
+];
+for (const file of webviewAssets) {
   fs.copyFileSync(path.join(root, 'media', file), path.join(previewRoot, file));
 }
 fs.cpSync(path.join(root, 'media', 'provider-icons'), path.join(previewRoot, 'provider-icons'), {
@@ -16,6 +28,13 @@ fs.cpSync(path.join(root, 'media', 'provider-icons'), path.join(previewRoot, 'pr
 });
 
 const i18nUri = './i18n.js';
+const messageTextUri = './messageText.js';
+const messageChoicesUri = './messageChoices.js';
+const providerRunStateUri = './providerRunState.js';
+const conversationStoreUri = './conversationStore.js';
+const slashCommandsUri = './slashCommands.js';
+const openCodeDialogStateUri = './openCodeDialogState.js';
+const claudeActionsUri = './claudeActions.js';
 const mainJsUri = './main.js';
 const cssUri = './main.css';
 
@@ -182,10 +201,21 @@ html = html
   .replace('<meta http-equiv="Content-Security-Policy" content="__CSP__">', '')
   .replace('__MAIN_CSS_URI__', cssUri)
   .replace('__I18N_JS_URI__', i18nUri)
+  .replace('__MESSAGE_TEXT_JS_URI__', messageTextUri)
+  .replace('__MESSAGE_CHOICES_JS_URI__', messageChoicesUri)
+  .replace('__PROVIDER_RUN_STATE_JS_URI__', providerRunStateUri)
+  .replace('__CONVERSATION_STORE_JS_URI__', conversationStoreUri)
+  .replace('__SLASH_COMMANDS_JS_URI__', slashCommandsUri)
+  .replace('__OPEN_CODE_DIALOG_STATE_JS_URI__', openCodeDialogStateUri)
+  .replace('__CLAUDE_ACTIONS_JS_URI__', claudeActionsUri)
   .replace('__MAIN_JS_URI__', mainJsUri)
   .replace(/__NONCE__/g, 'preview')
   .replace(/__LOCALE__/g, 'zh-CN')
   .replace(`<script nonce="preview" src="${i18nUri}"></script>`, `${vscodeStub}\n  <script nonce="preview" src="${i18nUri}"></script>`);
+
+if (/__[A-Z0-9_]+__/.test(html)) {
+  throw new Error('Preview webview still contains unresolved VS Code placeholders.');
+}
 
 fs.writeFileSync(outputPath, html);
 console.log(outputPath);

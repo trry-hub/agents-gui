@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebarProvider';
 import { CliManager } from './cliManager';
+import { CliAgentRuntime } from './agentRuntime';
+import { CliOpenCodeAgentCapability } from './openCodeAgentCapability';
 import { CommitMessageCommand } from './commitMessageCommand';
+import { runExtensionSmokeProbe } from './extensionSmokeHarness';
 import { resolveRuntimeLocale, runtimeT } from './localization';
 import { SYNCED_GLOBAL_STATE_KEYS } from './syncedState';
 
@@ -9,6 +12,8 @@ export function activate(context: vscode.ExtensionContext) {
   const locale = resolveRuntimeLocale(vscode.env.language);
   context.globalState.setKeysForSync(SYNCED_GLOBAL_STATE_KEYS);
   const cliManager = new CliManager();
+  const agentRuntime = new CliAgentRuntime(cliManager);
+  const openCodeCapability = new CliOpenCodeAgentCapability(cliManager);
   const commitMessageCommand = new CommitMessageCommand(cliManager, context.globalState);
   let sidebarProvider: SidebarProvider | undefined;
 
@@ -126,8 +131,8 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents-gui.cancelCommitMessageGeneration', () => {
-      commitMessageCommand.cancel();
+    vscode.commands.registerCommand('agents-gui.cancelCommitMessageGeneration', (rootUri) => {
+      commitMessageCommand.cancel(rootUri);
     })
   );
 
@@ -137,9 +142,18 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  if (context.extensionMode !== vscode.ExtensionMode.Production) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand('agents-gui.internal.runSmoke', () => (
+        runExtensionSmokeProbe(context.extensionUri, { storageUri: context.globalStorageUri })
+      ))
+    );
+  }
+
   try {
-    sidebarProvider = new SidebarProvider(context.extensionUri, cliManager, {
+    sidebarProvider = new SidebarProvider(context.extensionUri, agentRuntime, {
       extensionMode: context.extensionMode,
+      openCodeCapability,
       state: context.globalState,
       storageUri: context.globalStorageUri,
     });

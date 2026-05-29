@@ -44,6 +44,7 @@ export function buildAssistantPrompt(request: AssistantPromptRequest): string {
     `Provider: ${request.provider.name}`,
     'Mode: Agent',
     `Provider agent/mode: ${agentMode.label} (${agentMode.id})`,
+    renderRuntimeSelection(request),
     `Action: ${ACTION_LABELS[request.action]}`,
     '',
     'Agent mode is always enabled. Reason across files when helpful and be explicit about assumptions, edits, and verification.',
@@ -64,7 +65,7 @@ export function buildAssistantPrompt(request: AssistantPromptRequest): string {
     '- Use concise Markdown.',
     '- When suggesting code changes, include file paths and minimal patches or snippets.',
     '- If context is missing, say what is missing and proceed with the best available information.',
-    '- When you need the user to choose among discrete options, put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies.',
+    '- Only when progress is blocked until the user chooses among discrete options, first ask the user to choose, then put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies. Do not use that format for optional follow-up suggestions after a completed answer.',
     DELIVERY_REQUIREMENTS,
     languageInstructionForLocale(request.locale),
   ];
@@ -78,8 +79,10 @@ function buildOpenCodeFreeformPrompt(request: AssistantPromptRequest): string {
   const hasAttachments = Boolean(request.attachments?.length);
   const hasContext = hasSubstantialContext(request.context);
   const hasHistory = Boolean(request.conversationHistory?.length);
+  const runtimeSelection = renderRuntimeSelection(request);
+  const hasRuntimeSelection = Boolean(runtimeSelection);
 
-  if (!hasAttachments && !hasContext && !hasHistory) {
+  if (!hasAttachments && !hasContext && !hasHistory && !hasRuntimeSelection) {
     if (!languageDirective) {
       return message;
     }
@@ -87,6 +90,10 @@ function buildOpenCodeFreeformPrompt(request: AssistantPromptRequest): string {
   }
 
   const lines: string[] = [message, ''];
+
+  if (runtimeSelection) {
+    lines.push(runtimeSelection, '');
+  }
 
   const history = renderConversationHistory(request.conversationHistory);
   if (history) {
@@ -110,11 +117,37 @@ function buildOpenCodeFreeformPrompt(request: AssistantPromptRequest): string {
   }
 
   lines.push('Keep the answer concise. Do not inspect the project unless the request needs it.');
-  lines.push('When you need the user to choose among discrete options, put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies.');
+  lines.push('Only when progress is blocked until the user chooses among discrete options, first ask the user to choose, then put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies. Do not use that format for optional follow-up suggestions after a completed answer.');
   lines.push('');
   lines.push(DELIVERY_REQUIREMENTS);
 
   return lines.filter((line, index, all) => line !== '' || all[index - 1] !== '').join('\n');
+}
+
+function renderRuntimeSelection(request: AssistantPromptRequest): string {
+  const runtime = request.runtime;
+  if (!runtime) {
+    return '';
+  }
+
+  const lines = ['Runtime selection from Agents GUI:'];
+  lines.push(`- Provider: ${request.provider.name}`);
+  lines.push(`- Agent/mode: ${request.agentMode.label} (${request.agentMode.id})`);
+  if (runtime.modelId || runtime.modelLabel) {
+    lines.push(
+      `- Selected model: ${runtime.modelLabel || runtime.modelId}${runtime.modelId ? ` (${runtime.modelId})` : ''}`
+    );
+  }
+  if (runtime.runtimeId || runtime.runtimeLabel) {
+    lines.push(`- Runtime mode: ${runtime.runtimeLabel || runtime.runtimeId}${runtime.runtimeId ? ` (${runtime.runtimeId})` : ''}`);
+  }
+  if (runtime.permissionModeId || runtime.permissionModeLabel) {
+    lines.push(
+      `- Permission mode: ${runtime.permissionModeLabel || runtime.permissionModeId}${runtime.permissionModeId ? ` (${runtime.permissionModeId})` : ''}`
+    );
+  }
+  lines.push('If the user asks which model, agent, runtime, or permission mode is selected, answer from this Agents GUI runtime selection instead of guessing from prior conversation, provider memory, or model self-knowledge.');
+  return lines.join('\n');
 }
 
 export function getAssistantActionLabel(action: AssistantActionId): string {

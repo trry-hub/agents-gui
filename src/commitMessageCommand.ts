@@ -90,7 +90,7 @@ const COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui.commitMessageGenerat
 const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
   en: {
     progress: 'Generating commit message...',
-    alreadyGenerating: 'A commit message is already being generated.',
+    alreadyGenerating: 'A commit message is already being generated for this repository.',
     noGitExtension: 'The built-in Git extension is not available.',
     gitDisabled: 'The built-in Git extension is disabled.',
     noRepository: 'No Git repository was found in this workspace.',
@@ -118,7 +118,7 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
   },
   'zh-CN': {
     progress: '正在生成提交信息...',
-    alreadyGenerating: '正在生成提交信息，请稍候。',
+    alreadyGenerating: '该仓库正在生成提交信息，请稍候。',
     noGitExtension: '内置 Git 扩展不可用。',
     gitDisabled: '内置 Git 扩展已禁用。',
     noRepository: '当前工作区没有找到 Git 仓库。',
@@ -147,8 +147,7 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
 };
 
 export class CommitMessageCommand {
-  private isGenerating = false;
-  private currentCancellation?: vscode.CancellationTokenSource;
+  private readonly cancellationsByRoot = new Map<string, vscode.CancellationTokenSource>();
 
   constructor(
     private readonly cliManager: CliManager,
@@ -158,7 +157,7 @@ export class CommitMessageCommand {
   watchStagedChangesContext(context: vscode.ExtensionContext): void {
     void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
     void vscode.commands.executeCommand('setContext', STAGED_CHANGE_ROOTS_CONTEXT, []);
-    void this.setGeneratingContext(false);
+    void this.setGeneratingContext();
     void this.bindStagedChangesContext(context).catch(() => {
       void vscode.commands.executeCommand('setContext', HAS_STAGED_CHANGES_CONTEXT, false);
       void vscode.commands.executeCommand('setContext', STAGED_CHANGE_ROOTS_CONTEXT, []);
@@ -170,25 +169,27 @@ export class CommitMessageCommand {
     externalToken?: vscode.CancellationToken
   ): Promise<void> {
     const locale = this.getRuntimeLocale();
-    if (this.isGenerating) {
-      vscode.window.showInformationMessage(this.t(locale, 'alreadyGenerating'));
-      return;
-    }
-
-    this.isGenerating = true;
-    const cancellation = new vscode.CancellationTokenSource();
-    this.currentCancellation = cancellation;
+    let cancellation: vscode.CancellationTokenSource | undefined;
+    let repositoryRootKey: string | undefined;
     let streamingRepository: GitRepository | undefined;
     let originalInputValue = '';
     let completedGeneration = false;
 
     try {
-      await this.setGeneratingContext(true);
       const repository = await this.pickRepository(locale, resolveRepositoryRootUri(rootUri));
       if (!repository) {
         return;
       }
-      await this.setGeneratingContext(true, repository.rootUri);
+
+      repositoryRootKey = repository.rootUri.toString();
+      if (this.cancellationsByRoot.has(repositoryRootKey)) {
+        vscode.window.showInformationMessage(this.t(locale, 'alreadyGenerating'));
+        return;
+      }
+
+      cancellation = new vscode.CancellationTokenSource();
+      this.cancellationsByRoot.set(repositoryRootKey, cancellation);
+      await this.setGeneratingContext();
 
       let rawDiff = repository.state.indexChanges.length > 0
         ? await repository.diff(true)
@@ -266,29 +267,37 @@ export class CommitMessageCommand {
 
       vscode.window.showErrorMessage(this.t(locale, 'failed', { message }));
     } finally {
-      if (this.currentCancellation === cancellation) {
-        this.currentCancellation = undefined;
+      if (repositoryRootKey && this.cancellationsByRoot.get(repositoryRootKey) === cancellation) {
+        this.cancellationsByRoot.delete(repositoryRootKey);
       }
-      cancellation.dispose();
-      this.isGenerating = false;
-      await this.setGeneratingContext(false);
+      cancellation?.dispose();
+      await this.setGeneratingContext();
     }
   }
 
-  cancel(): void {
-    this.currentCancellation?.cancel();
+  cancel(rootUri?: vscode.Uri | { readonly rootUri?: vscode.Uri }): void {
+    const rootKey = resolveRepositoryRootUri(rootUri)?.toString();
+    if (rootKey) {
+      this.cancellationsByRoot.get(rootKey)?.cancel();
+      return;
+    }
+
+    for (const cancellation of this.cancellationsByRoot.values()) {
+      cancellation.cancel();
+    }
   }
 
-  private async setGeneratingContext(isGenerating: boolean, rootUri?: vscode.Uri): Promise<void> {
+  private async setGeneratingContext(): Promise<void> {
+    const generatingRoots = Array.from(this.cancellationsByRoot.keys());
     await vscode.commands.executeCommand(
       'setContext',
       COMMIT_MESSAGE_GENERATING_CONTEXT,
-      isGenerating
+      generatingRoots.length > 0
     );
     await vscode.commands.executeCommand(
       'setContext',
       COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT,
-      isGenerating && rootUri ? [rootUri.toString()] : []
+      generatingRoots
     );
   }
 
