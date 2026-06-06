@@ -2342,6 +2342,18 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.message-activity-stack {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 1px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--assistant-border) 58%, transparent);
+}
+
+.message-activity-stack .message-activity-inline {
+  margin: 0;
+}
+
 .message-activity-inline {
   display: block;
   width: fit-content;
@@ -2358,6 +2370,7 @@ textarea:focus {
   gap: 6px;
   width: fit-content;
   max-width: 100%;
+  min-height: 18px;
   cursor: pointer;
   user-select: none;
 }
@@ -2475,22 +2488,25 @@ textarea:focus {
 }
 
 .message-choice-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: min(100%, 380px);
-  margin-top: 8px;
+  display: grid;
+  gap: 1px;
+  width: min(100%, 520px);
+  margin: 10px 0 2px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 84%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--assistant-panel) 72%, transparent);
 }
 
 .message-choice-button {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 4px 7px;
-  border: 1px solid var(--assistant-border);
-  border-radius: 6px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  min-height: 30px;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 5px;
   color: var(--vscode-foreground);
   background: transparent;
   cursor: pointer;
@@ -2502,20 +2518,20 @@ textarea:focus {
 
 .message-choice-button:hover,
 .message-choice-button:focus-visible {
-  border-color: color-mix(in srgb, var(--assistant-accent) 55%, var(--assistant-border));
-  background: var(--assistant-hover);
+  background: color-mix(in srgb, var(--assistant-accent) 10%, var(--assistant-hover));
   outline: none;
 }
 
 .message-choice-index {
   display: inline-grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  color: var(--assistant-accent);
-  background: color-mix(in srgb, var(--assistant-accent) 12%, transparent);
-  font-size: 10px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--assistant-accent) 86%, var(--vscode-foreground));
+  background: color-mix(in srgb, var(--assistant-accent) 12%, var(--assistant-panel));
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -2712,11 +2728,6 @@ textarea:focus {
 
 .message-content:has(.md-spacer:only-child) {
   display: none;
-}
-
-.message-streaming-cursor {
-  align-self: end;
-  margin-top: 1px;
 }
 
 .message.assistant .message-bubble:has(.message-content .md-spacer:only-child),
@@ -3248,28 +3259,10 @@ textarea:focus {
   opacity: 0.9;
 }
 
-.cursor {
-  display: inline-block;
-  width: 6px;
-  height: 12px;
-  margin-left: 3px;
-  background: currentColor;
-  opacity: 0.7;
-  animation: cursor-blink 1s step-end infinite;
-  vertical-align: text-bottom;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .cursor,
   .message-activity-inline.is-running .message-activity-text,
   .message-status.is-running .message-status-label {
     animation: none;
-  }
-}
-
-@keyframes cursor-blink {
-  50% {
-    opacity: 0;
   }
 }
 

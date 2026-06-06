@@ -20,3 +20,4 @@ dist/tiktoken_bg.wasm
 *.vsix
 agents-gui-global-logo-settings.png
 index.html
+WCDB_Contact*.sqlite*

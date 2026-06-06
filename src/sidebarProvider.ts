@@ -101,6 +101,7 @@ const MAX_IMAGE_ATTACHMENTS = 8;
 const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const DEFAULT_CLI_ID = 'opencode';
 const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
+const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
 const DEFAULT_COMMIT_MESSAGE_LANGUAGE: CommitMessageSettings['language'] = 'auto';
 const DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS = 60_000;
 const NO_OUTPUT_NOTICE_MS = 45_000;
@@ -601,6 +602,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       : {};
     const knownProviderIds = new Set([
       DEFAULT_COMMIT_MESSAGE_PROVIDER,
+      ASK_COMMIT_MESSAGE_PROVIDER,
       ...CLI_PROFILES.map((profile) => profile.id),
     ]);
     const provider = typeof record.provider === 'string' && knownProviderIds.has(record.provider)

@@ -21,26 +21,67 @@
     const promptForChoice = typeof options.promptForChoice === 'function'
       ? options.promptForChoice
       : (_index, label) => label;
-    const choices = [];
-    let hasExplicitChoiceLine = false;
+    const candidates = collectMessageChoiceCandidates(source).slice(0, 5);
+    return candidates.map((choice) => {
+      const index = normalizeChoiceIndex(choice.index);
+      const label = normalizeChoiceLabel(choice.label);
+      return {
+        index,
+        label,
+        prompt: promptForChoice(index, label),
+      };
+    }).filter((choice) => choice.index && choice.label);
+  }
+
+  function extractMessageChoiceLineKeys(text) {
+    return collectMessageChoiceCandidates(text)
+      .slice(0, 5)
+      .map((choice) => choice.lineKey)
+      .filter(Boolean);
+  }
+
+  function collectMessageChoiceCandidates(text) {
+    const source = normalizeMessageText(text);
+    if (!source.trim()) {
+      return [];
+    }
+
+    const explicitCandidates = [];
+    const implicitCandidates = [];
     let inFence = false;
+    let collectingImplicit = false;
+
     for (const rawLine of source.split('\n')) {
       const trimmed = rawLine.trim();
       if (/^```/.test(trimmed)) {
         inFence = !inFence;
         continue;
       }
-      if (inFence || !trimmed) {
+      if (inFence) {
+        continue;
+      }
+      if (!trimmed) {
+        if (collectingImplicit && implicitCandidates.length > 0) {
+          collectingImplicit = false;
+        }
         continue;
       }
 
-      const cleaned = stripInlineMarkdown(trimmed)
-        .replace(/^[-*+]\s+/, '')
-        .replace(/^>\s+/, '')
-        .replace(/^#{1,6}\s+/, '')
-        .trim();
+      const cleaned = normalizeMessageChoiceLine(trimmed);
+      if (!cleaned) {
+        continue;
+      }
+
+      if (hasMessageChoiceIntent(cleaned)) {
+        collectingImplicit = true;
+        continue;
+      }
+
       const choice = parseMessageChoiceLine(cleaned);
       if (!choice) {
+        if (collectingImplicit && implicitCandidates.length > 0) {
+          collectingImplicit = false;
+        }
         continue;
       }
 
@@ -49,19 +90,29 @@
       if (!index || !label) {
         continue;
       }
-      hasExplicitChoiceLine = hasExplicitChoiceLine || choice.explicit;
 
-      choices.push({
+      const candidate = {
+        ...choice,
         index,
         label,
-        prompt: promptForChoice(index, label),
-      });
-      if (choices.length >= 5) {
-        break;
+        lineKey: cleaned,
+      };
+
+      if (choice.explicit) {
+        explicitCandidates.push(candidate);
+        continue;
+      }
+
+      if (collectingImplicit) {
+        implicitCandidates.push(candidate);
       }
     }
 
-    return choices.length >= 2 && (hasExplicitChoiceLine || hasMessageChoiceIntent(source)) ? choices : [];
+    if (explicitCandidates.length >= 2) {
+      return explicitCandidates;
+    }
+
+    return implicitCandidates.length >= 2 ? implicitCandidates : [];
   }
 
   function parseMessageChoiceLine(line) {
@@ -93,6 +144,14 @@
       .replace(/\s+/g, ' ')
       .replace(/\s*(?:→|=>|->)\s*.+$/, '')
       .replace(/[。；;:：]+$/, '')
+      .trim();
+  }
+
+  function normalizeMessageChoiceLine(line) {
+    return stripInlineMarkdown(String(line || '').trim())
+      .replace(/^[-*+]\s+/, '')
+      .replace(/^>\s+/, '')
+      .replace(/^#{1,6}\s+/, '')
       .trim();
   }
 
@@ -143,7 +202,9 @@
   }
 
   return {
+    extractMessageChoiceLineKeys,
     extractMessageChoices,
+    normalizeMessageChoiceLine,
     hasMessageChoiceIntent,
     normalizeChoiceIndex,
     normalizeChoiceLabel,

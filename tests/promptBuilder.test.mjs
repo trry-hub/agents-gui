@@ -49,7 +49,7 @@ const {
 } = require('../.test-dist/apiProviders.js');
 const { ApiProviderClient } = require('../.test-dist/apiProviderClient.js');
 const { normalizeMessageText, stripInlineMarkdown } = require('../media/messageText.js');
-const { extractMessageChoices } = require('../media/messageChoices.js');
+const { extractMessageChoiceLineKeys, extractMessageChoices } = require('../media/messageChoices.js');
 const providerRunState = require('../media/providerRunState.js');
 const conversationStore = require('../media/conversationStore.js');
 const slashCommands = require('../media/slashCommands.js');
@@ -1265,7 +1265,12 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /function renderMarkdownWithActivity\(container, text, activity, activityTimeline, running, baseDetailKey = ''\)/);
   assert.match(script, /function mergeOpenCodeActivityTimeline\(existing, activities, offset\)/);
   assert.match(script, /item\.activityTimeline = mergeOpenCodeActivityTimeline\(\s*item\.activityTimeline,\s*message\.activities,\s*normalizeMessageText\(item\.text\)\.length\s*\)/s);
-  assert.match(script, /appendInlineActivityGroup\(\s*container,\s*group\.entries,\s*running && group\.latest,\s*baseDetailKey \? `\$\{baseDetailKey\}:activity:\$\{group\.offset\}` : ''\s*\);/s);
+  assert.match(script, /const activityEntries = timeline\.length > 0 \? timeline : fallbackEntries;/);
+  assert.match(script, /const choiceLineKeys = !running && messageChoices\?\.extractMessageChoiceLineKeys/);
+  assert.match(script, /renderMarkdownLite\(container, normalized, \{\s*hiddenChoiceLineKeys: choiceLineKeys,\s*hideProgressNoise: activityEntries\.length > 0,\s*\}\);/s);
+  assert.match(script, /appendOpenCodeActivityTrail\(\s*container,\s*activityEntries,\s*running,\s*baseDetailKey \? `\$\{baseDetailKey\}:activity` : ''\s*\);/s);
+  assert.doesNotMatch(script, /groupOpenCodeActivityTimeline/);
+  assert.doesNotMatch(script, /activityInsertionOffset/);
   assert.match(script, /const openMessageDetailKeys = new Set\(\);/);
   assert.match(script, /function messageDetailKey\(cliId, threadId, index, kind, localKey = ''\)/);
   assert.match(script, /function renderActiveStreamMessage\(target\)/);
@@ -1288,6 +1293,8 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /const thinkingText = sanitizeThinkingText\(normalized\);/);
   assert.match(script, /appendOpenCodeActivityDetails\(body, activity\.entries, detailKey \? `\$\{detailKey\}:activity` : ''\);/);
   assert.match(script, /thinkingTextBlock\.className = 'message-thinking-detail-text';/);
+  assert.match(script, /function appendOpenCodeActivityTrail\(container, entries, running, detailKey = ''\)/);
+  assert.match(script, /stack\.className = 'message-activity-stack';/);
   assert.doesNotMatch(script, /thinking\.open = true/);
   assert.doesNotMatch(script, /body\.textContent = openCodeActivityBodyText/);
   assert.match(css, /\.message-thinking\s*\{/);
@@ -1302,6 +1309,8 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(css, /\.message-thinking-chevron\s*\{\s*[^}]*opacity:\s*0;/s);
   assert.match(css, /\.message-thinking-summary:hover \.message-thinking-chevron,\s*\.message-thinking\[open\] \.message-thinking-chevron\s*\{/);
   assert.match(css, /\.message-thinking-body\s*\{/);
+  assert.match(css, /\.message-activity-stack\s*\{/);
+  assert.match(css, /\.message-activity-stack \.message-activity-inline\s*\{/);
   assert.match(css, /\.message-activity-inline\s*\{/);
   assert.match(script, /const row = document\.createElement\('details'\);/);
   assert.match(script, /row\.dataset\.messageDetailKey = detailKey;/);
@@ -1775,6 +1784,8 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /function orderedInstalledProfiles\(\)/);
   assert.match(script, /function renderHomeAgentSettings\(\)/);
   assert.match(script, /function renderCommitMessageSettings\(\)/);
+  assert.match(script, /appendApiProviderOption\(commitMessageProviderSelect, 'ask', i18n\.t\('commitSettings\.providerAsk'\)\)/);
+  assert.match(script, /const knownProviderIds = new Set\(\[\s*'default',\s*'ask',\s*\.\.\.installedProfiles\(\)\.map\(\(profile\) => profile\.id\),\s*\]\);/s);
   assert.match(script, /const knownCliIds = profilesLoading\s*\?\s*undefined\s*:\s*new Set\(configurableAgentProfiles\(\)\.map\(\(profile\) => profile\.id\)\);/);
   assert.match(script, /const availableProfiles = configurableAgentProfiles\(\);[\s\S]*availableProfiles\.forEach\(\(profile\) => \{/);
   assert.match(script, /apiProviderSettings = normalizeApiProviderSettings\(apiProviderSettings\);/);
@@ -1803,6 +1814,9 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(css, /\.settings-save-status\.is-error\s*\{/);
   assert.match(i18nScript, /'settings\.saveStatus\.saved': 'Settings saved'/);
   assert.match(i18nScript, /'settings\.saveStatus\.saved': '设置已保存'/);
+  assert.match(i18nScript, /'commitSettings\.provider': 'CLI'/);
+  assert.match(i18nScript, /'commitSettings\.providerAsk': 'Ask every time'/);
+  assert.match(i18nScript, /'commitSettings\.providerAsk': '每次询问'/);
   assert.match(i18nScript, /'homeAgents\.showAllStatus': 'All installed agents are visible\. Save to keep this layout\.'/);
   assert.match(i18nScript, /'homeAgents\.showAllStatus': '已显示全部 Agent，点击保存后生效。'/);
   assert.match(i18nScript, /'homeAgents\.orderChangedStatus': 'Order changed\. Save to keep this layout\.'/);
@@ -2317,7 +2331,7 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(script, /function createMessageCopyButton\(\)/);
   assert.match(script, /copyButton\.dataset\.messageCopy = 'true';/);
   assert.match(script, /function markdownToCopyPlainText\(text\)/);
-  assert.match(script, /const lines = preprocessAssistantMessageLines\(String\(text \|\| ''\)\.split\('\\n'\)\);/);
+  assert.match(script, /const lines = preprocessAssistantMessageLines\(String\(text \|\| ''\)\.split\('\\n'\), options\);/);
   assert.match(script, /function renderedMessagePlainText\(container\)/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'copyMessageText', text: markdownToCopyPlainText\(latest\) \}\);/);
   assert.match(script, /const copyButton = event\.target\.closest\('\[data-message-copy\]'\);/);
@@ -2380,10 +2394,14 @@ test('webview conversation transcript surfaces compact metadata and readable cod
   assert.match(script, /function appendAssistantMarkupParts\(container, parts\)/);
   assert.match(script, /function parseAssistantSectionHeading\(line\)/);
   assert.match(script, /function shouldShowAssistantSectionLabel\(lines, index, name\)/);
-  assert.match(script, /function preprocessAssistantMessageLines\(lines\)/);
+  assert.match(script, /function preprocessAssistantMessageLines\(lines, options = \{\}\)/);
+  assert.match(script, /const hideProgressNoise = Boolean\(options\.hideProgressNoise\);/);
   assert.match(script, /function isInternalAnalysisHeading\(line, lines, index\)/);
   assert.match(script, /function isInternalAnalysisField\(line\)/);
+  assert.match(script, /function isAssistantIntentDiagnosticLine\(line\)/);
+  assert.match(script, /\^I detect \[\\w -\]\+ intent\\b/);
   assert.match(script, /function isAssistantToolNoiseLine\(line\)/);
+  assert.match(script, /\|\| \(\(hasInternalSignals \|\| hideProgressNoise\) && isAssistantProgressNoiseLine\(source\)\)/);
   assert.match(script, /function shouldHideAssistantSection\(name\)/);
   assert.match(script, /function normalizeAssistantDisplayLine\(line\)/);
   assert.match(script, /function appendAssistantSectionLabel\(container, name\)/);
@@ -2786,15 +2804,17 @@ test('webview reduces decorative motion when requested', () => {
     css.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{(?<body>[\s\S]*?)\n\}/g),
     (match) => match.groups?.body ?? ''
   );
-  const statusMotionBlock = reducedMotionBlocks.find((block) => block.includes('.cursor')) || '';
+  const statusMotionBlock = reducedMotionBlocks.find((block) => block.includes('.message-status.is-running')) || '';
 
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(statusMotionBlock, /\.cursor,\s*\.message-activity-inline\.is-running \.message-activity-text,\s*\.message-status\.is-running \.message-status-label\s*\{[^}]*animation:\s*none;/s);
+  assert.match(statusMotionBlock, /\.message-activity-inline\.is-running \.message-activity-text,\s*\.message-status\.is-running \.message-status-label\s*\{[^}]*animation:\s*none;/s);
+  assert.doesNotMatch(css, /\.cursor\s*\{/);
+  assert.doesNotMatch(css, /@keyframes cursor-blink/);
   assert.doesNotMatch(statusMotionBlock, /\.message-spinner/);
   assert.doesNotMatch(statusMotionBlock, /\.loading-spinner/);
 });
 
-test('webview keeps visible streaming affordances and quick choices', () => {
+test('webview keeps running status singular and supports quick choices', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const textScript = readFileSync(new URL('../media/messageText.js', import.meta.url), 'utf8');
   const choiceScript = readFileSync(new URL('../media/messageChoices.js', import.meta.url), 'utf8');
@@ -2804,8 +2824,9 @@ test('webview keeps visible streaming affordances and quick choices', () => {
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const promptSource = readFileSync(new URL('../src/promptBuilder.ts', import.meta.url), 'utf8');
 
-  assert.match(script, /function appendStreamingCursor\(container, running, text\)/);
-  assert.match(script, /className = 'cursor message-streaming-cursor'/);
+  assert.doesNotMatch(script, /appendStreamingCursor/);
+  assert.doesNotMatch(script, /message-streaming-cursor/);
+  assert.doesNotMatch(script, /className = 'cursor/);
   assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/);
   assert.match(html, /__MESSAGE_CHOICES_JS_URI__/);
   assert.match(script, /const messageText = window\.AgentsGuiMessageText/);
@@ -2821,10 +2842,13 @@ test('webview keeps visible streaming affordances and quick choices', () => {
   assert.match(choiceScript, /require\('\.\/messageText\.js'\)/);
   assert.match(choiceScript, /root\.AgentsGuiMessageText/);
   assert.match(choiceScript, /function extractMessageChoices\(text/);
+  assert.match(choiceScript, /function extractMessageChoiceLineKeys\(text\)/);
+  assert.match(choiceScript, /function collectMessageChoiceCandidates\(text\)/);
   assert.match(choiceScript, /function hasMessageChoiceIntent\(text\)/);
   assert.match(choiceScript, /function parseMessageChoiceLine\(line\)/);
   assert.match(choiceScript, /function normalizeChoiceLabel\(value\)/);
-  assert.match(choiceScript, /hasExplicitChoiceLine \|\| hasMessageChoiceIntent\(source\)/);
+  assert.match(choiceScript, /function normalizeMessageChoiceLine\(line\)/);
+  assert.match(choiceScript, /if \(explicitCandidates\.length >= 2\) \{/);
   assert.match(choiceScript, /(?:→\|=>\|->)/);
   assert.match(choiceScript, /\(\?:选项\|方案\|Option\)/);
   assert.match(choiceScript, /[①②③④⑤⑥⑦⑧⑨⑩]/);
@@ -2851,7 +2875,7 @@ test('webview keeps visible streaming affordances and quick choices', () => {
   assert.match(css, /\.message\.assistant:has\(\.claude-approval-panel\)\s*\{/);
   assert.match(css, /\.claude-approval-panel\s*\{/);
   assert.match(css, /\.claude-approval-choice\.is-selected\s*\{/);
-  assert.match(css, /\.message-streaming-cursor\s*\{/);
+  assert.doesNotMatch(css, /\.message-streaming-cursor\s*\{/);
   assert.match(i18nScript, /'message\.choice\.label'/);
   assert.match(i18nScript, /'message\.choice\.prompt'/);
   assert.match(i18nScript, /'claude\.approval\.placeholder': 'Tell Claude what to do instead'/);
@@ -3038,6 +3062,36 @@ test('message choice parser ignores incidental numbered lists without choice int
     [
       { index: '1', label: '继续验证' },
       { index: '2', label: '停止' },
+    ]
+  );
+});
+
+test('message choice parser prefers explicit options over nearby procedural steps', () => {
+  const text = [
+    '需要你的操作',
+    '1. 解锁你的 iPhone 7（输入锁屏密码）',
+    '2. 解锁后我才能挂载开发者磁盘镜像，进入微信的 App 沙箱',
+    '',
+    '不过在此之前，请问你具体想找什么？',
+    '- 选项 1 — 找微信好友列表/微信号（通讯录数据，存在微信的 SQLite 数据库里）',
+    '- 选项 2 — 找微信聊天记录/图片/文件（存在 Documents 目录下）',
+    '- 选项 3 — 找手机里的照片/视频（这个现在就可以通过 /DCIM/ 访问）',
+  ].join('\n');
+
+  assert.deepEqual(
+    extractMessageChoices(text).map(({ index, label }) => ({ index, label })),
+    [
+      { index: '1', label: '找微信好友列表/微信号（通讯录数据，存在微信的 SQLite 数据库里）' },
+      { index: '2', label: '找微信聊天记录/图片/文件（存在 Documents 目录下）' },
+      { index: '3', label: '找手机里的照片/视频（这个现在就可以通过 /DCIM/ 访问）' },
+    ]
+  );
+  assert.deepEqual(
+    extractMessageChoiceLineKeys(text),
+    [
+      '选项 1 — 找微信好友列表/微信号（通讯录数据，存在微信的 SQLite 数据库里）',
+      '选项 2 — 找微信聊天记录/图片/文件（存在 Documents 目录下）',
+      '选项 3 — 找手机里的照片/视频（这个现在就可以通过 /DCIM/ 访问）',
     ]
   );
 });

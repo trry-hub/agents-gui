@@ -66,7 +66,7 @@ Agents GUI 会接入 VS Code 原生源代码管理视图：
 3. 扩展会只读取暂存区 diff，并结合输入框里已有的草稿提示生成提交信息。
 4. 生成结果会流式写入提交信息输入框，完成后可直接提交。
 
-提交信息默认遵循 VS Code 显示语言。中文界面下会默认生成中文提交信息，也可通过 `agents-gui.commitMessage.language` 手动切换。
+提交信息默认遵循 VS Code 显示语言。中文界面下会默认生成中文提交信息，也可通过 `agents-gui.commitMessage.language` 手动切换。要指定生成使用的 CLI，可在提交信息设置里选择具体 CLI，或将 `agents-gui.commitMessage.provider` 设为 `ask` 让每次生成前弹出选择。
 
 ---
 
@@ -87,7 +87,7 @@ Agents GUI 会接入 VS Code 原生源代码管理视图：
 | `agents-gui.apiProviders.agentProviderByCliId` | `{}` | 每个 Agent 的自定义 API 供应商覆盖配置 |
 | `agents-gui.home.visibleAgentIds` | `[]` | 首页标题区展示的 Agent |
 | `agents-gui.home.agentOrder` | `[]` | 首页标题区 Agent 展示顺序 |
-| `agents-gui.commitMessage.provider` | `"default"` | Git 提交信息生成使用的 AI 提供方 |
+| `agents-gui.commitMessage.provider` | `"default"` | Git 提交信息生成使用的 CLI，支持 `default`、`ask` 或 CLI 配置 ID |
 | `agents-gui.commitMessage.language` | `"auto"` | Git 提交信息语言，默认跟随 VS Code |
 | `agents-gui.commitMessage.maxDiffChars` | `60000` | 生成提交信息时附加的暂存区 diff 最大字符数 |
 

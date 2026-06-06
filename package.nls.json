@@ -30,7 +30,7 @@
   "config.apiProviders.customProviders.apiKey.description": "可选的 API Key 值，存储在 VS Code 设置中，以便 Settings Sync 同步到已登录的设备。",
   "config.apiProviders.defaultProviderId.description": "全局默认自定义 API 供应商 ID。",
   "config.apiProviders.agentProviderByCliId.description": "每个 Agent 的自定义 API 供应商覆盖配置。使用 inherit 表示跟随全局默认。",
-  "config.commitMessage.provider.description": "Git 提交信息生成使用的 AI 提供方。default 表示跟随 Agents GUI 默认提供方。",
+  "config.commitMessage.provider.description": "Git 提交信息生成使用的 CLI。default 表示跟随 Agents GUI 默认提供方，ask 表示每次生成前选择 CLI。",
   "config.commitMessage.language.description": "AI 生成 Git 提交信息时使用的语言。auto 表示跟随 VS Code 显示语言。",
   "config.commitMessage.maxDiffChars.description": "生成 Git 提交信息时附加的暂存区 diff 最大字符数。"
 }

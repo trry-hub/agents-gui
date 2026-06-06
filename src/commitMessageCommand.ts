@@ -80,6 +80,8 @@ interface CommitMessageGenerationResult {
 }
 
 const DEFAULT_CLI_ID = 'opencode';
+const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
+const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 const COMMIT_MESSAGE_TIMEOUT_MS = 90_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
@@ -100,15 +102,17 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     stageAllAndGenerate: 'Stage All and Generate',
     providerUnavailable: '{provider} is not installed or cannot be started.',
     chooseInstalledProvider: '{provider} is not installed. Choose an installed provider for commit messages.',
+    chooseCommitCli: 'Choose a CLI for this commit message',
     useProviderForCommitMessage: 'Use for Git commit messages',
+    useOnceForCommitMessage: 'Use once for this commit message',
     openCommitSettings: 'Open Commit Message Settings',
-    openCommitSettingsDescription: 'Configure providers, language, and diff limits',
+    openCommitSettingsDescription: 'Configure CLI, language, and diff limits',
     providerSelected: '{provider} will be used for Git commit messages.',
-    providerSetupRequired: '{provider} is not installed. Install or configure an AI provider to generate commit messages.',
+    providerSetupRequired: '{provider} is not installed. Install or configure a CLI to generate commit messages.',
     openSetup: 'Open Setup',
     copyInstallCommand: 'Copy Install Command',
     installCommandCopied: 'Install command copied.',
-    emptyOutput: 'The AI provider did not return a commit message.',
+    emptyOutput: 'The CLI did not return a commit message.',
     generated: 'Commit message generated from staged changes.',
     generatedTruncated: 'Commit message generated from truncated staged changes.',
     generatedWithFallback: 'Commit message generated with {provider} after {fallbackProvider} was unavailable.',
@@ -128,15 +132,17 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     stageAllAndGenerate: '暂存全部并生成',
     providerUnavailable: '{provider} 未安装或无法启动。',
     chooseInstalledProvider: '{provider} 未安装。选择一个已安装提供方用于提交信息生成。',
+    chooseCommitCli: '选择本次提交信息生成使用的 CLI',
     useProviderForCommitMessage: '用于 Git 提交信息生成',
+    useOnceForCommitMessage: '仅用于本次提交信息生成',
     openCommitSettings: '打开提交信息设置',
-    openCommitSettingsDescription: '配置提供方、语言和 diff 限制',
+    openCommitSettingsDescription: '配置 CLI、语言和 diff 限制',
     providerSelected: '将使用 {provider} 生成 Git 提交信息。',
-    providerSetupRequired: '{provider} 未安装。请安装或配置一个 AI 提供方后再生成提交信息。',
+    providerSetupRequired: '{provider} 未安装。请安装或配置一个 CLI 后再生成提交信息。',
     openSetup: '打开配置',
     copyInstallCommand: '复制安装命令',
     installCommandCopied: '安装命令已复制。',
-    emptyOutput: 'AI 提供方没有返回提交信息。',
+    emptyOutput: 'CLI 没有返回提交信息。',
     generated: '已根据暂存区变更生成提交信息。',
     generatedTruncated: '已根据截断后的暂存区变更生成提交信息。',
     generatedWithFallback: '已在 {fallbackProvider} 不可用后，降级使用 {provider} 生成提交信息。',
@@ -218,7 +224,6 @@ export class CommitMessageCommand {
       if (!primaryProfile) {
         return;
       }
-      const profiles = await this.resolveGenerationProfiles(primaryProfile);
 
       streamingRepository = repository;
       originalInputValue = repository.inputBox.value;
@@ -230,7 +235,8 @@ export class CommitMessageCommand {
         }
       };
       const result = await this.generateCommitMessageWithFallback(
-        profiles,
+        primaryProfile,
+        () => this.resolveFallbackGenerationProfiles(primaryProfile),
         prompt,
         repository.rootUri.fsPath,
         language,
@@ -463,47 +469,46 @@ export class CommitMessageCommand {
 
   private async resolveReadyProfile(locale: RuntimeLocale): Promise<CliProfile | undefined> {
     const preferred = this.getDefaultProfile();
+
+    if (this.usesAskCommitMessageProvider()) {
+      const installedProfiles = await this.getInstalledProfiles();
+      if (installedProfiles.length === 0) {
+        await this.promptProviderSetup(locale, preferred);
+        return undefined;
+      }
+
+      return this.pickInstalledProfile(
+        locale,
+        this.t(locale, 'chooseCommitCli'),
+        false,
+        installedProfiles
+      );
+    }
+
     if (await this.cliManager.checkInstalled(preferred.id)) {
       return preferred;
     }
 
     const installedProfiles = await this.getInstalledProfiles();
-    if (installedProfiles.length > 0) {
-      const providerItems = [
-        ...installedProfiles.map((profile) => ({
-          label: profile.name,
-          description: this.t(locale, 'useProviderForCommitMessage'),
-          profile,
-        })),
-        {
-          label: this.t(locale, 'openCommitSettings'),
-          description: this.t(locale, 'openCommitSettingsDescription'),
-          profile: undefined,
-        },
-      ];
-      const picked = await vscode.window.showQuickPick(providerItems, {
-        placeHolder: this.t(locale, 'chooseInstalledProvider', { provider: preferred.name }),
-      });
-      if (!picked) {
-        return undefined;
-      }
-
-      if (!picked.profile) {
-        await this.openCommitMessageSettings();
-        return undefined;
-      }
-
-      await vscode.workspace.getConfiguration('agents-gui.commitMessage').update(
-        'provider',
-        picked.profile.id,
-        vscode.ConfigurationTarget.Global
-      );
-      vscode.window.showInformationMessage(
-        this.t(locale, 'providerSelected', { provider: picked.profile.name })
-      );
-      return picked.profile;
+    if (installedProfiles.length === 0) {
+      await this.promptProviderSetup(locale, preferred);
+      return undefined;
     }
 
+    const picked = await this.pickInstalledProfile(
+      locale,
+      this.t(locale, 'chooseInstalledProvider', { provider: preferred.name }),
+      true,
+      installedProfiles
+    );
+    if (picked) {
+      return picked;
+    }
+
+    return undefined;
+  }
+
+  private async promptProviderSetup(locale: RuntimeLocale, preferred: CliProfile): Promise<void> {
     const openSetup = this.t(locale, 'openSetup');
     const copyInstallCommand = this.t(locale, 'copyInstallCommand');
     const choice = await vscode.window.showWarningMessage(
@@ -518,8 +523,53 @@ export class CommitMessageCommand {
       await vscode.env.clipboard.writeText(preferred.installHint);
       vscode.window.showInformationMessage(this.t(locale, 'installCommandCopied'));
     }
+  }
 
-    return undefined;
+  private async pickInstalledProfile(
+    locale: RuntimeLocale,
+    placeHolder: string,
+    persistSelection: boolean,
+    installedProfiles: CliProfile[]
+  ): Promise<CliProfile | undefined> {
+    const providerItems = [
+      ...installedProfiles.map((profile) => ({
+        label: profile.name,
+        description: this.t(
+          locale,
+          persistSelection ? 'useProviderForCommitMessage' : 'useOnceForCommitMessage'
+        ),
+        profile,
+      })),
+      {
+        label: this.t(locale, 'openCommitSettings'),
+        description: this.t(locale, 'openCommitSettingsDescription'),
+        profile: undefined,
+      },
+    ];
+    const picked = await vscode.window.showQuickPick(providerItems, {
+      placeHolder,
+    });
+    if (!picked) {
+      return undefined;
+    }
+
+    if (!picked.profile) {
+      await this.openCommitMessageSettings();
+      return undefined;
+    }
+
+    if (persistSelection) {
+      await vscode.workspace.getConfiguration('agents-gui.commitMessage').update(
+        'provider',
+        picked.profile.id,
+        vscode.ConfigurationTarget.Global
+      );
+      vscode.window.showInformationMessage(
+        this.t(locale, 'providerSelected', { provider: picked.profile.name })
+      );
+    }
+
+    return picked.profile;
   }
 
   private async getInstalledProfiles(): Promise<CliProfile[]> {
@@ -533,13 +583,13 @@ export class CommitMessageCommand {
     return results.filter((result) => result.installed).map((result) => result.profile);
   }
 
-  private async resolveGenerationProfiles(primaryProfile: CliProfile): Promise<CliProfile[]> {
+  private async resolveFallbackGenerationProfiles(primaryProfile: CliProfile): Promise<CliProfile[]> {
     if (!this.usesDefaultCommitMessageProvider()) {
-      return [primaryProfile];
+      return [];
     }
 
     const seen = new Set<string>([primaryProfile.id]);
-    const profiles = [primaryProfile];
+    const profiles: CliProfile[] = [];
     for (const profile of await this.getInstalledProfiles()) {
       if (seen.has(profile.id)) {
         continue;
@@ -733,10 +783,12 @@ export class CommitMessageCommand {
   }
 
   private getConfiguredProvider(): string {
-    const commitProvider = vscode.workspace
-      .getConfiguration('agents-gui.commitMessage')
-      .get<string>('provider', 'default');
-    if (commitProvider && commitProvider !== 'default') {
+    const commitProvider = this.getConfiguredCommitMessageProvider();
+    if (
+      commitProvider
+      && commitProvider !== DEFAULT_COMMIT_MESSAGE_PROVIDER
+      && commitProvider !== ASK_COMMIT_MESSAGE_PROVIDER
+    ) {
       return commitProvider;
     }
 
@@ -745,11 +797,19 @@ export class CommitMessageCommand {
       .get<string>('defaultProvider', DEFAULT_CLI_ID);
   }
 
-  private usesDefaultCommitMessageProvider(): boolean {
+  private getConfiguredCommitMessageProvider(): string {
     const commitProvider = vscode.workspace
       .getConfiguration('agents-gui.commitMessage')
-      .get<string>('provider', 'default');
-    return !commitProvider || commitProvider === 'default';
+      .get<string>('provider', DEFAULT_COMMIT_MESSAGE_PROVIDER);
+    return commitProvider?.trim() || DEFAULT_COMMIT_MESSAGE_PROVIDER;
+  }
+
+  private usesDefaultCommitMessageProvider(): boolean {
+    return this.getConfiguredCommitMessageProvider() === DEFAULT_COMMIT_MESSAGE_PROVIDER;
+  }
+
+  private usesAskCommitMessageProvider(): boolean {
+    return this.getConfiguredCommitMessageProvider() === ASK_COMMIT_MESSAGE_PROVIDER;
   }
 
   private getConfiguredLanguage(): CommitMessageLanguageSetting {
@@ -847,7 +907,8 @@ export class CommitMessageCommand {
   }
 
   private async generateCommitMessageWithFallback(
-    profiles: CliProfile[],
+    primaryProfile: CliProfile,
+    resolveFallbackProfiles: () => Promise<CliProfile[]>,
     prompt: string,
     repositoryRoot: string,
     language: CommitMessageLanguage,
@@ -858,7 +919,8 @@ export class CommitMessageCommand {
     token: vscode.CancellationToken,
     externalToken?: vscode.CancellationToken
   ): Promise<CommitMessageGenerationResult> {
-    const primaryProfile = profiles[0];
+    const profiles = [primaryProfile];
+    let fallbackProfilesLoaded = false;
     let lastError: Error | undefined;
 
     for (let index = 0; index < profiles.length; index += 1) {
@@ -890,7 +952,12 @@ export class CommitMessageCommand {
         }
 
         lastError = error instanceof Error ? error : new Error(message);
-        if (!this.usesDefaultCommitMessageProvider() || index >= profiles.length - 1) {
+        if (!fallbackProfilesLoaded) {
+          fallbackProfilesLoaded = true;
+          profiles.push(...await resolveFallbackProfiles());
+        }
+
+        if (index >= profiles.length - 1) {
           throw lastError;
         }
       }

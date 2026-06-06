@@ -4,3 +4,4 @@ dist/
 .vscode-test/
 .playwright-mcp/
 *.vsix
+WCDB_Contact*.sqlite*

@@ -1337,6 +1337,7 @@
     const record = value && typeof value === 'object' ? value : {};
     const knownProviderIds = new Set([
       'default',
+      'ask',
       ...installedProfiles().map((profile) => profile.id),
     ]);
     const provider = knownProviderIds.has(record.provider) ? record.provider : 'default';
@@ -1615,6 +1616,7 @@
 
     commitMessageProviderSelect.innerHTML = '';
     appendApiProviderOption(commitMessageProviderSelect, 'default', i18n.t('commitSettings.providerDefault'));
+    appendApiProviderOption(commitMessageProviderSelect, 'ask', i18n.t('commitSettings.providerAsk'));
     profiles.forEach((profile) => {
       appendApiProviderOption(commitMessageProviderSelect, profile.id, profile.name);
     });
@@ -4613,7 +4615,6 @@
         itemRunning,
         baseDetailKey
       );
-      appendStreamingCursor(body, itemRunning, item.text);
       bubble.appendChild(body);
 
       if (Array.isArray(item.attachments) && item.attachments.length > 0) {
@@ -6021,7 +6022,6 @@
       itemRunning,
       baseDetailKey
     );
-    appendStreamingCursor(body, itemRunning, item.text);
     syncMessageRunningStatusElement(bubble, item, itemRunning);
     if (itemRunning || Boolean(runningByProvider[activeId] || pendingByProvider[activeId])) {
       bubble.querySelector(':scope > .message-actions')?.remove();
@@ -6031,17 +6031,6 @@
     }
     restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
     return true;
-  }
-
-  function appendStreamingCursor(container, running, text) {
-    if (!running || !normalizeMessageText(text).trim()) {
-      return;
-    }
-
-    const cursor = document.createElement('span');
-    cursor.className = 'cursor message-streaming-cursor';
-    cursor.setAttribute('aria-hidden', 'true');
-    container.appendChild(cursor);
   }
 
   function appendMessageChoiceActions(bubble, text) {
@@ -6611,80 +6600,39 @@
     }
 
     const timeline = normalizeOpenCodeActivityTimeline(activityTimeline);
-    const fallbackTimeline = timeline.length > 0
+    const fallbackEntries = timeline.length > 0
       ? []
       : normalizeOpenCodeActivity(activity).entries.map((entry) => ({ ...entry, offset: 0 }));
-    const groups = groupOpenCodeActivityTimeline(timeline.length > 0 ? timeline : fallbackTimeline, normalized);
+    const activityEntries = timeline.length > 0 ? timeline : fallbackEntries;
+    const choiceLineKeys = !running && messageChoices?.extractMessageChoiceLineKeys
+      ? new Set(messageChoices.extractMessageChoiceLineKeys(normalized))
+      : undefined;
 
-    if (groups.length === 0) {
-      renderMarkdownLite(container, normalized);
+    renderMarkdownLite(container, normalized, {
+      hiddenChoiceLineKeys: choiceLineKeys,
+      hideProgressNoise: activityEntries.length > 0,
+    });
+
+    if (activityEntries.length > 0) {
+      appendOpenCodeActivityTrail(
+        container,
+        activityEntries,
+        running,
+        baseDetailKey ? `${baseDetailKey}:activity` : ''
+      );
+    }
+  }
+
+  function appendOpenCodeActivityTrail(container, entries, running, detailKey = '') {
+    const normalizedEntries = normalizeOpenCodeActivityTimeline(entries);
+    if (normalizedEntries.length === 0) {
       return;
     }
 
-    let cursor = 0;
-    for (const group of groups) {
-      const offset = Math.max(cursor, Math.min(group.offset, normalized.length));
-      const segment = normalized.slice(cursor, offset);
-      if (segment.trim()) {
-        renderMarkdownLite(container, segment);
-      }
-      appendInlineActivityGroup(
-        container,
-        group.entries,
-        running && group.latest,
-        baseDetailKey ? `${baseDetailKey}:activity:${group.offset}` : ''
-      );
-      cursor = offset;
-    }
-
-    const rest = normalized.slice(cursor);
-    if (rest.trim() || container.childElementCount === 0) {
-      renderMarkdownLite(container, rest);
-    }
-  }
-
-  function groupOpenCodeActivityTimeline(timeline, text) {
-    const groups = [];
-    const byOffset = new Map();
-    const entries = normalizeOpenCodeActivityTimeline(timeline);
-    for (const entry of entries) {
-      const offset = activityInsertionOffset(text, entry.offset);
-      const key = String(offset);
-      if (!byOffset.has(key)) {
-        byOffset.set(key, { offset, entries: [], latest: false });
-      }
-      byOffset.get(key).entries.push(entry);
-    }
-
-    for (const group of byOffset.values()) {
-      groups.push(group);
-    }
-
-    groups.sort((a, b) => a.offset - b.offset);
-    if (groups.length > 0) {
-      groups[groups.length - 1].latest = true;
-    }
-    return groups;
-  }
-
-  function activityInsertionOffset(text, offset) {
-    const normalized = normalizeMessageText(text);
-    const safeOffset = Math.max(0, Math.min(Number(offset) || 0, normalized.length));
-    if (safeOffset === 0 || safeOffset >= normalized.length) {
-      return safeOffset;
-    }
-
-    const paragraphBreak = normalized.indexOf('\n\n', safeOffset);
-    if (paragraphBreak >= 0 && paragraphBreak - safeOffset <= 280) {
-      return paragraphBreak + 2;
-    }
-
-    const lineBreak = normalized.indexOf('\n', safeOffset);
-    if (lineBreak >= 0 && lineBreak - safeOffset <= 180) {
-      return lineBreak + 1;
-    }
-
-    return safeOffset;
+    const stack = document.createElement('div');
+    stack.className = 'message-activity-stack';
+    appendInlineActivityGroup(stack, normalizedEntries, running, detailKey);
+    container.appendChild(stack);
   }
 
   function appendInlineActivityGroup(container, entries, running, detailKey = '') {
@@ -6789,8 +6737,8 @@
     return result;
   }
 
-  function renderMarkdownLite(container, text) {
-    const lines = preprocessAssistantMessageLines(String(text || '').split('\n'));
+  function renderMarkdownLite(container, text, options = {}) {
+    const lines = preprocessAssistantMessageLines(String(text || '').split('\n'), options);
     let index = 0;
 
     while (index < lines.length) {
@@ -7100,13 +7048,18 @@
     container.appendChild(paragraph);
   }
 
-  function preprocessAssistantMessageLines(lines) {
+  function preprocessAssistantMessageLines(lines, options = {}) {
     const sourceLines = lines || [];
     const hasInternalSignals = sourceLines.some((line, index) => (
       isInternalAnalysisHeading(line, sourceLines, index)
         || isInternalAnalysisField(line)
+        || isAssistantIntentDiagnosticLine(line)
         || isAssistantToolNoiseLine(line)
     ));
+    const hideProgressNoise = Boolean(options.hideProgressNoise);
+    const hiddenChoiceLineKeys = options.hiddenChoiceLineKeys instanceof Set
+      ? options.hiddenChoiceLineKeys
+      : new Set(options.hiddenChoiceLineKeys || []);
 
     const cleaned = [];
     let skippingInternalField = false;
@@ -7115,6 +7068,9 @@
       const source = stripHiddenAssistantInlineMarkup(line);
       const trimmed = source.trim();
       const structuralTag = parseAssistantMarkupTag(trimmed);
+      const choiceLineKey = messageChoices?.normalizeMessageChoiceLine
+        ? messageChoices.normalizeMessageChoiceLine(source)
+        : '';
 
       if (skippingInternalField) {
         if (!trimmed) {
@@ -7128,8 +7084,13 @@
       }
 
       if (isInternalAnalysisHeading(source, sourceLines, index)
+        || isAssistantIntentDiagnosticLine(source)
         || isAssistantToolNoiseLine(source)
-        || (hasInternalSignals && isAssistantProgressNoiseLine(source))) {
+        || (choiceLineKey && hiddenChoiceLineKeys.has(choiceLineKey))
+        || ((hasInternalSignals || hideProgressNoise) && isAssistantProgressNoiseLine(source))) {
+        if (isAssistantIntentDiagnosticLine(source)) {
+          skippingInternalField = true;
+        }
         return;
       }
 
@@ -7183,6 +7144,12 @@
     return /^(?:Literal Request|Actual Need|Success Looks Like|字面请求|实际需求|成功标准)\s*:/i.test(normalizeAssistantDiagnosticLine(line));
   }
 
+  function isAssistantIntentDiagnosticLine(line) {
+    const source = normalizeAssistantDiagnosticLine(line);
+    return /^I detect [\w -]+ intent\b/i.test(source)
+      || /^我(?:检测|判断|识别)到.+意图/.test(source);
+  }
+
   function isAssistantToolNoiseLine(line) {
     const source = normalizeAssistantDiagnosticLine(line);
     return /\bpermission requested:\s*.+auto-?rejecting\b/i.test(source)
@@ -7191,7 +7158,7 @@
 
   function isAssistantProgressNoiseLine(line) {
     const source = normalizeAssistantDiagnosticLine(line);
-    return /^(?:I(?:'|’)ll start\b|I will start\b|Let me\b|Now let me\b|Let me now\b|Good initial sweep\b|The TypeScript check returned no output\b|Now I have all the data\b|Here(?:'|’)s the comprehensive\b|后台分析任务已并行启动|项目规模不小。先并行跑|找到项目了|让我(?:先|进一步|深入|直接|并行))/i.test(source);
+    return /^(?:I(?:'|’)ll start\b|I will start\b|Let me\b|Now let me\b|Let me now\b|Good initial sweep\b|The TypeScript check returned no output\b|Now I have all the data\b|Here(?:'|’)s the comprehensive\b|后台分析任务已并行启动|项目规模不小。先并行跑|找到项目了|让我(?:先|进一步|深入|直接|并行|查看|看一下|查一下|继续)|同时我(?:也|会)?(?:直接|先|继续|进一步)|我(?:先|继续|再|进一步)(?:查看|检查|搜索|确认|探查|看看))/i.test(source);
   }
 
   function normalizeAssistantDiagnosticLine(line) {
@@ -7312,7 +7279,10 @@
         return false;
       }
 
-      if (isInternalAnalysisField(source) || isAssistantToolNoiseLine(source) || isAssistantProgressNoiseLine(source)) {
+      if (isInternalAnalysisField(source)
+        || isAssistantIntentDiagnosticLine(source)
+        || isAssistantToolNoiseLine(source)
+        || isAssistantProgressNoiseLine(source)) {
         continue;
       }
 
