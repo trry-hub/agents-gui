@@ -79,6 +79,9 @@ export function resolveApiProviderRuntime(
     AGENTS_HUB_API_PROVIDER_ID: provider.id,
     AGENTS_HUB_API_PROTOCOL: provider.protocol,
   };
+  if (cliId === 'goose') {
+    env.GOOSE_PROVIDER = provider.protocol;
+  }
   Object.assign(env, provider.extraEnv);
 
   if (provider.baseUrl) {
@@ -87,6 +90,12 @@ export function resolveApiProviderRuntime(
       env.ANTHROPIC_BASE_URL = provider.baseUrl;
     } else {
       env.OPENAI_BASE_URL = provider.baseUrl;
+      if (cliId === 'aider') {
+        env.AIDER_OPENAI_API_BASE = provider.baseUrl;
+      }
+      if (cliId === 'goose') {
+        env.OPENAI_HOST = toGooseOpenAiHost(provider.baseUrl);
+      }
     }
   }
   if (provider.model) {
@@ -95,6 +104,12 @@ export function resolveApiProviderRuntime(
       env.ANTHROPIC_MODEL = provider.model;
     } else {
       env.OPENAI_MODEL = provider.model;
+      if (cliId === 'aider') {
+        env.AIDER_MODEL = toAiderOpenAiModel(provider.model);
+      }
+    }
+    if (cliId === 'goose') {
+      env.GOOSE_MODEL = provider.model;
     }
   }
 
@@ -105,6 +120,9 @@ export function resolveApiProviderRuntime(
       env.ANTHROPIC_API_KEY = provider.apiKey;
     } else {
       env.OPENAI_API_KEY = provider.apiKey;
+      if (cliId === 'aider') {
+        env.AIDER_OPENAI_API_KEY = provider.apiKey;
+      }
     }
   } else if (provider.apiKeyEnv) {
     const apiKey = sourceEnv[provider.apiKeyEnv];
@@ -114,6 +132,9 @@ export function resolveApiProviderRuntime(
         env.ANTHROPIC_API_KEY = apiKey;
       } else {
         env.OPENAI_API_KEY = apiKey;
+        if (cliId === 'aider') {
+          env.AIDER_OPENAI_API_KEY = apiKey;
+        }
       }
     } else {
       warnings.push({
@@ -145,6 +166,15 @@ export function resolveApiProviderRuntime(
           : '',
     ].join('|'),
   };
+}
+
+function toAiderOpenAiModel(model: string): string {
+  const normalized = model.trim().replace(/^openai\//, '');
+  return normalized ? `openai/${normalized}` : '';
+}
+
+function toGooseOpenAiHost(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/v1\/?$/, '');
 }
 
 export function resolveApiProviderForAgent(

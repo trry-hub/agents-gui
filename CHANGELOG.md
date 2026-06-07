@@ -1,5 +1,13 @@
 # 更新日志
 
+## v0.0.8 - 2026-06-07
+
+### 修复
+
+- 修复 Gemini CLI 在 macOS 系统代理环境下的 headless 启动卡顿。
+- 修复 Aider 与 Goose 使用自定义 OpenAI-compatible Provider 时的环境变量适配。
+- 优化提交信息生成的 OpenCode 默认模型选择，避免默认模型不可用导致失败。
+
 ## v0.0.4 - 2026-05-25
 
 Range: `v0.0.3..HEAD`

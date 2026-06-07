@@ -33,6 +33,7 @@ const {
   normalizeCommandPathOutput,
   shellQuote,
 } = require('../.test-dist/cliPathResolver.js');
+const { parseMacSystemProxyEnv } = require('../.test-dist/systemProxyEnv.js');
 const { getProviderExtensionBridge } = require('../.test-dist/providerExtensions.js');
 const {
   parseOpenCodeDebugConfigOutput,
@@ -765,7 +766,30 @@ test('gemini profile passes prompt as the -p argument for headless mode', () => 
   const profile = getCliProfile('gemini');
 
   assert.equal(profile.command, 'gemini');
-  assert.deepEqual(profile.promptArgs, ['-p']);
+  assert.deepEqual(profile.promptArgs, [
+    '--skip-trust',
+    '--approval-mode',
+    'plan',
+    '--output-format',
+    'text',
+    '-p',
+  ]);
+  assert.equal(profile.inputMode, 'argument');
+  assert.equal(profile.env?.GEMINI_CLI_NO_RELAUNCH, '1');
+});
+
+test('goose profile uses the current non-interactive run text mode', () => {
+  const profile = getCliProfile('goose');
+
+  assert.equal(profile.command, 'goose');
+  assert.deepEqual(profile.promptArgs, [
+    'run',
+    '--no-session',
+    '--quiet',
+    '--output-format',
+    'text',
+    '--text',
+  ]);
   assert.equal(profile.inputMode, 'argument');
 });
 
@@ -773,7 +797,7 @@ test('CLI profiles expose provider model, runtime, and permission option args', 
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const codex = getCliProfile('codex');
 
-  assert.equal(codex.defaultModel, 'gpt-5.4');
+  assert.equal(codex.defaultModel, 'gpt-5.4-mini');
   assert.equal(codex.modelOptions.find((option) => option.id === 'default'), undefined);
   assert.equal(codex.customModelArgPrefix.join(' '), '--model');
   assert.deepEqual(getCliModelOption(codex, 'gpt-5.4').args, ['--model', 'gpt-5.4']);
@@ -827,6 +851,32 @@ test('CLI path resolver keeps the first absolute command path from shell output'
     '/Users/t/.nvm/versions/node/v24.15.0/bin/codex'
   );
   assert.equal(shellQuote("bad'name"), "'bad'\\''name'");
+});
+
+test('macOS system proxy output maps to CLI proxy environment variables', () => {
+  const env = parseMacSystemProxyEnv(`
+<dictionary> {
+  ExceptionsList : <array> {
+    0 : 127.0.0.1
+    1 : localhost
+    2 : *.local
+  }
+  HTTPEnable : 1
+  HTTPPort : 7897
+  HTTPProxy : 127.0.0.1
+  HTTPSEnable : 1
+  HTTPSPort : 7897
+  HTTPSProxy : 127.0.0.1
+  SOCKSEnable : 1
+  SOCKSPort : 7897
+  SOCKSProxy : 127.0.0.1
+}
+`);
+
+  assert.equal(env.HTTP_PROXY, 'http://127.0.0.1:7897');
+  assert.equal(env.HTTPS_PROXY, 'http://127.0.0.1:7897');
+  assert.equal(env.ALL_PROXY, 'socks5://127.0.0.1:7897');
+  assert.match(env.NO_PROXY, /localhost/);
 });
 
 test('CLI manager revalidates cached command paths before spawning', () => {
@@ -1921,6 +1971,16 @@ test('custom API provider settings can sync explicit keys without leaking them',
   assert.equal(runtime.selectionKey.includes('sk-should-sync'), false);
   assert.equal(runtime.selectionKey.includes('actual-secret'), false);
   assert.equal(runtime.warnings.length, 0);
+
+  const aiderRuntime = resolveApiProviderRuntime(settings, 'aider', {});
+  assert.equal(aiderRuntime.env.AIDER_OPENAI_API_BASE, 'https://openrouter.ai/api/v1');
+  assert.equal(aiderRuntime.env.AIDER_OPENAI_API_KEY, 'sk-should-sync');
+  assert.equal(aiderRuntime.env.AIDER_MODEL, 'openai/anthropic/claude-sonnet');
+
+  const gooseRuntime = resolveApiProviderRuntime(settings, 'goose', {});
+  assert.equal(gooseRuntime.env.GOOSE_PROVIDER, 'openai');
+  assert.equal(gooseRuntime.env.GOOSE_MODEL, 'anthropic/claude-sonnet');
+  assert.equal(gooseRuntime.env.OPENAI_HOST, 'https://openrouter.ai/api');
 
   const fallback = sanitizeApiProviderSettings({
     customProviders: [{

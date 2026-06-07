@@ -298,8 +298,10 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /profile\.id === 'opencode'/);
   assert.match(
     source,
-    /runOpenCodePromptViaServer\(\s*prompt,\s*token,\s*repositoryRoot,\s*this\.getStoredOpenCodeModelId\(\),\s*onPartial\s*\)/s
+    /runOpenCodePromptViaServer\(\s*prompt,\s*token,\s*repositoryRoot,\s*await this\.getOpenCodeCommitMessageModelId\(repositoryRoot\),\s*onPartial\s*\)/s
   );
+  assert.match(source, /OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES/);
+  assert.match(source, /getOpenCodeModelOptions\(repositoryRoot\)/);
   assert.match(source, /return this\.cleanCommitMessageOutput\(\s*await this\.cliManager\.runOpenCodePromptViaServer/s);
   assert.match(source, /private cleanCommitMessageOutput\(\s*output: string,\s*language: CommitMessageLanguage,\s*diff: string/s);
   assert.doesNotMatch(source, /resolveInputValue/);

@@ -83,6 +83,12 @@ const DEFAULT_CLI_ID = 'opencode';
 const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
 const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
+const OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES = [
+  'mimo/mimo-v2.5-pro',
+  'opencode/mimo-v2.5-free',
+  'opencode/deepseek-v4-flash-free',
+  'opencode/big-pickle',
+];
 const COMMIT_MESSAGE_TIMEOUT_MS = 90_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
 const STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui.commitMessageStagedRoots';
@@ -622,7 +628,7 @@ export class CommitMessageCommand {
           prompt,
           token,
           repositoryRoot,
-          this.getStoredOpenCodeModelId(),
+          await this.getOpenCodeCommitMessageModelId(repositoryRoot),
           onPartial
         ),
         language,
@@ -822,6 +828,22 @@ export class CommitMessageCommand {
     const models = this.state?.get<Record<string, string>>(MODEL_STATE_KEY, {});
     const modelId = models?.opencode;
     return typeof modelId === 'string' && modelId.trim() ? modelId.trim() : undefined;
+  }
+
+  private async getOpenCodeCommitMessageModelId(repositoryRoot: string): Promise<string | undefined> {
+    const storedModelId = this.getStoredOpenCodeModelId();
+    if (storedModelId) {
+      return storedModelId;
+    }
+
+    const availableModels = await this.cliManager
+      .getOpenCodeModelOptions(repositoryRoot)
+      .catch(() => []);
+    const availableModelIds = new Set(availableModels.map((model) => model.id));
+
+    return OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES.find((modelId) =>
+      availableModelIds.has(modelId)
+    );
   }
 
   private getMaxDiffChars(): number {

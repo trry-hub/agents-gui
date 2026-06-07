@@ -5,3 +5,4 @@ dist/
 .playwright-mcp/
 *.vsix
 WCDB_Contact*.sqlite*
+.aider*

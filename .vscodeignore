@@ -4,6 +4,8 @@
 .neuralmemory/**
 .playwright-mcp/**
 .claude/**
+.aider*
+.aider*/**
 .test-dist/**
 docs/**
 tests/**

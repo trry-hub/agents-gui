@@ -389,8 +389,11 @@ export const CLI_PROFILES: CliProfile[] = [
     name: 'Gemini CLI',
     description: 'General coding assistant with broad model support and fast project Q&A.',
     command: 'gemini',
-    promptArgs: ['-p'],
+    promptArgs: ['--skip-trust', '--approval-mode', 'plan', '--output-format', 'text', '-p'],
     inputMode: 'argument',
+    env: {
+      GEMINI_CLI_NO_RELAUNCH: '1',
+    },
     accent: '#4285f4',
     icon: 'G',
     capabilities: ['chat', 'analysis', 'workspace'],
@@ -450,7 +453,7 @@ export const CLI_PROFILES: CliProfile[] = [
       refactor: 5,
       explain: 4,
     },
-    defaultModel: 'gpt-5.4',
+    defaultModel: 'gpt-5.4-mini',
     customModelArgPrefix: ['--model'],
     modelOptions: [
       {
@@ -648,8 +651,8 @@ export const CLI_PROFILES: CliProfile[] = [
     name: 'Goose',
     description: 'Automation-oriented agent for tool-using development tasks.',
     command: 'goose',
-    promptArgs: ['run', '-'],
-    inputMode: 'stdin',
+    promptArgs: ['run', '--no-session', '--quiet', '--output-format', 'text', '--text'],
+    inputMode: 'argument',
     accent: '#f97316',
     icon: '⌂',
     capabilities: ['agent', 'automation', 'tools'],

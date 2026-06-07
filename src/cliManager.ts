@@ -8,7 +8,8 @@ import type {
   AssistantOpenCodeNativeCommandResult,
   AssistantOpenCodeStatus,
 } from './assistantTypes';
-import { CliProfile, getCliProfile } from './cliProfiles';
+import type { CliModelOption, CliProfile } from './cliProfiles';
+import { getCliProfile } from './cliProfiles';
 import {
   buildCliLookupPath,
   mergePathEntries,
@@ -16,6 +17,7 @@ import {
 import { CliDiscovery, stableHash } from './cliDiscovery';
 import { CliProcessRunner } from './cliProcessRunner';
 import { OpenCodeServerClient, type OpenCodeEventStream } from './openCodeServerClient';
+import { getSystemProxyEnv } from './systemProxyEnv';
 
 export type AgentRunTransport = 'process' | 'sse';
 export type AgentRunOutputStream = 'stdout' | 'stderr';
@@ -126,6 +128,7 @@ export class CliManager {
     const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
     const env = {
       ...process.env,
+      ...getSystemProxyEnv(process.env),
       PATH: mergePathEntries([
         commandDir,
         buildCliLookupPath(process.env.PATH, process.env.HOME),
@@ -303,6 +306,10 @@ export class CliManager {
     return this.openCodeClient.getStatus();
   }
 
+  async getOpenCodeModelOptions(cwd = this.getWorkspaceRoot()): Promise<CliModelOption[]> {
+    return this.openCodeClient.fetchModelOptions(cwd);
+  }
+
   async getOpenCodeMcpStatus(): Promise<AssistantMcpServerStatus[] | undefined> {
     return (await this.getOpenCodeStatus())?.mcpServers;
   }
@@ -333,6 +340,7 @@ export class CliManager {
     const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
     const env = {
       ...process.env,
+      ...getSystemProxyEnv(process.env),
       PATH: mergePathEntries([
         commandDir,
         buildCliLookupPath(process.env.PATH, process.env.HOME),
