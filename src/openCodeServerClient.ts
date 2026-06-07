@@ -523,7 +523,6 @@ export class OpenCodeServerClient {
             const finalText = await this.fetchSessionText(serverUrl, sessionId, directory);
             return finalText ?? eventStream.outputText();
           }
-          continue;
         }
       }
 

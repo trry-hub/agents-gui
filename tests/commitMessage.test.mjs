@@ -296,13 +296,12 @@ test('commit message command uses staged git diff and writes to repository input
   assert.doesNotMatch(source, /session\.onError\.event/);
   assert.doesNotMatch(source, /session\.onEnd\.event/);
   assert.match(source, /profile\.id === 'opencode'/);
-  assert.match(
-    source,
-    /runOpenCodePromptViaServer\(\s*prompt,\s*token,\s*repositoryRoot,\s*await this\.getOpenCodeCommitMessageModelId\(repositoryRoot\),\s*onPartial\s*\)/s
-  );
+  assert.match(source, /const openCodeModelId = profile\.id === 'opencode'\s*\?\s*await this\.getOpenCodeCommitMessageModelId\(repositoryRoot\)\s*:\s*undefined;/s);
   assert.match(source, /OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES/);
-  assert.match(source, /getOpenCodeModelOptions\(repositoryRoot\)/);
-  assert.match(source, /return this\.cleanCommitMessageOutput\(\s*await this\.cliManager\.runOpenCodePromptViaServer/s);
+  assert.match(source, /const optionArgs = buildCliOptionArgs\(profile, \{\s*model: profile\.id === 'opencode' && openCodeModelId \? 'custom' : modelOption\.id,\s*customModel: openCodeModelId,/s);
+  assert.match(source, /openCodeModelId \?\? modelOption\.id/);
+  assert.match(source, /const session = await this\.cliManager\.startPrompt\(/);
+  assert.doesNotMatch(source, /runOpenCodePromptViaServer\(/);
   assert.match(source, /private cleanCommitMessageOutput\(\s*output: string,\s*language: CommitMessageLanguage,\s*diff: string/s);
   assert.doesNotMatch(source, /resolveInputValue/);
   assert.doesNotMatch(source, /existingMessage/);
@@ -315,9 +314,7 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /useOnceForCommitMessage/);
   assert.match(source, /resolveReadyProfile\(locale\)/);
   assert.match(source, /resolveFallbackGenerationProfiles\(primaryProfile: CliProfile\)/);
-  assert.match(source, /usesDefaultCommitMessageProvider\(\)/);
   assert.match(source, /profiles = \[primaryProfile\]/);
-  assert.match(source, /if \(!this\.usesDefaultCommitMessageProvider\(\)\) \{\s*return \[\];\s*\}/s);
   assert.match(source, /profiles\.push\(\.\.\.await resolveFallbackProfiles\(\)\)/);
   assert.match(source, /if \(index >= profiles\.length - 1\)/);
   assert.match(source, /fallbackFrom: primaryProfile/);
@@ -335,6 +332,10 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /clipboard\.writeText\(preferred\.installHint\)/);
   assert.match(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.match(source, /this\.state\?\.get<Record<string, string>>\(MODEL_STATE_KEY/);
+  assert.match(source, /CUSTOM_MODEL_STATE_KEY/);
+  assert.match(source, /normalized === 'configured'/);
+  assert.match(source, /normalized === 'custom'/);
+  assert.match(source, /openai\/gpt-5\.4-mini-fast/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui\.commitMessageGenerating'/);
   assert.match(source, /STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui\.commitMessageStagedRoots'/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui\.commitMessageGeneratingRoots'/);
@@ -361,6 +362,7 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /for \(const cancellation of this\.cancellationsByRoot\.values\(\)\)/);
   assert.match(source, /isLikelyCliError\(normalizedStderr\)/);
   assert.doesNotMatch(source, /diff\(false\)/);
+  assert.doesNotMatch(source, /usesDefaultCommitMessageProvider\(\)/);
 });
 
 test('OpenCode server commit generation waits for completed text parts only', () => {

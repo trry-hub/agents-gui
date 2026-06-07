@@ -32,6 +32,7 @@ import {
   normalizeCliOutput,
   normalizeCliOutputChunk,
 } from './outputFormatter';
+import { CUSTOM_MODEL_STATE_KEY } from './syncedState';
 
 interface GitInputBox {
   value: string;
@@ -84,9 +85,22 @@ const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
 const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
 const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 const OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES = [
-  'mimo/mimo-v2.5-pro',
-  'opencode/mimo-v2.5-free',
+  'openai/gpt-5.4-mini-fast',
+  'openai/gpt-5.4-mini',
+  'openai/gpt-5.4-fast',
+  'openai/gpt-5.4',
+  'openai/gpt-5.5-fast',
+  'openai/gpt-5.5',
+  'openai/gpt-5.5-pro',
   'opencode/deepseek-v4-flash-free',
+  'opencode/minimax-m3-free',
+  'nvidia/deepseek-ai/deepseek-v4-flash',
+  'nvidia/stepfun-ai/step-3.7-flash',
+  'nvidia/stepfun-ai/step-3.5-flash',
+  'nvidia/nvidia/nemotron-mini-4b-instruct',
+  'nvidia/minimaxai/minimax-m2.7',
+  'nvidia/minimaxai/minimax-m2.5',
+  'mimo/mimo-v2.5-pro',
   'opencode/big-pickle',
 ];
 const COMMIT_MESSAGE_TIMEOUT_MS = 90_000;
@@ -590,10 +604,6 @@ export class CommitMessageCommand {
   }
 
   private async resolveFallbackGenerationProfiles(primaryProfile: CliProfile): Promise<CliProfile[]> {
-    if (!this.usesDefaultCommitMessageProvider()) {
-      return [];
-    }
-
     const seen = new Set<string>([primaryProfile.id]);
     const profiles: CliProfile[] = [];
     for (const profile of await this.getInstalledProfiles()) {
@@ -622,24 +632,12 @@ export class CommitMessageCommand {
     inputMessage: string,
     token: vscode.CancellationToken
   ): Promise<string> {
-    if (profile.id === 'opencode') {
-      return this.cleanCommitMessageOutput(
-        await this.cliManager.runOpenCodePromptViaServer(
-          prompt,
-          token,
-          repositoryRoot,
-          await this.getOpenCodeCommitMessageModelId(repositoryRoot),
-          onPartial
-        ),
-        language,
-        diff,
-        inputMessage
-      );
-    }
-
     const agentMode = preferredCommitAgentMode(profile);
     const permissionMode = preferredCommitPermissionMode(profile);
     const modelOption = getCliModelOption(profile);
+    const openCodeModelId = profile.id === 'opencode'
+      ? await this.getOpenCodeCommitMessageModelId(repositoryRoot)
+      : undefined;
     const runtimeMode = getCliRuntimeMode(profile);
     const apiProviderRuntime = resolveApiProviderRuntime(
       this.getApiProviderSettings(),
@@ -647,7 +645,8 @@ export class CommitMessageCommand {
       process.env
     );
     const optionArgs = buildCliOptionArgs(profile, {
-      model: modelOption.id,
+      model: profile.id === 'opencode' && openCodeModelId ? 'custom' : modelOption.id,
+      customModel: openCodeModelId,
       runtime: runtimeMode.id,
       permissionMode: permissionMode.id,
     });
@@ -659,7 +658,7 @@ export class CommitMessageCommand {
       [
         'commitMessage',
         agentMode.id,
-        modelOption.id,
+        openCodeModelId ?? modelOption.id,
         runtimeMode.id,
         permissionMode.id,
         apiProviderRuntime.selectionKey,
@@ -810,10 +809,6 @@ export class CommitMessageCommand {
     return commitProvider?.trim() || DEFAULT_COMMIT_MESSAGE_PROVIDER;
   }
 
-  private usesDefaultCommitMessageProvider(): boolean {
-    return this.getConfiguredCommitMessageProvider() === DEFAULT_COMMIT_MESSAGE_PROVIDER;
-  }
-
   private usesAskCommitMessageProvider(): boolean {
     return this.getConfiguredCommitMessageProvider() === ASK_COMMIT_MESSAGE_PROVIDER;
   }
@@ -827,7 +822,22 @@ export class CommitMessageCommand {
   private getStoredOpenCodeModelId(): string | undefined {
     const models = this.state?.get<Record<string, string>>(MODEL_STATE_KEY, {});
     const modelId = models?.opencode;
-    return typeof modelId === 'string' && modelId.trim() ? modelId.trim() : undefined;
+    if (typeof modelId !== 'string') {
+      return undefined;
+    }
+
+    const normalized = modelId.trim();
+    if (!normalized || normalized === 'configured') {
+      return undefined;
+    }
+
+    if (normalized === 'custom') {
+      const customModels = this.state?.get<Record<string, string>>(CUSTOM_MODEL_STATE_KEY, {});
+      const customModelId = customModels?.opencode;
+      return typeof customModelId === 'string' && customModelId.trim() ? customModelId.trim() : undefined;
+    }
+
+    return normalized;
   }
 
   private async getOpenCodeCommitMessageModelId(repositoryRoot: string): Promise<string | undefined> {

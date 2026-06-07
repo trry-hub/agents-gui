@@ -3879,6 +3879,88 @@ test('OpenCode event stream only emits output for the owned session', async () =
   }
 });
 
+test('OpenCode server commit generation still resolves from session text when SSE completion never arrives', async () => {
+  const client = createOpenCodeServerClient();
+  const originalFetchJson = client.fetchJson;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalDateNow = Date.now;
+  let nowCalls = 0;
+  const token = {
+    isCancellationRequested: false,
+    onCancellationRequested() {
+      return { dispose() {} };
+    },
+  };
+  const eventStream = {
+    ready: Promise.resolve(true),
+    failed() {
+      return false;
+    },
+    error() {
+      return undefined;
+    },
+    close() {},
+    outputText() {
+      return 'partial output';
+    },
+    completed: new Promise(() => {}),
+  };
+
+  Date.now = () => (nowCalls++ < 2 ? 0 : 100_000);
+  globalThis.setTimeout = ((callback, _delay, ...args) => {
+    callback(...args);
+    return 0;
+  });
+  globalThis.clearTimeout = () => {};
+  client.fetchJson = async (url) => {
+    const href = String(url);
+    if (href.includes('/session/status')) {
+      return { ses_live: {} };
+    }
+
+    if (href.includes('/message')) {
+      return [
+        {
+          info: {
+            role: 'assistant',
+            status: 'completed',
+            time: {
+              completed: 1,
+            },
+          },
+          parts: [
+            {
+              type: 'text',
+              text: 'feat: add commit message fallback',
+            },
+          ],
+        },
+      ];
+    }
+
+    return undefined;
+  };
+
+  try {
+    const text = await client.waitForServerText(
+      'http://127.0.0.1:17017',
+      'ses_live',
+      process.cwd(),
+      token,
+      undefined,
+      eventStream
+    );
+
+    assert.equal(text, 'feat: add commit message fallback');
+  } finally {
+    client.fetchJson = originalFetchJson;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    Date.now = originalDateNow;
+  }
+});
+
 test('normalizeCliOutputChunk handles OpenCode run JSON text events', () => {
   assert.deepEqual(
     normalizeCliOutputChunk(
