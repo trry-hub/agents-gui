@@ -108,7 +108,7 @@
   let profilesLoading = true;
   let activeId = saved.activeId || '';
   let activeAgentModeByProvider = saved.activeAgentModeByProvider || {};
-  let activeModelByProvider = saved.activeModelByProvider || {};
+  let activeModelByProvider = {};
   let recentModelByProvider = saved.recentModelByProvider || {};
   let favoriteModelByProvider = saved.favoriteModelByProvider || {};
   let disabledMcpByProvider = saved.disabledMcpByProvider || {};
@@ -295,7 +295,6 @@
     vscode.setState({
       activeId,
       activeAgentModeByProvider,
-      activeModelByProvider,
       recentModelByProvider,
       favoriteModelByProvider,
       disabledMcpByProvider,
@@ -339,7 +338,6 @@
       command: 'saveSelectionState',
       activeProviderId: activeId,
       activeAgentModeByProvider,
-      activeModelByProvider,
       recentModelByProvider,
       favoriteModelByProvider,
       disabledMcpByProvider,
@@ -1108,14 +1106,17 @@
 
   function activeModelId(cliId = activeId) {
     const profile = profiles.find((item) => item.id === cliId);
+    const requested = activeModelByProvider[cliId];
     const normalized = normalizeOptionId(
       profile,
-      activeModelByProvider[cliId],
+      requested,
       'modelOptions',
       'defaultModel',
       'model.short'
     );
-    activeModelByProvider[cliId] = normalized;
+    if (!requested || requested !== normalized) {
+      delete activeModelByProvider[cliId];
+    }
     return normalized;
   }
 
@@ -8591,7 +8592,6 @@
         {
           const availableProfiles = visibleInstalledProfiles();
           const storedAgentModes = persistedSelectionMap(message.activeAgentModeByProvider);
-          const storedModels = persistedSelectionMap(message.activeModelByProvider);
           const storedRecentModels = persistedSelectionMap(message.recentModelByProvider);
           const storedFavoriteModels = persistedSelectionMap(message.favoriteModelByProvider);
           const storedCustomModels = persistedSelectionMap(message.customModelByProvider);
@@ -8600,9 +8600,7 @@
           activeAgentModeByProvider = hasAppliedPersistentSelection
             ? { ...storedAgentModes, ...activeAgentModeByProvider }
             : { ...activeAgentModeByProvider, ...storedAgentModes };
-          activeModelByProvider = hasAppliedPersistentSelection
-            ? { ...storedModels, ...activeModelByProvider }
-            : { ...activeModelByProvider, ...storedModels };
+          activeModelByProvider = {};
           recentModelByProvider = hasAppliedPersistentSelection
             ? { ...storedRecentModels, ...recentModelByProvider }
             : { ...recentModelByProvider, ...storedRecentModels };

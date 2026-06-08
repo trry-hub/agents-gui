@@ -453,9 +453,15 @@ export const CLI_PROFILES: CliProfile[] = [
       refactor: 5,
       explain: 4,
     },
-    defaultModel: 'gpt-5.4-mini',
+    defaultModel: 'configured',
     customModelArgPrefix: ['--model'],
     modelOptions: [
+      {
+        id: 'configured',
+        label: 'Configured',
+        summaryLabel: 'Configured',
+        description: 'Use the model configured by Codex CLI settings or environment variables.',
+      },
       {
         id: 'gpt-5.5',
         label: 'GPT-5.5',

@@ -57,7 +57,6 @@ export type HostToWebviewMessage =
       defaultProviderId?: string;
       activeProviderId?: string;
       activeAgentModeByProvider?: Record<string, string>;
-      activeModelByProvider?: Record<string, string>;
       recentModelByProvider?: Record<string, string>;
       favoriteModelByProvider?: Record<string, string>;
       disabledMcpByProvider?: Record<string, string[]>;

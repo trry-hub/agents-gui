@@ -8,10 +8,8 @@ import {
 } from './apiProviders';
 import { CliManager, Session } from './cliManager';
 import {
-  buildCliOptionArgs,
   CLI_PROFILES,
   getCliAgentMode,
-  getCliModelOption,
   getCliPermissionMode,
   getCliProfile,
   getCliRuntimeMode,
@@ -32,7 +30,6 @@ import {
   normalizeCliOutput,
   normalizeCliOutputChunk,
 } from './outputFormatter';
-import { CUSTOM_MODEL_STATE_KEY } from './syncedState';
 
 interface GitInputBox {
   value: string;
@@ -83,26 +80,7 @@ interface CommitMessageGenerationResult {
 const DEFAULT_CLI_ID = 'opencode';
 const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
 const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
-const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
-const OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES = [
-  'openai/gpt-5.4-mini-fast',
-  'openai/gpt-5.4-mini',
-  'openai/gpt-5.4-fast',
-  'openai/gpt-5.4',
-  'openai/gpt-5.5-fast',
-  'openai/gpt-5.5',
-  'openai/gpt-5.5-pro',
-  'opencode/deepseek-v4-flash-free',
-  'opencode/minimax-m3-free',
-  'nvidia/deepseek-ai/deepseek-v4-flash',
-  'nvidia/stepfun-ai/step-3.7-flash',
-  'nvidia/stepfun-ai/step-3.5-flash',
-  'nvidia/nvidia/nemotron-mini-4b-instruct',
-  'nvidia/minimaxai/minimax-m2.7',
-  'nvidia/minimaxai/minimax-m2.5',
-  'mimo/mimo-v2.5-pro',
-  'opencode/big-pickle',
-];
+const OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS = ['run', '--format', 'json'];
 const COMMIT_MESSAGE_TIMEOUT_MS = 90_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
 const STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui.commitMessageStagedRoots';
@@ -176,8 +154,7 @@ export class CommitMessageCommand {
   private readonly cancellationsByRoot = new Map<string, vscode.CancellationTokenSource>();
 
   constructor(
-    private readonly cliManager: CliManager,
-    private readonly state?: vscode.Memento
+    private readonly cliManager: CliManager
   ) {}
 
   watchStagedChangesContext(context: vscode.ExtensionContext): void {
@@ -634,22 +611,22 @@ export class CommitMessageCommand {
   ): Promise<string> {
     const agentMode = preferredCommitAgentMode(profile);
     const permissionMode = preferredCommitPermissionMode(profile);
-    const modelOption = getCliModelOption(profile);
-    const openCodeModelId = profile.id === 'opencode'
-      ? await this.getOpenCodeCommitMessageModelId(repositoryRoot)
-      : undefined;
     const runtimeMode = getCliRuntimeMode(profile);
     const apiProviderRuntime = resolveApiProviderRuntime(
       this.getApiProviderSettings(),
       profile.id,
       process.env
     );
-    const optionArgs = buildCliOptionArgs(profile, {
-      model: profile.id === 'opencode' && openCodeModelId ? 'custom' : modelOption.id,
-      customModel: openCodeModelId,
-      runtime: runtimeMode.id,
-      permissionMode: permissionMode.id,
-    });
+    const optionArgs = [
+      ...(runtimeMode.args ?? []),
+      ...(permissionMode.args ?? []),
+    ];
+    const startOptions = profile.id === 'opencode'
+      ? {
+          promptArgs: OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS,
+          attachBackgroundServer: false,
+        }
+      : {};
     const session = await this.cliManager.startPrompt(
       profile.id,
       prompt,
@@ -658,12 +635,13 @@ export class CommitMessageCommand {
       [
         'commitMessage',
         agentMode.id,
-        openCodeModelId ?? modelOption.id,
+        'configured',
         runtimeMode.id,
         permissionMode.id,
         apiProviderRuntime.selectionKey,
       ].join('|'),
-      apiProviderRuntime.env
+      apiProviderRuntime.env,
+      startOptions
     );
 
     if (!session) {
@@ -817,43 +795,6 @@ export class CommitMessageCommand {
     return vscode.workspace
       .getConfiguration('agents-gui.commitMessage')
       .get<CommitMessageLanguageSetting>('language', 'auto');
-  }
-
-  private getStoredOpenCodeModelId(): string | undefined {
-    const models = this.state?.get<Record<string, string>>(MODEL_STATE_KEY, {});
-    const modelId = models?.opencode;
-    if (typeof modelId !== 'string') {
-      return undefined;
-    }
-
-    const normalized = modelId.trim();
-    if (!normalized || normalized === 'configured') {
-      return undefined;
-    }
-
-    if (normalized === 'custom') {
-      const customModels = this.state?.get<Record<string, string>>(CUSTOM_MODEL_STATE_KEY, {});
-      const customModelId = customModels?.opencode;
-      return typeof customModelId === 'string' && customModelId.trim() ? customModelId.trim() : undefined;
-    }
-
-    return normalized;
-  }
-
-  private async getOpenCodeCommitMessageModelId(repositoryRoot: string): Promise<string | undefined> {
-    const storedModelId = this.getStoredOpenCodeModelId();
-    if (storedModelId) {
-      return storedModelId;
-    }
-
-    const availableModels = await this.cliManager
-      .getOpenCodeModelOptions(repositoryRoot)
-      .catch(() => []);
-    const availableModelIds = new Set(availableModels.map((model) => model.id));
-
-    return OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES.find((modelId) =>
-      availableModelIds.has(modelId)
-    );
   }
 
   private getMaxDiffChars(): number {

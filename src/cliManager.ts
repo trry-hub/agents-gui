@@ -72,6 +72,7 @@ interface ResolvedBackgroundServer {
 
 interface StartPromptOptions {
   attachBackgroundServer?: boolean;
+  promptArgs?: string[];
 }
 
 export class CliManager {
@@ -139,10 +140,11 @@ export class CliManager {
     const backgroundAttachArgs = options.attachBackgroundServer === false
       ? []
       : await this.getBackgroundAttachArgs(profile, command, cwd, env);
+    const promptArgs = options.promptArgs ?? profile.promptArgs;
     const args =
       profile.inputMode === 'argument' && initialInput
-        ? [...profile.promptArgs, ...backgroundAttachArgs, ...agentArgs, initialInput]
-        : [...profile.promptArgs, ...backgroundAttachArgs, ...agentArgs];
+        ? [...promptArgs, ...backgroundAttachArgs, ...agentArgs, initialInput]
+        : [...promptArgs, ...backgroundAttachArgs, ...agentArgs];
     const onOutput = new vscode.EventEmitter<string>();
     const onStderr = new vscode.EventEmitter<string>();
     const onError = new vscode.EventEmitter<string>();

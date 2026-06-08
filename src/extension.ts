@@ -14,7 +14,7 @@ export function activate(context: vscode.ExtensionContext) {
   const cliManager = new CliManager();
   const agentRuntime = new CliAgentRuntime(cliManager);
   const openCodeCapability = new CliOpenCodeAgentCapability(cliManager);
-  const commitMessageCommand = new CommitMessageCommand(cliManager, context.globalState);
+  const commitMessageCommand = new CommitMessageCommand(cliManager);
   let sidebarProvider: SidebarProvider | undefined;
 
   const getSidebarProvider = (showWarning = true): SidebarProvider | undefined => {

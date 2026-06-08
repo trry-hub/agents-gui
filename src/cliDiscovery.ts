@@ -67,14 +67,15 @@ export class CliDiscovery {
             };
           }
           if (discoveredModels.length > 0) {
-            const modelOptions = mergeOpenCodeModelOptions(profile.modelOptions ?? [], discoveredModels);
+            const modelOptions = mergeOpenCodeModelOptions(
+              profile.modelOptions ?? [],
+              discoveredModels,
+              discovery.defaultModelId
+            );
             profile = {
               ...profile,
               modelOptions,
-              defaultModel: preferredOpenCodeDefaultModel(
-                modelOptions,
-                discovery.defaultModelId ?? profile.defaultModel
-              ),
+              defaultModel: 'configured',
             };
           }
         }
@@ -512,22 +513,13 @@ function mergeOpenCodeAgentModes(...groups: CliAgentMode[][]): CliAgentMode[] {
   return merged;
 }
 
-function preferredOpenCodeDefaultModel(options: CliModelOption[], fallback: string | undefined): string {
-  const selectableOptions = options.filter((option) => !option.disabled && !option.actionOnly);
-  return (
-    selectableOptions.find((option) => option.id === fallback)?.id ??
-    selectableOptions[0]?.id ??
-    fallback ??
-    'configured'
-  );
-}
-
 function mergeOpenCodeModelOptions(
   baseOptions: CliModelOption[],
-  discoveredOptions: CliModelOption[]
+  discoveredOptions: CliModelOption[],
+  configuredModelId?: string
 ): CliModelOption[] {
   const baseVisibleOptions = discoveredOptions.length > 0
-    ? baseOptions.filter((option) => option.id !== 'default' && option.id !== 'configured')
+    ? baseOptions.filter((option) => option.id !== 'default')
     : baseOptions;
   const defaultOptions = baseVisibleOptions.filter((option) => !option.custom);
   const customOptions = baseVisibleOptions.filter((option) => option.custom);
@@ -540,10 +532,27 @@ function mergeOpenCodeModelOptions(
     }
 
     seen.add(option.id);
-    merged.push(option);
+    merged.push(decorateOpenCodeConfiguredModelOption(option, configuredModelId));
   }
 
   return merged;
+}
+
+function decorateOpenCodeConfiguredModelOption(
+  option: CliModelOption,
+  configuredModelId: string | undefined
+): CliModelOption {
+  if (option.id !== 'configured' || !configuredModelId) {
+    return option;
+  }
+
+  const [, ...modelParts] = configuredModelId.split('/');
+  const summaryLabel = modelParts.join('/') || configuredModelId;
+  return {
+    ...option,
+    summaryLabel,
+    description: `${option.description} Current OpenCode configured model: ${configuredModelId}.`,
+  };
 }
 
 function normalizeCommandVersionOutput(output: string): string | undefined {

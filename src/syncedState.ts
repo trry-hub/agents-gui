@@ -1,6 +1,5 @@
 export const LAST_PROVIDER_STATE_KEY = 'agents-gui.lastProviderId';
 export const AGENT_MODE_STATE_KEY = 'agents-gui.agentModeByProvider';
-export const MODEL_STATE_KEY = 'agents-gui.modelByProvider';
 export const RECENT_MODEL_STATE_KEY = 'agents-gui.recentModelByProvider';
 export const FAVORITE_MODEL_STATE_KEY = 'agents-gui.favoriteModelByProvider';
 export const DISABLED_MCP_STATE_KEY = 'agents-gui.disabledMcpByProvider';
@@ -14,7 +13,6 @@ export const TASK_BOARD_DISMISSED_STATE_KEY = 'agents-gui.taskBoardDismissed';
 export const SYNCED_GLOBAL_STATE_KEYS = [
   LAST_PROVIDER_STATE_KEY,
   AGENT_MODE_STATE_KEY,
-  MODEL_STATE_KEY,
   RECENT_MODEL_STATE_KEY,
   FAVORITE_MODEL_STATE_KEY,
   DISABLED_MCP_STATE_KEY,

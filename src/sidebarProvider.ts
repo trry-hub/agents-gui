@@ -61,7 +61,6 @@ import {
   DISABLED_MCP_STATE_KEY,
   FAVORITE_MODEL_STATE_KEY,
   LAST_PROVIDER_STATE_KEY,
-  MODEL_STATE_KEY,
   PERMISSION_STATE_KEY,
   RECENT_MODEL_STATE_KEY,
   RUNTIME_STATE_KEY,
@@ -401,7 +400,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       defaultProviderId,
       activeProviderId: storedProviderId,
       activeAgentModeByProvider: this.getStoredAgentModeState(),
-      activeModelByProvider: this.getStoredModelState(),
       recentModelByProvider: this.getStoredStringRecord(RECENT_MODEL_STATE_KEY),
       favoriteModelByProvider: this.getStoredStringRecord(FAVORITE_MODEL_STATE_KEY),
       disabledMcpByProvider: this.getStoredStringArrayRecord(DISABLED_MCP_STATE_KEY),
@@ -1208,7 +1206,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const payload = message as {
       activeProviderId?: unknown;
       activeAgentModeByProvider?: unknown;
-      activeModelByProvider?: unknown;
       recentModelByProvider?: unknown;
       favoriteModelByProvider?: unknown;
       disabledMcpByProvider?: unknown;
@@ -1228,10 +1225,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.state.update(
       AGENT_MODE_STATE_KEY,
       this.normalizeAgentModeState(payload.activeAgentModeByProvider)
-    );
-    await this.state.update(
-      MODEL_STATE_KEY,
-      this.normalizeModelState(payload.activeModelByProvider)
     );
     await this.state.update(RECENT_MODEL_STATE_KEY, normalizeStringRecord(payload.recentModelByProvider));
     await this.state.update(FAVORITE_MODEL_STATE_KEY, normalizeStringRecord(payload.favoriteModelByProvider));
@@ -1263,10 +1256,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return result;
   }
 
-  private getStoredModelState(): Record<string, string> {
-    return this.normalizeModelState(this.state?.get<Record<string, string>>(MODEL_STATE_KEY, {}));
-  }
-
   private getStoredStringRecord(key: string): Record<string, string> {
     return normalizeStringRecord(this.state?.get<Record<string, string>>(key, {}));
   }
@@ -1277,25 +1266,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private getStoredContextOptions(): Partial<AssistantContextOptions> {
     return normalizeContextOptions(this.state?.get<Partial<AssistantContextOptions>>(CONTEXT_OPTIONS_STATE_KEY, {}));
-  }
-
-  private normalizeModelState(value: unknown): Record<string, string> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return {};
-    }
-
-    const result: Record<string, string> = {};
-    for (const [providerId, modelId] of Object.entries(value)) {
-      if (typeof providerId !== 'string' || typeof modelId !== 'string') {
-        continue;
-      }
-      const profile = this.profilesById.get(providerId) ?? getCliProfile(providerId);
-      const model = profile?.modelOptions?.find((item) => item.id === modelId && !item.disabled);
-      if (model) {
-        result[providerId] = modelId;
-      }
-    }
-    return result;
   }
 
   private resolveCliId(message: AssistantWebviewRequest): string {

@@ -601,22 +601,25 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(openCodeClientSource, /parseOpenCodeProviderModels\(payload\)/);
   assert.match(discoverySource, /\['models'\]/);
   assert.match(discoverySource, /opencode-models/);
-  assert.match(discoverySource, /preferredOpenCodeDefaultModel/);
-  assert.match(discoverySource, /option\.id !== 'default' && option\.id !== 'configured'/);
+  assert.match(discoverySource, /defaultModel: 'configured'/);
+  assert.match(discoverySource, /decorateOpenCodeConfiguredModelOption/);
+  assert.match(discoverySource, /option\.id !== 'default'/);
   assert.match(source, /private backgroundServers = new Map/);
   assert.match(source, /private readonly processRunner = new CliProcessRunner/);
   assert.match(source, /attachBackgroundServer\?: boolean/);
+  assert.match(source, /promptArgs\?: string\[\]/);
   assert.match(
     source,
     /const backgroundAttachArgs = options\.attachBackgroundServer === false\s*\?\s*\[\]\s*:\s*await this\.getBackgroundAttachArgs/s
   );
+  assert.match(source, /const promptArgs = options\.promptArgs \?\? profile\.promptArgs/);
   assert.match(
     source,
     /const eventStreamUrl = options\.attachBackgroundServer === false\s*\?\s*undefined\s*:\s*this\.getOpenCodeEventStreamUrl/s
   );
   assert.match(
     source,
-    /\[\.\.\.profile\.promptArgs,\s*\.\.\.backgroundAttachArgs,\s*\.\.\.agentArgs,\s*initialInput\]/s
+    /\[\.\.\.promptArgs,\s*\.\.\.backgroundAttachArgs,\s*\.\.\.agentArgs,\s*initialInput\]/s
   );
   assert.match(source, /resolveBackgroundServerCandidates/);
   assert.match(source, /expandBackgroundServerArg/);
@@ -797,8 +800,10 @@ test('CLI profiles expose provider model, runtime, and permission option args', 
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const codex = getCliProfile('codex');
 
-  assert.equal(codex.defaultModel, 'gpt-5.4-mini');
+  assert.equal(codex.defaultModel, 'configured');
   assert.equal(codex.modelOptions.find((option) => option.id === 'default'), undefined);
+  assert.equal(getCliModelOption(codex).id, 'configured');
+  assert.equal(getCliModelOption(codex).args, undefined);
   assert.equal(codex.customModelArgPrefix.join(' '), '--model');
   assert.deepEqual(getCliModelOption(codex, 'gpt-5.4').args, ['--model', 'gpt-5.4']);
   assert.deepEqual(getCliModelOption(codex, 'custom').args, undefined);
@@ -3390,6 +3395,7 @@ test('agent mode select is persisted per provider', () => {
   assert.match(script, /function schedulePersistUserSelection\(\)/);
   assert.match(script, /command: 'saveSelectionState'/);
   assert.match(script, /activeProviderId: activeId/);
+  assert.doesNotMatch(script, /activeModelByProvider,/);
   assert.match(script, /recentModelByProvider,/);
   assert.match(script, /favoriteModelByProvider,/);
   assert.match(script, /disabledMcpByProvider,/);

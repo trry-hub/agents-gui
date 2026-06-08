@@ -49,18 +49,16 @@ export function truncateCommitDiff(
 export function buildCommitMessagePrompt(request: CommitMessagePromptRequest): string {
   const languageInstruction =
     request.language === 'zh-CN'
-      ? 'Generate the commit message in Simplified Chinese, but keep the Conventional Commits type and optional scope in English. For Simplified Chinese output, the summary after the colon must be Simplified Chinese.'
-      : 'Generate the commit message in English.';
+      ? 'Language: Simplified Chinese summary after the colon; keep the Conventional Commits type and optional scope in English.'
+      : 'Language: English.';
   const truncationInstruction = request.truncated
-    ? 'The staged diff was truncated. Generate the best commit message from the visible staged diff only.'
+    ? 'The staged diff was truncated; use only the visible staged diff.'
     : 'The staged diff is complete.';
   const inputMessage = request.inputMessage?.trim();
   const inputContext = inputMessage
     ? [
         '',
-        'Existing Source Control input:',
-        'Use this input as a user-provided draft or intent, including format or style instruction. The staged diff remains the source of truth; preserve useful scope, wording, or style only when it does not contradict the staged diff.',
-        'If the input asks for emoji, keep the Conventional Commits type at the start and put the emoji inside the summary after the colon.',
+        'Existing Source Control input (draft/style only, not change evidence):',
         '```text',
         escapePromptFence(inputMessage),
         '```',
@@ -68,22 +66,13 @@ export function buildCommitMessagePrompt(request: CommitMessagePromptRequest): s
     : [];
 
   return [
-    'You are generating a Git commit message for VS Code Source Control.',
+    'Generate a Git commit message for VS Code Source Control.',
     'Only use the staged Git diff below as the source of truth. Do not mention unstaged or untracked changes.',
     languageInstruction,
     truncationInstruction,
-    '',
-    'Rules:',
-    '- Output only the commit message. Do not wrap it in Markdown fences.',
-    '- The first line must be a Conventional Commits subject: type(optional-scope): summary.',
-    '- Use exactly one of these formats: a single subject line, or a subject line, one blank line, then body.',
-    '- Use one concise subject line when possible.',
-    '- Add a body only when the staged diff contains multiple meaningful changes.',
-    '- When adding a body, put exactly one empty line between the subject and the body.',
-    '- Keep the body to at most two short lines; each line must describe a concrete staged change.',
-    '- Do not output analysis, reasoning, rationale, or explanations.',
-    '- Do not invent issue numbers, branch names, tests, or unstaged behavior.',
-    '- If Existing Source Control input is provided, treat it as draft wording or user intent, not as extra change evidence.',
+    'Output only a Conventional Commits message: type(optional-scope): summary.',
+    'Use one subject line when possible; add a body only for multiple meaningful staged changes.',
+    'No Markdown, reasoning, issue numbers, branch names, tests, or invented behavior.',
     ...inputContext,
     '',
     'Staged Git diff:',
@@ -121,12 +110,7 @@ export function cleanGeneratedCommitMessage(
     .join('\n')
     .trim();
 
-  return normalizeCommitMessageFormat(
-    applyInputPreferences(
-      enforceCommitMessageLanguage(stripTrailingExplanation(selected), options),
-      options
-    )
-  );
+  return normalizeCommitMessageFormat(stripTrailingExplanation(selected));
 }
 
 function extractFirstFence(text: string): string | undefined {
@@ -194,197 +178,4 @@ function normalizeCommitMessageFormat(message: string): string {
   }
 
   return [subject, '', body.replace(/\n{3,}/g, '\n\n')].join('\n');
-}
-
-function enforceCommitMessageLanguage(
-  message: string,
-  options: CleanCommitMessageOptions
-): string {
-  if (options.language !== 'zh-CN') {
-    return message;
-  }
-
-  const firstLine = message.split('\n')[0] ?? '';
-  const summary = conventionalSummary(firstLine);
-  if (summary && containsCjk(summary)) {
-    return message;
-  }
-
-  return buildCommitMessageFallback(options.diff, options.language, firstLine);
-}
-
-function conventionalSummary(line: string): string | undefined {
-  return /^[a-z]+(?:\([^)]+\))?!?:\s+(.+)$/.exec(line.trim())?.[1];
-}
-
-function containsCjk(text: string): boolean {
-  return /[\u3400-\u9FFF]/.test(text);
-}
-
-function buildCommitMessageFallback(
-  diff: string | undefined,
-  language: CommitMessageLanguage | undefined,
-  candidateSubject: string
-): string {
-  if (!diff) {
-    return '';
-  }
-
-  const file = changedFiles(diff)[0];
-  if (!file) {
-    return '';
-  }
-
-  const scope = conventionalScope(candidateSubject) ?? inferCommitScope(file);
-  const displayName = displayFileName(file);
-  const change = classifyDiffChange(diff);
-  if (change === 'addedBlankLines') {
-    return language === 'zh-CN'
-      ? `chore(${scope}): 在 ${displayName} 末尾添加空行`
-      : `chore(${scope}): add trailing blank lines to ${displayName}`;
-  }
-
-  return language === 'zh-CN'
-    ? `chore(${scope}): 更新 ${displayName}`
-    : `chore(${scope}): update ${displayName}`;
-}
-
-function applyInputPreferences(message: string, options: CleanCommitMessageOptions): string {
-  if (!message || !inputRequestsEmoji(options.inputMessage)) {
-    return message;
-  }
-
-  return ensureSubjectEmoji(message);
-}
-
-function inputRequestsEmoji(inputMessage: string | undefined): boolean {
-  if (!inputMessage) {
-    return false;
-  }
-
-  const input = inputMessage.trim();
-  if (!input) {
-    return false;
-  }
-
-  if (/(?:不要|不用|不需要|无需|without|no)\s*.*(?:emoji|gitmoji|表情|图标)/i.test(input)) {
-    return false;
-  }
-
-  return /(?:emoji|gitmoji|表情|表情图标|带上.*图标|带.*表情)/i.test(input);
-}
-
-function ensureSubjectEmoji(message: string): string {
-  const lines = message.split('\n');
-  const subject = lines[0] ?? '';
-  if (!subject || containsEmoji(subject)) {
-    return message;
-  }
-
-  const match = /^([a-z]+(?:\([^)]+\))?!?:\s+)(.+)$/.exec(subject.trim());
-  if (!match) {
-    return message;
-  }
-
-  lines[0] = `${match[1]}${emojiForCommitType(match[1])} ${match[2].trimStart()}`;
-  return lines.join('\n');
-}
-
-function emojiForCommitType(prefix: string): string {
-  const type = /^([a-z]+)/.exec(prefix)?.[1] ?? '';
-  const emojiByType: Record<string, string> = {
-    feat: '✨',
-    fix: '🛠️',
-    docs: '📝',
-    style: '💄',
-    refactor: '♻️',
-    perf: '⚡',
-    test: '✅',
-    build: '🏗️',
-    ci: '💚',
-    chore: '🔧',
-    revert: '⏪',
-  };
-
-  return emojiByType[type] ?? '✨';
-}
-
-function containsEmoji(text: string): boolean {
-  return /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text);
-}
-
-function changedFiles(diff: string): string[] {
-  const files: string[] = [];
-  const pushFile = (file: string | undefined) => {
-    if (!file || file === '/dev/null' || files.includes(file)) {
-      return;
-    }
-
-    files.push(file);
-  };
-
-  for (const line of diff.split('\n')) {
-    const trimmed = line.trim();
-    const gitMatch = /^diff --git a\/(.+?) b\/(.+)$/.exec(trimmed);
-    if (gitMatch) {
-      pushFile(gitMatch[2]);
-      continue;
-    }
-
-    const plusMatch = /^\+\+\+\s+(?:b\/)?(.+)$/.exec(trimmed);
-    if (plusMatch) {
-      pushFile(plusMatch[1]);
-      continue;
-    }
-
-    const indexMatch = /^Index:\s+(.+)$/.exec(trimmed);
-    if (indexMatch) {
-      pushFile(indexMatch[1]);
-    }
-  }
-
-  return files;
-}
-
-
-function conventionalScope(line: string): string | undefined {
-  return /^[a-z]+\(([^)]+)\)!?:\s+\S/.exec(line.trim())?.[1];
-}
-
-function inferCommitScope(file: string): string {
-  const normalized = file.replace(/\\/g, '/');
-  const base = normalized.split('/').pop() ?? normalized;
-  if (/^\.?env(?:\.|$)/.test(base)) {
-    return 'env';
-  }
-
-  const directory = normalized.split('/').filter(Boolean)[0];
-  return sanitizeScope(directory || base.replace(/\.[^.]+$/, '')) || 'misc';
-}
-
-function sanitizeScope(scope: string): string {
-  return scope.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
-function displayFileName(file: string): string {
-  const normalized = file.replace(/\\/g, '/');
-  return normalized.split('/').pop() || normalized;
-}
-
-function classifyDiffChange(diff: string): 'addedBlankLines' | 'updated' {
-  const changes = diff
-    .split('\n')
-    .filter((line) => /^[+-]/.test(line) && !line.startsWith('+++') && !line.startsWith('---'));
-  const additions = changes.filter((line) => line.startsWith('+'));
-  const removals = changes.filter((line) => line.startsWith('-'));
-
-  if (
-    additions.length > 0 &&
-    removals.length === 0 &&
-    changes.every((line) => line.slice(1).trim() === '')
-  ) {
-    return 'addedBlankLines';
-  }
-
-  return 'updated';
 }

@@ -7,6 +7,8 @@
 - 优化提交信息生成的 OpenCode 模型选择，忽略 `configured` 占位值并支持自定义模型回填。
 - 让提交信息生成在当前 CLI 失败后继续尝试其他已安装 CLI，提升可用性。
 - 将 OpenCode 的提交信息生成切回标准 `run` 路径，避开 `prompt_async` 的 `session_message.seq` 写库错误。
+- OpenCode 提交信息生成默认尊重自身 configured 模型，关闭 thinking 输出，并绕过后台 attach server。
+- 提交信息生成尊重插件里的 CLI 设置；所选 CLI 使用本地 CLI 配置的模型，不再注入 GUI 侧模型参数。
 
 ## v0.0.8 - 2026-06-07
 

@@ -26,15 +26,14 @@ test('buildCommitMessagePrompt requires staged-only commit messages in Chinese',
   });
 
   assert.match(prompt, /Only use the staged Git diff/);
-  assert.match(prompt, /Generate the commit message in Simplified Chinese/);
-  assert.match(prompt, /The first line must be a Conventional Commits subject/);
-  assert.match(prompt, /Use exactly one of these formats/);
-  assert.match(prompt, /subject line, one blank line, then body/);
+  assert.match(prompt, /Language: Simplified Chinese summary after the colon/);
+  assert.match(prompt, /Output only a Conventional Commits message/);
+  assert.match(prompt, /Use one subject line when possible/);
   assert.doesNotMatch(prompt, /Always include a scope in parentheses/);
-  assert.match(prompt, /For Simplified Chinese output, the summary after the colon must be Simplified Chinese/);
-  assert.match(prompt, /Do not output analysis, reasoning, rationale, or explanations/);
+  assert.match(prompt, /No Markdown, reasoning/);
   assert.match(prompt, /Do not mention unstaged or untracked changes/);
   assert.match(prompt, /diff --git a\/src\/a\.ts b\/src\/a\.ts/);
+  assert.ok(prompt.length < 800);
 });
 
 test('buildCommitMessagePrompt calls out truncated staged diffs', () => {
@@ -44,7 +43,7 @@ test('buildCommitMessagePrompt calls out truncated staged diffs', () => {
     truncated: true,
   });
 
-  assert.match(prompt, /The staged diff was truncated/);
+  assert.match(prompt, /The staged diff was truncated; use only the visible staged diff/);
 });
 
 test('buildCommitMessagePrompt carries existing SCM input as user draft context', () => {
@@ -55,11 +54,9 @@ test('buildCommitMessagePrompt carries existing SCM input as user draft context'
     inputMessage: 'fix(env): clarify env sample',
   });
 
-  assert.match(prompt, /Existing Source Control input/);
+  assert.match(prompt, /Existing Source Control input \(draft\/style only, not change evidence\)/);
   assert.match(prompt, /fix\(env\): clarify env sample/);
-  assert.match(prompt, /Use this input as a user-provided draft or intent/);
-  assert.match(prompt, /format or style instruction/);
-  assert.match(prompt, /staged diff remains the source of truth/);
+  assert.match(prompt, /Only use the staged Git diff/);
 });
 
 test('cleanGeneratedCommitMessage strips markdown fences and explanation', () => {
@@ -126,7 +123,7 @@ test('cleanGeneratedCommitMessage extracts an embedded conventional subject afte
   assert.equal(message, 'chore(pc): 在 .env.dev 末尾添加空行');
 });
 
-test('cleanGeneratedCommitMessage rewrites English summaries to Chinese fallback for zh locale', () => {
+test('cleanGeneratedCommitMessage preserves CLI output without language or emoji rewrites', () => {
   const diff = [
     'diff --git a/.env.dev b/.env.dev',
     'index 1111111..2222222 100644',
@@ -146,7 +143,8 @@ test('cleanGeneratedCommitMessage rewrites English summaries to Chinese fallback
     { language: 'zh-CN', diff }
   );
 
-  assert.equal(message, 'chore(env): 在 .env.dev 末尾添加空行');
+  assert.equal(message, 'chore(env): add trailing newlines to .env.dev');
+  assert.doesNotMatch(message, /更新|🔧/);
 });
 
 test('cleanGeneratedCommitMessage keeps a valid conventional subject when scope is omitted', () => {
@@ -186,7 +184,7 @@ test('cleanGeneratedCommitMessage does not force scope from non-git diff headers
   assert.equal(message, 'chore: 在 .env.dev 文件末尾添加空行');
 });
 
-test('cleanGeneratedCommitMessage applies emoji style requested by SCM input', () => {
+test('cleanGeneratedCommitMessage preserves CLI output even when SCM input asks for emoji', () => {
   const diff = [
     'diff --git a/.env.dev b/.env.dev',
     'index 1111111..2222222 100644',
@@ -198,13 +196,13 @@ test('cleanGeneratedCommitMessage applies emoji style requested by SCM input', (
     '+',
   ].join('\n');
 
-  const message = cleanGeneratedCommitMessage('chore(env): 在 .env.dev 末尾添加空行', {
+  const message = cleanGeneratedCommitMessage('chore(env): add trailing newlines to .env.dev', {
     language: 'zh-CN',
     diff,
     inputMessage: '要带上表情图标',
   });
 
-  assert.equal(message, 'chore(env): 🔧 在 .env.dev 末尾添加空行');
+  assert.equal(message, 'chore(env): add trailing newlines to .env.dev');
 });
 
 test('truncateCommitDiff keeps staged diff under the configured limit', () => {
@@ -296,12 +294,24 @@ test('commit message command uses staged git diff and writes to repository input
   assert.doesNotMatch(source, /session\.onError\.event/);
   assert.doesNotMatch(source, /session\.onEnd\.event/);
   assert.match(source, /profile\.id === 'opencode'/);
-  assert.match(source, /const openCodeModelId = profile\.id === 'opencode'\s*\?\s*await this\.getOpenCodeCommitMessageModelId\(repositoryRoot\)\s*:\s*undefined;/s);
-  assert.match(source, /OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES/);
-  assert.match(source, /const optionArgs = buildCliOptionArgs\(profile, \{\s*model: profile\.id === 'opencode' && openCodeModelId \? 'custom' : modelOption\.id,\s*customModel: openCodeModelId,/s);
-  assert.match(source, /openCodeModelId \?\? modelOption\.id/);
+  assert.doesNotMatch(source, /openCodeModelId/);
+  assert.doesNotMatch(source, /OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES/);
+  assert.doesNotMatch(source, /getOpenCodeModelOptions\(repositoryRoot\)/);
+  assert.match(source, /OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS = \['run', '--format', 'json'\]/);
+  assert.doesNotMatch(source, /OPENCODE_COMMIT_MESSAGE_OPENAI_VARIANT_ARGS/);
+  assert.doesNotMatch(source, /buildCliOptionArgs\(profile/);
+  assert.match(source, /const optionArgs = \[\s*\.\.\.\(runtimeMode\.args \?\? \[\]\),\s*\.\.\.\(permissionMode\.args \?\? \[\]\),\s*\];/s);
+  assert.match(source, /\[\.\.\.optionArgs,\s*\.\.\.\(agentMode\.args \?\? \[\]\)\]/);
+  assert.match(
+    source,
+    /const startOptions = profile\.id === 'opencode'\s*\?\s*\{\s*promptArgs: OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS,\s*attachBackgroundServer: false,\s*\}\s*:\s*\{\};/s
+  );
+  assert.match(source, /'configured',\s*runtimeMode\.id,/s);
   assert.match(source, /const session = await this\.cliManager\.startPrompt\(/);
+  assert.match(source, /apiProviderRuntime\.env,\s*startOptions\s*\)/s);
   assert.doesNotMatch(source, /runOpenCodePromptViaServer\(/);
+  assert.doesNotMatch(source, /getOpenCodeCommitMessageModelId/);
+  assert.doesNotMatch(source, /getOpenCodeCommitMessageArgs/);
   assert.match(source, /private cleanCommitMessageOutput\(\s*output: string,\s*language: CommitMessageLanguage,\s*diff: string/s);
   assert.doesNotMatch(source, /resolveInputValue/);
   assert.doesNotMatch(source, /existingMessage/);
@@ -329,13 +339,11 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /showQuickPick\(providerItems/);
   assert.match(source, /commitMessage'\)\.update\(\s*'provider'/);
   assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);
+  assert.doesNotMatch(source, /FOLLOW_DEFAULT_COMMIT_MESSAGE_PROVIDER/);
+  assert.match(source, /DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default'/);
   assert.match(source, /clipboard\.writeText\(preferred\.installHint\)/);
-  assert.match(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
-  assert.match(source, /this\.state\?\.get<Record<string, string>>\(MODEL_STATE_KEY/);
-  assert.match(source, /CUSTOM_MODEL_STATE_KEY/);
-  assert.match(source, /normalized === 'configured'/);
-  assert.match(source, /normalized === 'custom'/);
-  assert.match(source, /openai\/gpt-5\.4-mini-fast/);
+  assert.doesNotMatch(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
+  assert.doesNotMatch(source, /CUSTOM_MODEL_STATE_KEY/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui\.commitMessageGenerating'/);
   assert.match(source, /STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui\.commitMessageStagedRoots'/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui\.commitMessageGeneratingRoots'/);
@@ -387,17 +395,21 @@ test('OpenCode server commit generation waits for completed text parts only', ()
   assert.doesNotMatch(source, /\.map\(\(part\) => this\.pickString\(this\.objectRecord\(part\)\.text\) \?\? ''\)/);
 });
 
-test('sidebar persists the selected model so SCM commit generation can reuse it', () => {
+test('sidebar does not persist active model selection as its own model config', () => {
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const mediaSource = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
+  const protocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
 
-  assert.match(syncedStateSource, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
-  assert.match(sidebarSource, /MODEL_STATE_KEY,\n/);
-  assert.match(sidebarSource, /activeModelByProvider: this\.getStoredModelState\(\)/);
-  assert.match(sidebarSource, /this\.state\.update\(\s*MODEL_STATE_KEY,\s*this\.normalizeModelState\(payload\.activeModelByProvider\)/s);
-  assert.match(mediaSource, /activeModelByProvider,\s*recentModelByProvider,/);
-  assert.match(mediaSource, /activeModelByProvider = hasAppliedPersistentSelection/);
+  assert.doesNotMatch(syncedStateSource, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
+  assert.doesNotMatch(protocolSource, /activeModelByProvider\?:/);
+  assert.doesNotMatch(sidebarSource, /^  MODEL_STATE_KEY,$/m);
+  assert.doesNotMatch(sidebarSource, /this\.state\.update\(\s*MODEL_STATE_KEY,/s);
+  assert.doesNotMatch(sidebarSource, /activeModelByProvider: this\.getStoredModelState\(\)/);
+  assert.doesNotMatch(sidebarSource, /normalizeModelState\(payload\.activeModelByProvider\)/);
+  assert.match(mediaSource, /let activeModelByProvider = \{\};/);
+  assert.match(mediaSource, /activeModelByProvider = \{\};/);
+  assert.doesNotMatch(mediaSource, /activeModelByProvider,\s*recentModelByProvider,/);
   assert.match(mediaSource, /function persist\(\)[\s\S]*vscode\.setState[\s\S]*schedulePersistUserSelection\(\);/);
   assert.match(mediaSource, /modelSelect\.addEventListener\('change'[\s\S]*persistUserSelection\(\);[\s\S]*renderAll\(\);/);
 });
