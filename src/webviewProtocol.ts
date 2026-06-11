@@ -10,6 +10,20 @@ import type { CliProfile } from './cliProfiles';
 
 export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | string;
 
+export interface SetupCliProfile {
+  id: string;
+  name: string;
+  description: string;
+  installHint: string;
+  installed: boolean;
+  version?: string;
+  icon?: string;
+  webviewIcon?: {
+    light: string;
+    dark: string;
+  };
+}
+
 export type WebviewToHostMessage =
   | ({ command: 'send' | 'quickAction' } & AssistantWebviewRequest)
   | { command: 'openSettings'; section?: SettingsSection }
@@ -46,6 +60,8 @@ export type WebviewToHostMessage =
   | { command: 'openFilePalette' }
   | { command: 'openProviderExtension'; cliId?: string; providerId?: string }
   | { command: 'copyInstallCommand'; installCommand?: string }
+  | { command: 'installCli'; cliId?: string }
+  | { command: 'setOpenCodeModelVariant'; modelId?: string; variant?: string }
   | { command: 'copyMessageText'; text?: string }
   | { command: 'saveSelectionState'; state?: unknown }
   | { command: 'reloadWindow' };
@@ -54,6 +70,7 @@ export type HostToWebviewMessage =
   | ({
       command: 'profiles';
       profiles: CliProfile[];
+      setupProfiles?: SetupCliProfile[];
       defaultProviderId?: string;
       activeProviderId?: string;
       activeAgentModeByProvider?: Record<string, string>;
@@ -67,6 +84,7 @@ export type HostToWebviewMessage =
       claudeTerminalBannerDismissed?: boolean;
       taskBoardDismissed?: boolean;
     } & Record<string, unknown>)
+  | { command: 'refreshStarted' }
   | ({
       command: 'apiProviderSettings';
       settings: ApiProviderSettings;
@@ -84,9 +102,10 @@ export type HostToWebviewMessage =
       sessionId: string;
       text: string;
       contextSummary: AssistantContextSummary;
-      modelId?: string;
-      modelLabel?: string;
-      runtimeId?: string;
+	      modelId?: string;
+	      modelLabel?: string;
+	      modelVariant?: string;
+	      runtimeId?: string;
       runtimeLabel?: string;
       permissionModeId?: string;
       permissionModeLabel?: string;

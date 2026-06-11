@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ApiProviderClient } from './apiProviderClient';
@@ -39,6 +40,7 @@ import {
 import { AssistantContextCollector } from './contextCollector';
 import { buildAssistantPrompt } from './promptBuilder';
 import {
+  filterPromptEchoChunk,
   flushCliOutputBuffer,
   normalizeCliOutput,
   normalizeCliOutputChunk,
@@ -52,7 +54,7 @@ import {
 } from './localization';
 import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
 import { getProviderExtensionBridge } from './providerExtensions';
-import type { HostToWebviewMessage, WebviewToHostMessage } from './webviewProtocol';
+import type { HostToWebviewMessage, SetupCliProfile, WebviewToHostMessage } from './webviewProtocol';
 import {
   AGENT_MODE_STATE_KEY,
   CLAUDE_TERMINAL_BANNER_STATE_KEY,
@@ -98,6 +100,8 @@ interface CommitMessageSettings {
 
 const MAX_IMAGE_ATTACHMENTS = 8;
 const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+const IMAGE_ATTACHMENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_STORED_IMAGE_ATTACHMENTS = 128;
 const DEFAULT_CLI_ID = 'opencode';
 const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
 const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
@@ -114,7 +118,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private pendingRequests: AssistantWebviewRequest[] = [];
   private disposables: vscode.Disposable[] = [];
   private outputBuffers = new Map<string, string>();
+  private promptEchoBuffers = new Map<string, string>();
   private noOutputNoticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private setupTerminals = new Map<string, vscode.Terminal>();
   private openCodeStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private openCodeStatusRefreshAttempts = new Map<string, number>();
   private profilesById = new Map<string, CliProfile>();
@@ -212,6 +218,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'copyInstallCommand':
           await this.copyInstallCommand(message.installCommand);
+          break;
+        case 'installCli':
+          await this.installCli(message.cliId);
+          break;
+        case 'setOpenCodeModelVariant':
+          await this.setOpenCodeModelVariant(message.modelId, message.variant);
           break;
         case 'copyMessageText':
           await this.copyMessageText(message.text);
@@ -332,6 +344,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async refreshProviders(): Promise<void> {
+    await this.postToWebview({ command: 'refreshStarted' });
     await this.sendProfiles();
     await this.sendContextSummary();
     await this.sendHomeAgentSettings();
@@ -397,6 +410,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         vscodeExtension: this.getProviderExtensionStatus(profile.id),
         webviewIcon: this.getProviderIconUris(profile.id),
       })),
+      setupProfiles: profiles.map((profile) => this.toSetupProfile(profile)),
       defaultProviderId,
       activeProviderId: storedProviderId,
       activeAgentModeByProvider: this.getStoredAgentModeState(),
@@ -410,6 +424,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       claudeTerminalBannerDismissed: this.state?.get<boolean>(CLAUDE_TERMINAL_BANNER_STATE_KEY, false),
       taskBoardDismissed: this.state?.get<boolean>(TASK_BOARD_DISMISSED_STATE_KEY, false),
     });
+  }
+
+  private toSetupProfile(profile: CliProfile): SetupCliProfile {
+    return {
+      id: profile.id,
+      name: profile.name,
+      description: profile.description,
+      installHint: profile.installHint,
+      installed: profile.installed,
+      version: profile.version,
+      icon: profile.icon,
+      webviewIcon: this.getProviderIconUris(profile.id),
+    };
   }
 
   private async sendApiProviderSettings(): Promise<void> {
@@ -818,7 +845,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const modelOption = getCliModelOption(profile, message.model);
     const runtimeMode = getCliRuntimeMode(profile, message.runtime);
     const permissionMode = getCliPermissionMode(profile, message.permissionMode);
-    const effectiveModel = effectiveCliModelSelection(modelOption, message.customModel);
+    const effectiveModel = effectiveCliModelSelection(modelOption, message.customModel, message.modelVariant);
     const apiProviderRuntime = resolveApiProviderRuntime(
       this.getApiProviderSettings(),
       cliId,
@@ -870,6 +897,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       runtime: {
         modelId: effectiveModel.id,
         modelLabel: effectiveModel.label,
+        modelVariant: effectiveModel.variant,
         runtimeId: runtimeMode.id,
         runtimeLabel: runtimeMode.summaryLabel || runtimeMode.label,
         permissionModeId: permissionMode.id,
@@ -939,6 +967,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       agentModeLabel: agentMode.label,
       modelId: effectiveModel.id,
       modelLabel: effectiveModel.label,
+      modelVariant: effectiveModel.variant,
       runtimeId: runtimeMode.id,
       runtimeLabel: runtimeMode.summaryLabel || runtimeMode.label,
       permissionModeId: permissionMode.id,
@@ -976,14 +1005,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.outputBuffers.get(session.id) ?? ''
         );
         this.outputBuffers.set(session.id, normalized.buffer);
-        if (!normalized.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
+        const filtered = filterPromptEchoChunk(
+          normalized.text,
+          session.cliId,
+          this.promptEchoBuffers.get(session.id) ?? ''
+        );
+        if (filtered.buffer) {
+          this.promptEchoBuffers.set(session.id, filtered.buffer);
+        } else {
+          this.promptEchoBuffers.delete(session.id);
+        }
+        if (!filtered.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
           return;
         }
 
         this.postToWebview({
           command: 'output',
           cliId: session.cliId,
-          text: normalized.text,
+          text: filtered.text,
           thinking: normalized.thinking,
           activities: normalized.activities,
           status: normalized.status,
@@ -1027,11 +1066,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const buffered = this.outputBuffers.get(session.id);
       const flushed = flushCliOutputBuffer(buffered ?? '', session.cliId);
       this.outputBuffers.delete(session.id);
-      if (flushed) {
+      const filtered = filterPromptEchoChunk(
+        flushed,
+        session.cliId,
+        this.promptEchoBuffers.get(session.id) ?? ''
+      );
+      this.promptEchoBuffers.delete(session.id);
+      if (filtered.text) {
         this.postToWebview({
           command: 'output',
           cliId: session.cliId,
-          text: flushed,
+          text: filtered.text,
           sessionId: session.id,
           openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
           stream: 'stdout',
@@ -1081,6 +1126,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private cleanupSessionState(session: AgentSession): void {
     this.clearNoOutputNoticeTimer(session.id);
     this.outputBuffers.delete(session.id);
+    this.promptEchoBuffers.delete(session.id);
     this.activeSessions.delete(session.cliId);
     this.wiredSessionIds.delete(session.id);
   }
@@ -1189,6 +1235,66 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     vscode.window.showInformationMessage(runtimeT(this.locale, 'notification.installCommandCopied'));
   }
 
+  private async installCli(cliId: unknown): Promise<void> {
+    const profileId = typeof cliId === 'string' ? cliId.trim() : '';
+    const profile = CLI_PROFILES.find((item) => item.id === profileId);
+    const command = profile?.installHint.trim();
+    if (!profile || !command) {
+      vscode.window.showWarningMessage(
+        runtimeT(this.locale, 'error.unknownProvider', { provider: profileId || 'unknown' })
+      );
+      return;
+    }
+
+    let terminal = this.setupTerminals.get(profile.id);
+    if (!terminal || terminal.exitStatus) {
+      terminal = vscode.window.createTerminal({ name: `Agents GUI Setup: ${profile.name}` });
+      this.setupTerminals.set(profile.id, terminal);
+    }
+
+    terminal.show(true);
+    terminal.sendText(command, true);
+    vscode.window.showInformationMessage(runtimeT(this.locale, 'notification.installCommandSent'));
+  }
+
+  private async setOpenCodeModelVariant(modelId: unknown, variant: unknown): Promise<void> {
+    const cleanModelId = typeof modelId === 'string' ? modelId.trim() : '';
+    const cleanVariant = typeof variant === 'string' ? variant.trim() : '';
+    if (
+      !cleanModelId
+      || !cleanModelId.includes('/')
+      || /[\r\n]/.test(cleanModelId)
+      || !cleanVariant
+      || !/^[A-Za-z0-9_.-]+$/.test(cleanVariant)
+    ) {
+      return;
+    }
+
+    const statePath = path.join(os.homedir(), '.local', 'state', 'opencode', 'model.json');
+    const state = await this.readOpenCodeModelStateFile(statePath);
+    const existingVariants = state.variant && typeof state.variant === 'object' && !Array.isArray(state.variant)
+      ? state.variant as Record<string, unknown>
+      : {};
+    state.variant = {
+      ...existingVariants,
+      [cleanModelId]: cleanVariant,
+    };
+
+    await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.promises.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  }
+
+  private async readOpenCodeModelStateFile(statePath: string): Promise<Record<string, unknown>> {
+    try {
+      const parsed = JSON.parse(await fs.promises.readFile(statePath, 'utf8'));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
   private async copyMessageText(messageText: unknown): Promise<void> {
     const text = typeof messageText === 'string' ? messageText.trim() : '';
     if (!text) {
@@ -1245,6 +1351,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const result: Record<string, string> = {};
     for (const [providerId, modeId] of Object.entries(value)) {
       if (typeof providerId !== 'string' || typeof modeId !== 'string') {
+        continue;
+      }
+      if (usesProviderNativeAgentConfig(providerId)) {
         continue;
       }
       const profile = this.profilesById.get(providerId) ?? getCliProfile(providerId);
@@ -1339,6 +1448,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const attachmentDir = vscode.Uri.joinPath(this.attachmentStorageUri, 'pasted-images');
     await vscode.workspace.fs.createDirectory(attachmentDir);
+    await this.pruneImageAttachmentStorage(attachmentDir);
 
     const attachments: AssistantImageAttachment[] = [];
     for (const input of imageInputs) {
@@ -1363,6 +1473,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return attachments;
   }
 
+  private async pruneImageAttachmentStorage(attachmentDir: vscode.Uri): Promise<void> {
+    try {
+      const entries = await vscode.workspace.fs.readDirectory(attachmentDir);
+      const cutoff = Date.now() - IMAGE_ATTACHMENT_RETENTION_MS;
+      const files: Array<{ uri: vscode.Uri; mtime: number }> = [];
+
+      for (const [name, type] of entries) {
+        if (type !== vscode.FileType.File) {
+          continue;
+        }
+
+        const uri = vscode.Uri.joinPath(attachmentDir, name);
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          if (stat.mtime < cutoff) {
+            await vscode.workspace.fs.delete(uri, { useTrash: false });
+            continue;
+          }
+
+          files.push({ uri, mtime: stat.mtime });
+        } catch {
+          // Best-effort cleanup must not block prompt submission.
+        }
+      }
+
+      files.sort((a, b) => b.mtime - a.mtime);
+      for (const stale of files.slice(MAX_STORED_IMAGE_ATTACHMENTS)) {
+        await vscode.workspace.fs.delete(stale.uri, { useTrash: false });
+      }
+    } catch {
+      // Best-effort cleanup must not block prompt submission.
+    }
+  }
+
   private registerDevelopmentWebviewWatcher(): void {
     if (this.extensionMode !== vscode.ExtensionMode.Development) {
       return;
@@ -1370,7 +1514,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const pattern = new vscode.RelativePattern(
       this.extensionUri,
-      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,conversationStore.js,slashCommands.js,openCodeDialogState.js,claudeActions.js}'
+      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,conversationStore.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js}'
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
@@ -1478,6 +1622,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.getWebviewUri(webview, 'media', 'claudeActions.js')
     );
     html = html.replace(
+      /__INLINE_MARKDOWN_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'inlineMarkdown.js')
+    );
+    html = html.replace(
       /__MAIN_JS_URI__/g,
       this.getWebviewUri(webview, 'media', 'main.js')
     );
@@ -1493,6 +1641,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.clearOpenCodeStatusRefreshTimers();
     this.openCodeStatusRefreshAttempts.clear();
     this.outputBuffers.clear();
+    this.promptEchoBuffers.clear();
     for (const [, session] of this.activeSessions) {
       this.agentRuntime.stop(session.id);
     }
@@ -1546,14 +1695,24 @@ function preferredReadOnlyPermission(profile?: CliProfile): string | undefined {
 
 function effectiveCliModelSelection(
   model: CliModelOption,
-  customModel: string | undefined
-): { id: string; label: string } {
+  customModel: string | undefined,
+  modelVariant?: string
+): { id: string; label: string; variant?: string } {
   const customId = model.custom ? String(customModel || '').trim() : '';
-  const id = customId || model.id;
-  const label = model.custom && customId
+  const id = customId || model.configuredModelId || model.id;
+  const variant = sanitizeModelVariant(modelVariant) ?? sanitizeModelVariant(model.variant);
+  const baseLabel = model.custom && customId
     ? customId
     : model.summaryLabel || model.label || id;
-  return { id, label };
+  const label = variant && !baseLabel.includes(`· ${variant}`)
+    ? `${baseLabel} · ${variant}`
+    : baseLabel;
+  return { id, label, ...(variant ? { variant } : {}) };
+}
+
+function sanitizeModelVariant(value: string | undefined): string | undefined {
+  const variant = String(value || '').trim();
+  return /^[A-Za-z0-9_.-]+$/.test(variant) ? variant : undefined;
 }
 
 function isImageAttachmentInput(value: unknown): value is AssistantImageAttachmentInput {
@@ -1615,6 +1774,10 @@ function normalizeContextOptions(value: unknown): Partial<AssistantContextOption
     }
   }
   return result;
+}
+
+function usesProviderNativeAgentConfig(providerId: string): boolean {
+  return providerId === 'opencode';
 }
 
 function decodeImageDataUrl(

@@ -2095,6 +2095,110 @@ textarea:focus {
   text-wrap: pretty;
 }
 
+.cli-setup-state {
+  width: min(100%, 520px);
+  gap: 12px;
+}
+
+.cli-setup-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cli-setup-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--assistant-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--assistant-panel) 92%, transparent);
+  min-width: 0;
+}
+
+.cli-setup-card.is-recommended {
+  border-color: color-mix(in srgb, var(--assistant-accent) 58%, var(--assistant-border));
+  background: color-mix(in srgb, var(--assistant-accent) 11%, var(--assistant-panel));
+}
+
+.cli-setup-card-header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.cli-setup-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--assistant-accent) 12%, var(--vscode-editor-background));
+  color: var(--vscode-foreground);
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.cli-setup-icon img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.cli-setup-heading {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cli-setup-name {
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cli-setup-badge {
+  color: var(--assistant-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.cli-setup-card.is-recommended .cli-setup-badge {
+  color: color-mix(in srgb, var(--assistant-accent) 76%, var(--vscode-foreground));
+  font-weight: 650;
+}
+
+.cli-setup-description {
+  color: var(--assistant-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cli-setup-command {
+  display: block;
+  max-width: 100%;
+  padding: 6px 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--assistant-border) 75%, transparent);
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--vscode-editor-background) 78%, var(--assistant-panel));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cli-setup-actions,
+.cli-setup-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .suggestion-list {
   display: flex;
   flex-wrap: wrap;
@@ -3206,6 +3310,15 @@ textarea:focus {
 
 .md-link:hover {
   text-decoration: underline;
+}
+
+.md-link-disabled {
+  color: inherit;
+  text-decoration: none;
+}
+
+.md-link-disabled:hover {
+  text-decoration: none;
 }
 
 .message-status {
@@ -4424,9 +4537,9 @@ body[data-provider="opencode"] .mode-menu.is-visible {
 body[data-provider="opencode"] .model-menu.is-visible {
   order: 3;
   display: block;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 128px;
+  max-width: none;
 }
 
 body[data-provider="opencode"] .composer-settings-button {
@@ -4474,6 +4587,10 @@ body[data-provider="opencode"] .mode-summary {
   max-width: 94px;
 }
 
+body[data-provider="opencode"] .model-menu .option-summary {
+  max-width: none;
+}
+
 body[data-provider="opencode"] .context-summary {
   width: 24px;
   max-width: 24px;
@@ -4503,6 +4620,13 @@ body[data-provider="opencode"] .context-summary span:not(.chip-prefix) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+body[data-provider="opencode"] #modelSummaryLabel {
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 body[data-provider="opencode"] .option-summary::after,

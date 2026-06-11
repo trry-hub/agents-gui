@@ -138,6 +138,9 @@ function renderRuntimeSelection(request: AssistantPromptRequest): string {
       `- Selected model: ${runtime.modelLabel || runtime.modelId}${runtime.modelId ? ` (${runtime.modelId})` : ''}`
     );
   }
+  if (runtime.modelVariant) {
+    lines.push(`- Reasoning depth: ${runtime.modelVariant}`);
+  }
   if (runtime.runtimeId || runtime.runtimeLabel) {
     lines.push(`- Runtime mode: ${runtime.runtimeLabel || runtime.runtimeId}${runtime.runtimeId ? ` (${runtime.runtimeId})` : ''}`);
   }
@@ -146,7 +149,7 @@ function renderRuntimeSelection(request: AssistantPromptRequest): string {
       `- Permission mode: ${runtime.permissionModeLabel || runtime.permissionModeId}${runtime.permissionModeId ? ` (${runtime.permissionModeId})` : ''}`
     );
   }
-  lines.push('If the user asks which model, agent, runtime, or permission mode is selected, answer from this Agents GUI runtime selection instead of guessing from prior conversation, provider memory, or model self-knowledge.');
+  lines.push('If the user asks which model, reasoning depth, agent, runtime, or permission mode is selected, answer from this Agents GUI runtime selection instead of guessing from prior conversation, provider memory, or model self-knowledge.');
   return lines.join('\n');
 }
 

@@ -52,11 +52,11 @@ test('view title commands are registered before the sidebar provider is construc
 test('refresh providers title action reloads the full sidebar state', () => {
   assert.match(
     extensionSource,
-    /registerCommand\('agents-gui\.refreshProviders', async \(\) => \{[\s\S]*await provider\.refreshProviders\(\);[\s\S]*\}\)/
+    /registerCommand\('agents-gui\.refreshProviders', async \(\) => \{[\s\S]*vscode\.window\.withProgress[\s\S]*notification\.refreshingProviders[\s\S]*provider\.refreshProviders\(\)[\s\S]*\}\)/
   );
   assert.match(
     sidebarSource,
-    /async refreshProviders\(\): Promise<void> \{\s*await this\.sendProfiles\(\);\s*await this\.sendContextSummary\(\);\s*await this\.sendHomeAgentSettings\(\);\s*await this\.sendApiProviderSettings\(\);\s*await this\.sendCommitMessageSettings\(\);\s*\}/s
+    /async refreshProviders\(\): Promise<void> \{\s*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);\s*await this\.sendProfiles\(\);\s*await this\.sendContextSummary\(\);\s*await this\.sendHomeAgentSettings\(\);\s*await this\.sendApiProviderSettings\(\);\s*await this\.sendCommitMessageSettings\(\);\s*\}/s
   );
 });
 

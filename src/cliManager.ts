@@ -378,9 +378,8 @@ export class CliManager {
       }
 
       if (!ownedProcess && await this.waitForTcp(server.host, server.port, 120)) {
-        if (await this.isBackgroundServerAvailable(profile, server, cwd, 900)) {
-          return server.attachArgs;
-        }
+        // Do not attach to stale OpenCode servers started by a previous extension host or another workspace.
+        // Older servers can collapse provider/auth failures into generic "Unexpected server error" messages.
         continue;
       }
 

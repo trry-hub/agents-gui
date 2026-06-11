@@ -55,7 +55,13 @@ export function activate(context: vscode.ExtensionContext) {
       if (!provider) {
         return;
       }
-      await provider.refreshProviders();
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Window,
+          title: runtimeT(locale, 'notification.refreshingProviders'),
+        },
+        () => provider.refreshProviders()
+      );
     })
   );
 

@@ -23,6 +23,9 @@ export interface CliProfileOption {
 
 export interface CliModelOption extends CliProfileOption {
   custom?: boolean;
+  configuredModelId?: string;
+  variant?: string;
+  variantOptions?: string[];
 }
 
 export interface CliRuntimeMode extends CliProfileOption {}
@@ -634,7 +637,7 @@ export const CLI_PROFILES: CliProfile[] = [
         custom: true,
       },
     ],
-    defaultAgentMode: 'configured',
+    defaultAgentMode: 'build',
     env: {
       OPENCODE_DB: '{tmp}/agents-gui-opencode-{cwdHash}.db',
       OMO_DISABLE_POSTHOG: '1',
@@ -642,11 +645,20 @@ export const CLI_PROFILES: CliProfile[] = [
     },
     agentModes: [
       {
-        id: 'configured',
-        label: 'Configured',
-        description: 'OpenCode configured primary agent, used when agent discovery is unavailable.',
+        id: 'build',
+        label: 'build',
+        description: 'OpenCode build mode.',
         instruction:
-          'OpenCode configured agent: use the current provider-native primary agent configured by OpenCode.',
+          'OpenCode build mode: use the provider-native build workflow configured by OpenCode.',
+        args: ['--agent', 'build'],
+      },
+      {
+        id: 'plan',
+        label: 'plan',
+        description: 'OpenCode plan mode.',
+        instruction:
+          'OpenCode plan mode: inspect the workspace and propose a plan before making changes.',
+        args: ['--agent', 'plan'],
       },
     ],
     installHint: 'brew install opencode-ai/tap/opencode',

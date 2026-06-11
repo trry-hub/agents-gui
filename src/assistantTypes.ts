@@ -105,6 +105,7 @@ export interface AssistantPromptRequest {
 export interface AssistantRuntimeSelection {
   modelId?: string;
   modelLabel?: string;
+  modelVariant?: string;
   runtimeId?: string;
   runtimeLabel?: string;
   permissionModeId?: string;
@@ -118,6 +119,7 @@ export interface AssistantWebviewRequest {
   mode?: AssistantMode;
   agentMode?: string;
   model?: string;
+  modelVariant?: string;
   customModel?: string;
   runtime?: string;
   permissionMode?: string;

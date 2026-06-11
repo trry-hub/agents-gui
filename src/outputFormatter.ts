@@ -32,6 +32,11 @@ export interface NormalizedCliOutputChunk {
   activities?: NormalizedCliActivity[];
 }
 
+export interface PromptEchoChunkFilterResult {
+  text: string;
+  buffer: string;
+}
+
 export interface NormalizedCliActivity {
   id?: string;
   kind: 'file' | 'search' | 'command' | 'tool';
@@ -56,7 +61,7 @@ export function normalizeCliOutput(text: string, providerId?: string): string {
   const normalized = normalizeDisplayText(text);
 
   const providerNormalized = normalizeProviderOutput(normalized, providerId);
-  return stripInternalPromptEcho(providerNormalized);
+  return stripInternalPromptEcho(providerNormalized, providerId);
 }
 
 export function normalizeCliOutputChunk(
@@ -94,6 +99,32 @@ export function flushCliOutputBuffer(buffer: string, providerId?: string): strin
         ? normalizeClaudeJsonChunk(`${buffer}\n`)
         : undefined;
   return parsed?.text ?? normalizeCliOutput(buffer, providerId);
+}
+
+export function filterPromptEchoChunk(
+  text: string,
+  providerId?: string,
+  buffer = ''
+): PromptEchoChunkFilterResult {
+  if (providerId !== 'opencode' || !text) {
+    return { text, buffer: '' };
+  }
+
+  const combined = `${buffer}${text}`;
+  const stripped = stripInternalPromptEchoWithState(combined, providerId);
+  if (stripped.pending) {
+    return { text: '', buffer: combined.slice(-16_000) };
+  }
+
+  if (stripped.matched) {
+    return { text: stripped.text, buffer: '' };
+  }
+
+  if (buffer) {
+    return { text: combined, buffer: '' };
+  }
+
+  return { text, buffer: '' };
 }
 
 function normalizeProviderOutput(text: string, providerId?: string): string {
@@ -475,7 +506,28 @@ function renderOpenCodeJsonEventLine(line: string): RenderedOpenCodeJsonEvent | 
 function openCodeErrorMessage(errorOwner: Record<string, unknown>): string | undefined {
   const error = firstObject(errorOwner.error, errorOwner);
   const data = firstObject(error.data);
-  return pickString(data.message, error.message);
+  const message = pickString(data.message, error.message);
+  const responseMessage = openCodeResponseBodyMessage(pickString(data.responseBody, error.responseBody));
+  if (responseMessage && (!message || isGenericOpenCodeServerError(message))) {
+    return responseMessage;
+  }
+
+  return message ?? responseMessage;
+}
+
+function openCodeResponseBodyMessage(responseBody: string | undefined): string | undefined {
+  const record = firstObject(responseBody);
+  if (Object.keys(record).length === 0) {
+    return undefined;
+  }
+
+  const error = firstObject(record.error, record);
+  const data = firstObject(error.data);
+  return pickString(data.message, error.message, record.message, data.code, error.code, record.code);
+}
+
+function isGenericOpenCodeServerError(message: string): boolean {
+  return /^Unexpected server error\. Check server logs for details\.?$/i.test(message.trim());
 }
 
 function openCodeToolActivity(
@@ -777,27 +829,101 @@ function isCodexNoiseLine(line: string): boolean {
   );
 }
 
-function stripInternalPromptEcho(text: string): string {
+function stripInternalPromptEcho(text: string, providerId?: string): string {
+  const stripped = stripInternalPromptEchoWithState(text, providerId);
+  if (stripped.pending || stripped.matched) {
+    return stripped.text;
+  }
+
+  return text;
+}
+
+function stripInternalPromptEchoWithState(
+  text: string,
+  providerId?: string
+): { text: string; matched: boolean; pending: boolean } {
   const firstContentIndex = text.search(/\S/);
   if (firstContentIndex === -1) {
-    return text;
+    return { text, matched: false, pending: false };
+  }
+
+  const candidate = text.slice(firstContentIndex);
+  if (providerId === 'opencode' && isPotentialQuotedOpenCodePromptPrefix(candidate)) {
+    const promptEndIndex = text.indexOf(INTERNAL_PROMPT_END_MARKER, firstContentIndex);
+    if (promptEndIndex === -1) {
+      return { text: '', matched: true, pending: true };
+    }
+
+    return {
+      text: stripPromptBoundary(text.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length)),
+      matched: true,
+      pending: false,
+    };
   }
 
   if (!startsWithInternalPromptEcho(text, firstContentIndex)) {
-    return text;
+    return { text, matched: false, pending: false };
   }
 
   const promptEndIndex = text.indexOf(INTERNAL_PROMPT_END_MARKER, firstContentIndex);
   if (promptEndIndex === -1) {
-    return text;
+    return isIncompleteInternalPromptEcho(candidate, providerId)
+      ? { text: '', matched: true, pending: true }
+      : { text, matched: false, pending: false };
   }
 
-  return stripPromptBoundary(text.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length));
+  return {
+    text: stripPromptBoundary(text.slice(promptEndIndex + INTERNAL_PROMPT_END_MARKER.length)),
+    matched: true,
+    pending: false,
+  };
+}
+
+function isIncompleteInternalPromptEcho(candidate: string, providerId?: string): boolean {
+  if (providerId === 'opencode' && isOpenCodeRuntimePromptEcho(candidate)) {
+    return true;
+  }
+
+  return (
+    candidate.includes('Reply in Chinese (简体中文). Do not mix languages.') ||
+    candidate.includes('Keep the answer concise. Do not inspect the project unless the request needs it.') ||
+    candidate.includes('IDE context, use only if relevant:') ||
+    candidate.includes('Response requirements:')
+  );
 }
 
 function startsWithInternalPromptEcho(text: string, firstContentIndex: number): boolean {
   const candidate = text.slice(firstContentIndex);
-  return INTERNAL_PROMPT_START_MARKERS.some((marker) => candidate.startsWith(marker));
+  return INTERNAL_PROMPT_START_MARKERS.some((marker) => candidate.startsWith(marker)) ||
+    isOpenCodeRuntimePromptEcho(candidate);
+}
+
+function isOpenCodeRuntimePromptEcho(candidate: string): boolean {
+  const runtimeIndex = candidate.indexOf('Runtime selection from Agents GUI:');
+  if (runtimeIndex < 0 || runtimeIndex > 500) {
+    return false;
+  }
+
+  return (
+    candidate.includes('- Provider:') ||
+    candidate.includes('- Agent/mode:') ||
+    candidate.includes('- Selected model:') ||
+    candidate.includes('IDE context, use only if relevant:') ||
+    candidate.includes('Keep the answer concise.')
+  );
+}
+
+function isPotentialQuotedOpenCodePromptPrefix(candidate: string): boolean {
+  const trimmed = candidate.trimStart();
+  if (!/^["'“”]/.test(trimmed)) {
+    return false;
+  }
+
+  if (isOpenCodeRuntimePromptEcho(trimmed)) {
+    return true;
+  }
+
+  return trimmed.length < 500 && !trimmed.includes('\n\n\n');
 }
 
 function stripPromptBoundary(text: string): string {
@@ -805,7 +931,7 @@ function stripPromptBoundary(text: string): string {
 }
 
 function sanitizeThinkingForDisplay(text: string | undefined): string {
-  return stripInternalPromptEcho(normalizeDisplayText(String(text || ''))).trim();
+  return stripInternalPromptEcho(normalizeDisplayText(String(text || '')), 'opencode').trim();
 }
 
 function normalizeDisplayText(text: string): string {

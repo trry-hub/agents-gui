@@ -20,6 +20,7 @@ const {
   getCliRuntimeMode,
 } = require('../.test-dist/cliProfiles.js');
 const {
+  filterPromptEchoChunk,
   flushCliOutputBuffer,
   normalizeCliOutput,
   normalizeCliOutputChunk,
@@ -40,8 +41,10 @@ const {
   parseOpenCodeConfigAgents,
   parseOpenCodeAgentListOutput,
   parseOpenCodeModelsOutput,
+  parseOpenCodeModelState,
   parseOpenCodeModelId,
   parseOpenCodeProviderModels,
+  parseOpenCodeModelMetadata,
 } = require('../.test-dist/opencodeAgents.js');
 const {
   sanitizeApiProviderSettings,
@@ -50,6 +53,7 @@ const {
 } = require('../.test-dist/apiProviders.js');
 const { ApiProviderClient } = require('../.test-dist/apiProviderClient.js');
 const { normalizeMessageText, stripInlineMarkdown } = require('../media/messageText.js');
+const inlineMarkdown = require('../media/inlineMarkdown.js');
 const { extractMessageChoiceLineKeys, extractMessageChoices } = require('../media/messageChoices.js');
 const providerRunState = require('../media/providerRunState.js');
 const conversationStore = require('../media/conversationStore.js');
@@ -286,6 +290,7 @@ test('buildAssistantPrompt tells OpenCode the selected runtime model when provid
     runtime: {
       modelId: 'mimo/mimo-v2.5-pro',
       modelLabel: 'mimo-v2.5-pro',
+      modelVariant: 'high',
       runtimeId: 'default',
       runtimeLabel: 'Default',
       permissionModeId: 'ask',
@@ -301,7 +306,8 @@ test('buildAssistantPrompt tells OpenCode the selected runtime model when provid
   assert.match(prompt, /^你用的什么模型呢/);
   assert.match(prompt, /Runtime selection from Agents GUI:/);
   assert.match(prompt, /Selected model: mimo-v2\.5-pro \(mimo\/mimo-v2\.5-pro\)/);
-  assert.match(prompt, /If the user asks which model, agent, runtime, or permission mode is selected/);
+  assert.match(prompt, /Reasoning depth: high/);
+  assert.match(prompt, /If the user asks which model, reasoning depth, agent, runtime, or permission mode is selected/);
   assert.doesNotMatch(prompt, /No IDE context was attached/);
 });
 
@@ -426,11 +432,12 @@ test('opencode profile uses run command with prompt as argument', () => {
   assert.equal(profile.env?.OMO_SEND_ANONYMOUS_TELEMETRY, '0');
   assert.equal(profile.inputMode, 'argument');
   assert.equal(profile.defaultModel, 'configured');
-  assert.equal(profile.defaultAgentMode, 'configured');
+  assert.equal(profile.defaultAgentMode, 'build');
   assert.equal(profile.modelOptions.find((option) => option.id === 'default'), undefined);
   assert.equal(profile.agentModes.find((mode) => mode.id === 'default'), undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'configured').args, undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'plan'), undefined);
+  assert.equal(profile.agentModes.find((mode) => mode.id === 'configured'), undefined);
+  assert.deepEqual(profile.agentModes.find((mode) => mode.id === 'build')?.args, ['--agent', 'build']);
+  assert.deepEqual(profile.agentModes.find((mode) => mode.id === 'plan')?.args, ['--agent', 'plan']);
 });
 
 test('opencode agent list output is parsed into provider-native agent modes', () => {
@@ -451,6 +458,8 @@ test('opencode agent list output is parsed into provider-native agent modes', ()
   assert.deepEqual(
     modes.map((mode) => [mode.id, mode.label, mode.args, mode.disabled]),
     [
+      ['build', 'build', ['--agent', 'build'], undefined],
+      ['plan', 'plan', ['--agent', 'plan'], undefined],
       ['\u200bSisyphus - Ultraworker', 'Sisyphus - Ultraworker', ['--agent', '\u200bSisyphus - Ultraworker'], undefined],
     ]
   );
@@ -473,6 +482,30 @@ test('opencode models output is parsed into provider-native model options', () =
       ['mimo/mimo-v2.5-pro', 'mimo/mimo-v2.5-pro', 'mimo-v2.5-pro', ['--model', 'mimo/mimo-v2.5-pro']],
     ]
   );
+});
+
+test('opencode model state exposes current model and variant', () => {
+  const state = parseOpenCodeModelState({
+    recent: [
+      { providerID: 'openai', modelID: 'gpt-5.5' },
+      { providerID: 'opencode', modelID: 'deepseek-v4-flash-free' },
+    ],
+    variant: {
+      'openai/gpt-5.5': 'xhigh',
+      'opencode/deepseek-v4-flash-free': 'max',
+    },
+  });
+
+  assert.equal(state.currentModelId, 'openai/gpt-5.5');
+  assert.equal(state.currentVariant, 'xhigh');
+  assert.deepEqual(state.recentModelIds, [
+    'openai/gpt-5.5',
+    'opencode/deepseek-v4-flash-free',
+  ]);
+  assert.deepEqual(state.variants, {
+    'openai/gpt-5.5': 'xhigh',
+    'opencode/deepseek-v4-flash-free': 'max',
+  });
 });
 
 test('opencode model ids split into provider and model for server prompts', () => {
@@ -500,7 +533,12 @@ test('opencode provider payload is parsed into official model options', () => {
         name: 'OpenCode Zen',
         models: {
           'big-pickle': { id: 'big-pickle', name: 'Big Pickle' },
-          'qwen3.6-plus-free': { id: 'qwen3.6-plus-free', name: 'Qwen3.6 Plus Free' },
+          'qwen3.6-plus-free': {
+            id: 'qwen3.6-plus-free',
+            name: 'Qwen3.6 Plus Free',
+            reasoning: true,
+            reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'high', 'xhigh'] }],
+          },
         },
       },
       {
@@ -521,6 +559,50 @@ test('opencode provider payload is parsed into official model options', () => {
       ['mimo/mimo-v2.5-pro', 'MiMo V2.5 Pro', 'mimo-v2.5-pro', ['--model', 'mimo/mimo-v2.5-pro']],
     ]
   );
+  assert.deepEqual(
+    options.find((option) => option.id === 'opencode/qwen3.6-plus-free')?.variantOptions,
+    ['low', 'medium', 'high', 'xhigh']
+  );
+});
+
+test('opencode model metadata exposes per-model reasoning depth options', () => {
+  const metadata = parseOpenCodeModelMetadata({
+    openai: {
+      id: 'openai',
+      models: {
+        'gpt-5.5': {
+          id: 'gpt-5.5',
+          reasoning: true,
+          reasoning_options: [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'xhigh'] }],
+        },
+        'gpt-5.4-mini': {
+          id: 'gpt-5.4-mini',
+          reasoning: false,
+          reasoning_options: [{ type: 'effort', values: ['low'] }],
+        },
+      },
+    },
+    deepseek: {
+      id: 'deepseek',
+      models: {
+        'deepseek-v4-flash': {
+          id: 'deepseek-v4-flash',
+          reasoning: true,
+          reasoning_options: [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max', 'max'] }],
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(metadata['openai/gpt-5.5']?.variantOptions, [
+    'none',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+  ]);
+  assert.equal(metadata['openai/gpt-5.4-mini'], undefined);
+  assert.deepEqual(metadata['deepseek/deepseek-v4-flash']?.variantOptions, ['high', 'max']);
 });
 
 test('opencode server config exposes current primary and custom agents', () => {
@@ -530,6 +612,11 @@ test('opencode server config exposes current primary and custom agents', () => {
     agent: {
       build: { mode: 'subagent', description: 'Implementation helper' },
       plan: { mode: 'subagent' },
+      'nvidia-chat': {
+        mode: 'primary',
+        model: 'nvidia/moonshotai/kimi-k2.6',
+        description: 'NVIDIA proxy chat without OpenCode tool schemas.',
+      },
       '\u200bSisyphus - Ultraworker': {
         mode: 'primary',
         description: 'Powerful AI orchestrator with a very long description that should be truncated before it reaches the UI title and makes the composer awkward to inspect.',
@@ -550,6 +637,7 @@ test('opencode server config exposes current primary and custom agents', () => {
       ],
     ]
   );
+  assert.deepEqual(discovery.modelBoundAgentIds, ['nvidia-chat']);
 });
 
 test('opencode debug config text exposes default agent without parsing full prompts', () => {
@@ -578,10 +666,9 @@ test('opencode debug config text exposes default agent without parsing full prom
   assert.equal(discovery.defaultModelId, 'mimo/mimo-v2.5-pro');
   assert.deepEqual(
     discovery.modes.map((mode) => [mode.id, mode.disabled, mode.args]),
-    [
-      ['\u200bSisyphus - Ultraworker', undefined, ['--agent', '\u200bSisyphus - Ultraworker']],
-    ]
+    []
   );
+  assert.deepEqual(discovery.modelBoundAgentIds, ['\u200bSisyphus - Ultraworker']);
 });
 
 test('cli manager warms and attaches background CLI servers when available', () => {
@@ -595,14 +682,35 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(discoverySource, /getOpenCodeAgentModes/);
   assert.match(discoverySource, /\['debug', 'config'\]/);
   assert.match(discoverySource, /opencode-agent-list/);
+  assert.match(discoverySource, /filterOpenCodeVisibleAgentModes/);
+  assert.match(discoverySource, /discovery\.modelBoundAgentIds/);
+  assert.match(discoverySource, /orderOpenCodeAgentModes/);
+  assert.match(discoverySource, /\['build', 0\]/);
+  assert.match(discoverySource, /\['plan', 1\]/);
+  assert.match(discoverySource, /includeBaseWhenDiscovered: true/);
+  assert.match(discoverySource, /baseVisibleModes\s*=\s*discoveredModes\.length > 0 && !options\.includeBaseWhenDiscovered\s*\?\s*\[\]\s*:\s*baseModes/s);
+  assert.match(discoverySource, /defaultAgentMode:\s*pickOpenCodeDefaultAgentMode\(mergedAgentModes, discovery\.defaultAgentId\)/);
+  assert.match(discoverySource, /selectableModes\.find\(\(mode\) => mode\.id === 'build'\)/);
+  assert.match(discoverySource, /decorateOpenCodeConfiguredAgentMode/);
+  assert.doesNotMatch(discoverySource, /preferredOpenCodeDefaultAgent/);
   assert.match(discoverySource, /getOpenCodeModelOptions/);
   assert.match(discoverySource, /this\.options\.openCodeClient\.fetchModelOptions\(cwd\)/);
   assert.match(openCodeClientSource, /apiUrl\(serverUrl, '\/config\/providers', cwd\)/);
   assert.match(openCodeClientSource, /parseOpenCodeProviderModels\(payload\)/);
   assert.match(discoverySource, /\['models'\]/);
   assert.match(discoverySource, /opencode-models/);
+  assert.match(discoverySource, /getOpenCodeModelState/);
+  assert.match(discoverySource, /getOpenCodeModelMetadata/);
+  assert.match(discoverySource, /\.local', 'state', 'opencode', 'model\.json'/);
+  assert.match(discoverySource, /\.cache', 'opencode', 'models\.json'/);
+  assert.match(discoverySource, /discovery\.defaultModelId \?\? modelState\.currentModelId/);
+  assert.match(discoverySource, /modelState\.variants/);
+  assert.match(discoverySource, /modelMetadata/);
+  assert.match(discoverySource, /configuredModelId/);
   assert.match(discoverySource, /defaultModel: 'configured'/);
-  assert.match(discoverySource, /decorateOpenCodeConfiguredModelOption/);
+  assert.match(discoverySource, /decorateOpenCodeModelOption/);
+  assert.match(discoverySource, /variantOptions/);
+  assert.match(discoverySource, /formatConfiguredOpenCodeModelSummary/);
   assert.match(discoverySource, /option\.id !== 'default'/);
   assert.match(source, /private backgroundServers = new Map/);
   assert.match(source, /private readonly processRunner = new CliProcessRunner/);
@@ -613,6 +721,14 @@ test('cli manager warms and attaches background CLI servers when available', () 
     /const backgroundAttachArgs = options\.attachBackgroundServer === false\s*\?\s*\[\]\s*:\s*await this\.getBackgroundAttachArgs/s
   );
   assert.match(source, /const promptArgs = options\.promptArgs \?\? profile\.promptArgs/);
+  assert.match(
+    source,
+    /if \(!ownedProcess && await this\.waitForTcp\(server\.host, server\.port, 120\)\) \{\s*\/\/ Do not attach to stale OpenCode servers[\s\S]*continue;\s*\}/
+  );
+  assert.doesNotMatch(
+    source,
+    /if \(!ownedProcess && await this\.waitForTcp\(server\.host, server\.port, 120\)\) \{\s*if \(await this\.isBackgroundServerAvailable/
+  );
   assert.match(
     source,
     /const eventStreamUrl = options\.attachBackgroundServer === false\s*\?\s*undefined\s*:\s*this\.getOpenCodeEventStreamUrl/s
@@ -977,6 +1093,8 @@ test('extension defaults to OpenCode as the active provider', () => {
   assert.match(sidebarSource, /this\.profilesById\.set\(profile\.id, profile\)/);
   assert.match(sidebarSource, /const storedProviderId = this\.getStoredProviderId\(installedProfiles\)/);
   assert.match(sidebarSource, /profiles: installedProfiles\.map\(\(profile\) => \(\{/);
+  assert.match(sidebarSource, /setupProfiles: profiles\.map\(\(profile\) => this\.toSetupProfile\(profile\)\)/);
+  assert.match(sidebarSource, /private toSetupProfile\(profile: CliProfile\): SetupCliProfile/);
   assert.match(sidebarSource, /activeProviderId: storedProviderId/);
   assert.match(sidebarSource, /activeAgentModeByProvider: this\.getStoredAgentModeState\(\)/);
 });
@@ -1018,7 +1136,7 @@ test('development mode watches webview assets for live reload', () => {
   assert.match(extensionSource, /extensionMode:\s*context\.extensionMode/);
   assert.match(sidebarSource, /vscode\.ExtensionMode\.Development/);
   assert.match(sidebarSource, /createFileSystemWatcher/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js\}/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
   assert.match(sidebarSource, /webviewAssetVersion/);
   assert.match(sidebarSource, /reloadWebviewForDevelopment/);
 });
@@ -1078,8 +1196,8 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-  const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
 
   assert.doesNotMatch(html, /id="composerAdvancedToggle"/);
   assert.doesNotMatch(html, /class="advanced-toggle"/);
@@ -1088,17 +1206,43 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.doesNotMatch(i18nScript, /composer\.advanced|advancedHide/);
   assert.match(css, /\.suggestion-button--primary\s*\{/s);
 
-  assert.match(script, /appendEmptyState\(titleText, subtitleText, showSetupAction = false,\s*installHint\)/);
+  assert.match(script, /let setupProfiles = \[\];/);
+  assert.match(script, /function normalizeSetupProfiles\(value\)/);
+  assert.match(script, /function setupProfilesForOnboarding\(\)/);
+  assert.match(script, /function appendCliSetupState\(fallbackProfile\)/);
+  assert.match(script, /function createCliSetupCard\(profile, recommended\)/);
+  assert.match(script, /SETUP_PROVIDER_ORDER = Object\.freeze\(\['opencode', 'codex', 'claude', 'gemini', 'goose', 'aider'\]\)/);
   assert.match(script, /function providerUnavailableMessage\(profile\)/);
-  assert.match(script, /const firstInstallHintProfile = profiles\.find\(\(profile\) => profile\?\.installHint && !profile\.installed\);/);
-  assert.match(script, /const suggestionActions = showSetupAction\s*\?\s*\[\['openSettings', 'empty\.configureProviders'\]\]\s*:/);
-  assert.match(script, /if \(showSetupAction && installHint\) \{\s*suggestionActions\.push\(\['copyInstall', 'empty\.copyInstall'\]\);\s*\}/);
+  assert.match(script, /appendCliSetupState\(\);/);
+  assert.match(script, /appendCliSetupState\(selectedProfile\);/);
   assert.match(script, /'openSettings'/);
+  assert.match(script, /'refreshProviders'/);
+  assert.match(script, /'installCli'/);
   assert.match(script, /'copyInstall'/);
   assert.match(script, /button\.classList\.add\('suggestion-button--primary'\)/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'installCli', cliId: button\.dataset\.cliId \}\)/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\)/);
   assert.match(sidebarSource, /case 'openSettings':/);
   assert.match(sidebarSource, /case 'copyInstallCommand':/);
+  assert.match(sidebarSource, /case 'installCli':/);
+  assert.match(sidebarSource, /private async installCli\(cliId: unknown\): Promise<void>/);
+  assert.match(sidebarSource, /case 'setOpenCodeModelVariant':/);
+  assert.match(sidebarSource, /private async setOpenCodeModelVariant\(modelId: unknown, variant: unknown\): Promise<void>/);
+  assert.match(sidebarSource, /\.local', 'state', 'opencode', 'model\.json'/);
+  assert.match(sidebarSource, /state\.variant = \{/);
+  assert.match(sidebarSource, /CLI_PROFILES\.find\(\(item\) => item\.id === profileId\)/);
+  assert.match(sidebarSource, /vscode\.window\.createTerminal\(\{ name: `Agents GUI Setup: \$\{profile\.name\}` \}\)/);
+  assert.match(sidebarSource, /terminal\.sendText\(command, true\)/);
   assert.match(extensionSource, /agents-gui\.openSettings/);
+  assert.match(css, /\.cli-setup-state\s*\{/);
+  assert.match(css, /\.cli-setup-card\.is-recommended\s*\{/);
+  assert.match(css, /\.cli-setup-command\s*\{/);
+  assert.match(i18nScript, /'setup\.title': 'Install a CLI Agent to start'/);
+  assert.match(i18nScript, /'setup\.title': '安装一个 CLI Agent 后开始使用'/);
+  assert.match(i18nScript, /'setup\.recommendedBadge': 'Recommended · Quick start'/);
+  assert.match(i18nScript, /'setup\.recommendedBadge': '推荐 · 快速开始'/);
+  assert.match(i18nScript, /'setup\.installRecommended': 'Install OpenCode'/);
+  assert.match(i18nScript, /'setup\.installRecommended': '安装 OpenCode'/);
   assert.match(i18nScript, /'empty\.configureProviders': 'Open provider settings'/);
   assert.match(i18nScript, /'empty\.configureProviders': '前往设置配置提供方'/);
   assert.match(i18nScript, /'empty\.copyInstall': 'Copy install command'/);
@@ -1114,6 +1258,7 @@ test('webview renders the Codex local mode menu like Code X', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 
   assert.match(html, /id="runtimeOptionList"[^>]*role="menu"/);
   assert.match(script, /const runtimeOptionList = document\.getElementById\('runtimeOptionList'\);/);
@@ -1159,8 +1304,13 @@ test('webview renders model selection as a single-layer menu', () => {
   assert.match(script, /renderAgentModeOptionList\(modes, agentModeSelect\.value\);/);
   assert.match(script, /modelOptionList\?\.addEventListener\('click'/);
   assert.match(script, /agentModeOptionList\?\.addEventListener\('click'/);
+  assert.match(script, /modeMenu\?\.addEventListener\('keydown'/);
+  assert.match(script, /event\.key !== 'Tab'/);
+  assert.match(script, /switchAgentModeByDelta\(event\.shiftKey \? -1 : 1\)/);
+  assert.match(script, /function switchAgentModeByDelta\(delta\)/);
   assert.match(script, /activeModelByProvider\[activeId\] = button\.dataset\.value;/);
-  assert.match(script, /activeAgentModeByProvider\[activeId\] = button\.dataset\.value;/);
+  assert.match(script, /setActiveAgentMode\(button\.dataset\.value\)/);
+  assert.match(script, /setActiveAgentMode\(next\.id, \{ keepMenuOpen: true \}\)/);
   assert.match(script, /modelMenu\.open = false;/);
   assert.match(script, /modeMenu\.open = false;/);
   assert.match(script, /if \(option\?\.custom\) \{/);
@@ -1203,7 +1353,7 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(script, /function splitAgentModeLabel\(/);
   assert.match(script, /profile\?\.id === 'opencode'\s*\?\s*splitAgentModeLabel\(displayMode\?\.label \|\| i18n\.t\('agentMode\.short'\)\)\.title/s);
   assert.match(script, /meta\.textContent = profile\?\.id === 'opencode'/);
-  assert.match(script, /displayModel\.summaryLabel \|\| displayModel\.label \|\| i18n\.t\('model\.short'\)/);
+  assert.match(script, /modelSummaryText\(model, displayModel\)/);
   assert.match(script, /selectedAction === 'freeform' \? 'input\.placeholderProvider' : 'input\.placeholderAction'/);
   assert.match(script, /const readonlyModel = profile\?\.id === 'opencode';/);
   assert.match(script, /modelMenu\?\.classList\.toggle\('is-readonly', Boolean\(readonlyModel\)\);/);
@@ -1238,6 +1388,9 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /body\[data-provider="opencode"\] \.context-row\s*\{\s*[^}]*padding:\s*0;/s);
   assert.match(css, /body\[data-provider="opencode"\] #contextSummaryLabel\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.mode-menu\.is-visible\s*\{\s*[^}]*order:\s*2;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.model-menu\.is-visible\s*\{\s*[^}]*max-width:\s*none;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.model-menu \.option-summary\s*\{\s*[^}]*max-width:\s*none;/s);
+  assert.match(css, /body\[data-provider="opencode"\] #modelSummaryLabel\s*\{\s*[^}]*overflow:\s*visible;[\s\S]*?text-overflow:\s*clip;[\s\S]*?white-space:\s*nowrap;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.composer-settings-button\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.composer-meta\s*\{\s*[^}]*order:\s*4;/s);
   assert.match(css, /body\[data-provider="opencode"\] #contextBudgetLabel\s*\{\s*[^}]*display:\s*none;/s);
@@ -1590,6 +1743,7 @@ test('webview supports pasted image attachments in the composer', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 
   assert.match(html, /id="attachmentStrip"/);
   assert.match(html, /id="attachImageBtn"/);
@@ -1605,6 +1759,11 @@ test('webview supports pasted image attachments in the composer', () => {
   assert.match(script, /const finalAttachments = promptAttachments\.map\(attachmentPayload\);/);
   assert.match(script, /const hasAttachments = promptAttachments\.length > 0;/);
   assert.match(script, /promptAttachments = \[\];/);
+  assert.match(sidebarSource, /IMAGE_ATTACHMENT_RETENTION_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(sidebarSource, /MAX_STORED_IMAGE_ATTACHMENTS = 128/);
+  assert.match(sidebarSource, /await this\.pruneImageAttachmentStorage\(attachmentDir\)/);
+  assert.match(sidebarSource, /vscode\.workspace\.fs\.delete\(uri, \{ useTrash: false \}\)/);
+  assert.match(sidebarSource, /files\.slice\(MAX_STORED_IMAGE_ATTACHMENTS\)/);
   assert.match(css, /\.attachment-strip\s*\{/);
   assert.match(css, /\.attachment-chip img\s*\{/);
   assert.match(css, /\.attach-button\s*\{/);
@@ -2161,7 +2320,9 @@ test('webview refreshes context after a concrete provider is active', () => {
   assert.match(script, /function defaultContextOptions\(\) \{\s*return \{ \.\.\.DEFAULT_CONTEXT_OPTIONS \};\s*\}/);
   assert.match(script, /function refreshActiveContext\(\) \{\s*if \(!activeId\) \{\s*return;\s*\}\s*vscode\.postMessage\(\{ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions\(\), modelId: activeModelId\(\) \}\);\s*\}/);
   assert.match(script, /providerSelect\.addEventListener\('change', \(\) => \{[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*\}\);/);
+  assert.match(script, /case 'profiles':[\s\S]*setupProfiles = normalizeSetupProfiles\(message\.setupProfiles\);[\s\S]*renderAll\(\);[\s\S]*refreshActiveContext\(\);[\s\S]*break;/);
   assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
+  assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*refreshActiveContext\(\);\s*renderAll\(\);/);
 });
@@ -2183,7 +2344,8 @@ test('webview shows provider detection as a loading state before empty provider 
   assert.match(script, /if \(profilesLoading\) \{[\s\S]*option\.textContent = i18n\.t\('provider\.loading'\)/);
   assert.match(script, /providerHint\.classList\.add\('is-loading'\)/);
   assert.match(script, /appendProviderLoadingState\(\)/);
-  assert.match(script, /profilesLoading = false;\s*profiles = message\.profiles \|\| \[\];/);
+  assert.match(script, /profilesLoading = false;\s*profiles = message\.profiles \|\| \[\];\s*setupProfiles = normalizeSetupProfiles\(message\.setupProfiles\);/);
+  assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /input\.placeholder = profilesLoading\s*\?\s*i18n\.t\('input\.placeholderLoading'\)/);
   assert.match(css, /\.empty-state\.is-loading/);
   assert.match(css, /\.loading-spinner/);
@@ -2657,6 +2819,11 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /case 'mcp':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('mcp', \{ commandQuery: sourceQuery \}\);/s);
   assert.match(script, /case 'variants':/);
   assert.match(script, /showOpenCodeStatusDialog\('variants', \{ commandQuery: sourceQuery \}\)/);
+  assert.match(script, /function openCodeVariantLines\(\)/);
+  assert.match(script, /function openCodeModelVariantOptions\(option\)/);
+  assert.match(script, /function maybeShowOpenCodeVariantDialog\(option, options = \{\}\)/);
+  assert.match(script, /command:\s*'setOpenCodeModelVariant'/);
+  assert.match(script, /showOpenCodeStatusDialog\('variants', \{\s*commandQuery: 'variants',\s*returnTo: options\.returnTo,\s*\}\)/s);
   assert.match(script, /case 'status':/);
   assert.match(script, /showOpenCodeStatusDialog\('status', \{ commandQuery: sourceQuery \}\)/);
   assert.match(script, /case 'themes':/);
@@ -2666,10 +2833,10 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
   assert.match(script, /function renderOpenCodeGroupedOptionDialogBody\(body, kind\)/);
   assert.match(script, /const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState\.optionDialogKinds\(\);/);
-  assert.match(openCodeDialogSource, /const OPTION_DIALOG_KINDS = Object\.freeze\(\['sessions', 'models', 'agents'\]\);/);
+  assert.match(openCodeDialogSource, /const OPTION_DIALOG_KINDS = Object\.freeze\(\['sessions', 'models', 'agents', 'variants'\]\);/);
   assert.match(script, /dialog\.setAttribute\('aria-labelledby', title\.id\);/);
   assert.match(script, /dialog\.setAttribute\('aria-describedby', description\.id\);/);
-  assert.match(script, /if \(openCodeDialogKind\) \{\s*event\.preventDefault\(\);\s*closeOpenCodeStatusDialog\(\);/s);
+  assert.match(script, /if \(openCodeDialogKind\) \{\s*event\.preventDefault\(\);\s*dismissOpenCodeStatusDialog\(\);/s);
   assert.match(script, /function handleOpenCodeOptionDialogKeydown\(event\)/);
   assert.match(script, /dialog\.addEventListener\('keydown', handleOpenCodeOptionDialogKeydown\);/);
   assert.match(script, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
@@ -2691,12 +2858,20 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /openCodeDialogEchoCleanupPending = false;\s*openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex\(kind\);/s);
   assert.match(script, /function focusPromptInputAfterDialogClose\(\)/);
   assert.match(script, /input\.focus\(\);\s*resizePromptInput\(\);/s);
+  assert.match(script, /let openCodeDialogHistory = \[\];/);
+  assert.match(script, /function openCodeDialogSnapshot\(kind = openCodeDialogKind\)/);
+  assert.match(script, /function restoreOpenCodeStatusDialog\(snapshot\)/);
+  assert.match(script, /function dismissOpenCodeStatusDialog\(options = \{\}\)/);
+  assert.match(script, /const previous = openCodeDialogHistory\.pop\(\);/);
+  assert.match(script, /if \(previous && restoreOpenCodeStatusDialog\(previous\)\) \{\s*return;\s*\}/s);
   assert.match(script, /function closeOpenCodeStatusDialog\(\{ focusPrompt = true \} = \{\}\)/);
   assert.match(script, /openCodeDialogCommandEchoQuery = '';\s*openCodeDialogEchoCleanupPending = false;/s);
+  assert.match(script, /openCodeDialogHistory = \[\];\s*renderOpenCodeStatusDialog\(\);/s);
   assert.match(script, /focusPromptInputAfterDialogClose\(\);/);
   assert.match(script, /function showOpenCodeStatusDialog\(kind, options = \{\}\)/);
   assert.match(script, /openCodeDialogCommandEchoQuery = normalizeOpenCodeDialogCommandQuery\(options\.commandQuery\);/);
   assert.match(script, /openCodeDialogEchoCleanupPending = Boolean\(openCodeDialogCommandEchoQuery\);/);
+  assert.match(script, /openCodeDialogHistory = options\.returnTo \? \[options\.returnTo\] : \[\];/);
   assert.match(openCodeDialogSource, /case 'models':\s*return \['model', 'models'\];/);
   assert.match(script, /clearInitialOpenCodeDialogCommandEcho\(filter, kind, \(\) => renderOpenCodeModelGroups\(list\)\)/);
   assert.match(script, /openCodeDialogQuery = filter\.value;\s*openCodeDialogActiveIndex = 0;\s*renderOpenCodeModelGroups\(list\);/);
@@ -2733,6 +2908,8 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /if \(openCodeDialogKind === 'mcp'\)/);
   assert.match(script, /event\.key === ' '/);
   assert.match(script, /activeModelByProvider\[activeId\] = value;/);
+  assert.match(script, /const returnTo = openCodeDialogKind === 'models' \? openCodeDialogSnapshot\('models'\) : undefined;/);
+  assert.match(script, /maybeShowOpenCodeVariantDialog\(option, \{ returnTo \}\)/);
   assert.match(script, /activeAgentModeByProvider\[activeId\] = value;/);
   assert.match(script, /setActiveThread\('opencode', thread\)/);
   assert.match(script, /function executeOpenCodeNativeSlashCommand/);
@@ -2892,13 +3069,16 @@ test('webview keeps running status singular and supports quick choices', () => {
   assert.doesNotMatch(script, /appendStreamingCursor/);
   assert.doesNotMatch(script, /message-streaming-cursor/);
   assert.doesNotMatch(script, /className = 'cursor/);
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
   assert.match(html, /__MESSAGE_CHOICES_JS_URI__/);
   assert.match(script, /const messageText = window\.AgentsGuiMessageText/);
+  assert.match(script, /const inlineMarkdown = window\.AgentsGuiInlineMarkdown/);
   assert.match(script, /const normalizeMessageText = messageText\.normalizeMessageText/);
   assert.match(script, /const stripInlineMarkdown = messageText\.stripInlineMarkdown/);
+  assert.match(script, /const appendInlineMarkdown = inlineMarkdown\.appendInlineMarkdown/);
   assert.doesNotMatch(script, /function normalizeMessageText\(text\)/);
   assert.doesNotMatch(script, /function stripInlineMarkdown\(text\)/);
+  assert.doesNotMatch(script, /function appendInlineMarkdown\(container, text\)/);
   assert.match(textScript, /function normalizeMessageText\(text\)/);
   assert.match(textScript, /function stripInlineMarkdown\(text\)/);
   assert.match(script, /const messageChoices = window\.AgentsGuiMessageChoices/);
@@ -2958,10 +3138,11 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
   const slashSource = readFileSync(new URL('../media/slashCommands.js', import.meta.url), 'utf8');
   const dialogSource = readFileSync(new URL('../media/openCodeDialogState.js', import.meta.url), 'utf8');
   const claudeSource = readFileSync(new URL('../media/claudeActions.js', import.meta.url), 'utf8');
+  const inlineSource = readFileSync(new URL('../media/inlineMarkdown.js', import.meta.url), 'utf8');
   const runStateSource = readFileSync(new URL('../media/providerRunState.js', import.meta.url), 'utf8');
 
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js\}/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
 
   assert.doesNotMatch(script, /function serializeThreadsForState\(source\)/);
   assert.match(conversationSource, /function serializeThreadsForState\(source\)/);
@@ -2983,6 +3164,10 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
 
   assert.doesNotMatch(script, /function createProviderRunState\(\)/);
   assert.match(runStateSource, /function createProviderRunState\(\)/);
+
+  assert.doesNotMatch(script, /SAFE_LINK_PROTOCOLS/);
+  assert.match(inlineSource, /SAFE_LINK_PROTOCOLS/);
+  assert.match(inlineSource, /function appendInlineMarkdown\(container, text\)/);
 });
 
 test('message choice parser extracts actionable choices from assistant text', () => {
@@ -3024,6 +3209,16 @@ test('message text utilities normalize terminal noise and inline markdown', () =
     stripInlineMarkdown('**OpenCode** [`session`](https://example.com) uses `model`'),
     'OpenCode session uses model'
   );
+});
+
+test('inline markdown helper blocks unsafe link protocols', () => {
+  assert.equal(inlineMarkdown.safeMarkdownHref('https://example.com/path?q=1'), 'https://example.com/path?q=1');
+  assert.equal(inlineMarkdown.safeMarkdownHref('http://example.com'), 'http://example.com');
+  assert.equal(inlineMarkdown.safeMarkdownHref('mailto:hello@example.com'), 'mailto:hello@example.com');
+  assert.equal(inlineMarkdown.safeMarkdownHref('javascript:alert(1)'), '');
+  assert.equal(inlineMarkdown.safeMarkdownHref('data:text/html;base64,PHNjcmlwdA=='), '');
+  assert.equal(inlineMarkdown.safeMarkdownHref('https://example.com/\nnext'), '');
+  assert.equal(inlineMarkdown.safeMarkdownHref('/relative/path'), '');
 });
 
 test('conversation store normalizes restored messages and serializes safe state', () => {
@@ -3208,6 +3403,7 @@ test('OpenCode dialog state helper owns command echo and active selection rules'
   assert.equal(openCodeDialogState.isCommandEcho('models', '/model', 'models'), true);
   assert.equal(openCodeDialogState.isCommandEcho('models', '/agent', 'models'), false);
   assert.equal(openCodeDialogState.isOptionDialogKind('mcp'), false);
+  assert.equal(openCodeDialogState.isOptionDialogKind('variants'), true);
   assert.deepEqual(
     openCodeDialogState.keyboardOptions('sessions', { options }).map((option) => option.id),
     ['a', 'b']
@@ -3225,6 +3421,8 @@ test('OpenCode dialog state helper owns command echo and active selection rules'
   assert.equal(openCodeDialogState.modelProviderName('openrouter'), 'OpenRouter');
   assert.equal(openCodeDialogState.modelTitle('opencode/deepseek-v4-flash-free'), 'DeepSeek V4 Flash Free');
   assert.equal(openCodeDialogState.modelFooter({ id: 'opencode/deepseek-v4-flash-free' }, 'opencode'), 'Free');
+  assert.equal(openCodeDialogState.modelFooter({ id: 'opencode/deepseek-v4-flash-free', variant: 'max' }, 'opencode'), 'Free · max');
+  assert.equal(openCodeDialogState.modelFooter({ id: 'openai/gpt-5.5', variant: 'xhigh' }, 'openai'), 'xhigh');
   assert.deepEqual(
     openCodeDialogState.groupModelOptions(
       [
@@ -3328,6 +3526,7 @@ test('preview webview streams markdown with real line breaks', () => {
     'slashCommands.js',
     'openCodeDialogState.js',
     'claudeActions.js',
+    'inlineMarkdown.js',
   ]) {
     assert.match(script, new RegExp(`'${file}'`));
   }
@@ -3337,6 +3536,7 @@ test('preview webview streams markdown with real line breaks', () => {
   assert.match(script, /__CONVERSATION_STORE_JS_URI__/);
   assert.match(script, /__SLASH_COMMANDS_JS_URI__/);
   assert.match(script, /__OPEN_CODE_DIALOG_STATE_JS_URI__/);
+  assert.match(script, /__INLINE_MARKDOWN_JS_URI__/);
   assert.match(script, /__CLAUDE_ACTIONS_JS_URI__/);
   assert.match(script, /unresolved VS Code placeholders/);
   assert.match(script, /\.join\('\\\\n'\)/);
@@ -3361,13 +3561,17 @@ test('webview and host surface the authoritative selected model for each run', (
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const promptSource = readFileSync(new URL('../src/promptBuilder.ts', import.meta.url), 'utf8');
 
-  assert.match(sidebarSource, /const effectiveModel = effectiveCliModelSelection\(modelOption, message\.customModel\);/);
+  assert.match(sidebarSource, /const effectiveModel = effectiveCliModelSelection\(modelOption, message\.customModel, message\.modelVariant\);/);
   assert.match(sidebarSource, /modelId: effectiveModel\.id/);
   assert.match(sidebarSource, /modelLabel: effectiveModel\.label/);
-  assert.match(sidebarSource, /runtime:\s*\{[\s\S]*modelId: effectiveModel\.id,[\s\S]*modelLabel: effectiveModel\.label,/);
+  assert.match(sidebarSource, /runtime:\s*\{[\s\S]*modelId: effectiveModel\.id,[\s\S]*modelLabel: effectiveModel\.label,[\s\S]*modelVariant: effectiveModel\.variant,/);
   assert.match(promptSource, /Runtime selection from Agents GUI:/);
   assert.match(promptSource, /Selected model:/);
+  assert.match(promptSource, /Reasoning depth:/);
   assert.match(promptSource, /answer from this Agents GUI runtime selection instead of guessing/);
+  assert.match(script, /function activeModelVariant\(cliId = activeId\)/);
+  assert.match(script, /modelVariant: activeModelVariant\(providerId\)/);
+  assert.match(script, /function modelSummaryText\(option, displayOption\)/);
   assert.match(script, /function summarizeRuntimeSelection\(message\)/);
   assert.match(script, /i18n\.t\('message\.modelMeta', \{ model \}\)/);
   assert.match(script, /mergeMessageMeta\(\s*summarizeRuntimeSelection\(message\),\s*summarizeRequestContext\(message\.contextSummary\)\s*\)/s);
@@ -3391,10 +3595,15 @@ test('agent mode select is persisted per provider', () => {
   assert.match(script, /activePermissionByProvider/);
   assert.match(script, /contextOptions/);
   assert.match(script, /let hasAppliedPersistentSelection = false;/);
+  assert.match(script, /let activeAgentModeByProvider = persistableAgentModeMap\(saved\.activeAgentModeByProvider\);/);
   assert.match(script, /function persistUserSelection\(\)/);
   assert.match(script, /function schedulePersistUserSelection\(\)/);
+  assert.match(script, /function usesProviderNativeAgentConfig\(providerId\)/);
+  assert.match(script, /providerId === 'opencode'/);
+  assert.match(script, /function persistableAgentModeMap\(value\)/);
   assert.match(script, /command: 'saveSelectionState'/);
   assert.match(script, /activeProviderId: activeId/);
+  assert.match(script, /activeAgentModeByProvider: persistableAgentModeMap\(activeAgentModeByProvider\)/);
   assert.doesNotMatch(script, /activeModelByProvider,/);
   assert.match(script, /recentModelByProvider,/);
   assert.match(script, /favoriteModelByProvider,/);
@@ -3403,13 +3612,15 @@ test('agent mode select is persisted per provider', () => {
   assert.match(script, /activeRuntimeByProvider,/);
   assert.match(script, /activePermissionByProvider,/);
   assert.match(script, /contextOptions: defaultContextOptions\(\),/);
-  assert.match(script, /persistedSelectionMap\(message\.activeAgentModeByProvider\)/);
+  assert.match(script, /persistableAgentModeMap\(message\.activeAgentModeByProvider\)/);
+  assert.match(script, /if \(usesProviderNativeAgentConfig\(cliId\)\) \{/);
   assert.match(script, /persistedSelectionMap\(message\.activeRuntimeByProvider\)/);
   assert.match(script, /message\.activeProviderId/);
   assert.match(sidebarSource, /case 'saveSelectionState':/);
   assert.match(sidebarSource, /private async saveSelectionState\(message: unknown\)/);
   assert.match(sidebarSource, /this\.state\.update\(LAST_PROVIDER_STATE_KEY, providerId\)/);
   assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
+  assert.match(sidebarSource, /usesProviderNativeAgentConfig\(providerId\)/);
   assert.match(sidebarSource, /this\.state\.update\(RUNTIME_STATE_KEY,/);
   assert.match(sidebarSource, /this\.state\.update\(PERMISSION_STATE_KEY,/);
   assert.match(sidebarSource, /this\.state\.update\(CONTEXT_OPTIONS_STATE_KEY,/);
@@ -3450,7 +3661,7 @@ test('webview localizes provider option labels in composer controls', () => {
   assert.match(i18nScript, /'option\.permission\.workspaceWrite': '默认权限'/);
   assert.match(i18nScript, /'option\.permission\.fullAuto': '自动审查'/);
   assert.match(i18nScript, /'option\.permission\.danger': '完全访问权限'/);
-  assert.match(i18nScript, /'option\.agentMode\.configured': '当前配置'/);
+  assert.doesNotMatch(i18nScript, /option\.agentMode\.configured/);
   assert.match(i18nScript, /'option\.agentMode\.build': '执行'/);
   assert.match(i18nScript, /'option\.agentMode\.plan': '规划'/);
   assert.match(i18nScript, /'agentMode\.subagent': '子代理'/);
@@ -4061,6 +4272,25 @@ test('normalizeCliOutput explains OpenCode attach and provider setup errors', ()
 
 test('normalizeCliOutput surfaces OpenCode top-level provider errors', () => {
   const errorLine = '{"type":"error","timestamp":1778855556690,"sessionID":"ses_1","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details."}}}\n';
+  const authErrorLine = '{"type":"error","timestamp":1781145835992,"sessionID":"ses_1","error":{"name":"APIError","data":{"message":"Your authentication token has been invalidated. Please try signing in again.","statusCode":401,"isRetryable":false}}}\n';
+  const genericAuthErrorLine = `${JSON.stringify({
+    type: 'error',
+    timestamp: 1781145835992,
+    sessionID: 'ses_1',
+    error: {
+      name: 'APIError',
+      data: {
+        message: 'Unexpected server error. Check server logs for details.',
+        statusCode: 401,
+        responseBody: JSON.stringify({
+          error: {
+            message: 'Your authentication token has been invalidated. Please try signing in again.',
+            code: 'token_invalidated',
+          },
+        }, null, 2),
+      },
+    },
+  })}\n`;
 
   assert.deepEqual(
     normalizeCliOutputChunk(errorLine, 'opencode'),
@@ -4072,6 +4302,14 @@ test('normalizeCliOutput surfaces OpenCode top-level provider errors', () => {
   assert.equal(
     normalizeCliOutput(errorLine, 'opencode'),
     'Error: Unexpected server error. Check server logs for details.\n'
+  );
+  assert.equal(
+    normalizeCliOutput(authErrorLine, 'opencode'),
+    'Error: Your authentication token has been invalidated. Please try signing in again.\n'
+  );
+  assert.equal(
+    normalizeCliOutput(genericAuthErrorLine, 'opencode'),
+    'Error: Your authentication token has been invalidated. Please try signing in again.\n'
   );
 });
 
@@ -4115,6 +4353,8 @@ test('OpenCode server commit generation listens for current-session provider err
   assert.match(source, /eventErrorMessage\(event\)/);
   assert.match(source, /eventStream\?\.error\(\)/);
   assert.match(source, /eventIsAssistantCompleted\(event\)/);
+  assert.match(source, /responseBodyMessage/);
+  assert.match(source, /isGenericServerError/);
   assert.match(source, /FreeUsageLimitError/);
   assert.match(source, /rate limit exceeded/i);
 });
@@ -4200,6 +4440,90 @@ test('normalizeCliOutput removes echoed OpenCode prompt wrappers before display'
     normalizeCliOutput('[search-mode] should stay when it is plain response text', 'opencode'),
     '[search-mode] should stay when it is plain response text'
   );
+});
+
+test('normalizeCliOutput removes echoed OpenCode runtime prompt before display', () => {
+  const prompt = buildAssistantPrompt({
+    provider: { id: 'opencode', name: 'OpenCode' },
+    mode: 'agent',
+    agentMode: {
+      id: 'plan',
+      label: 'plan',
+      instruction: 'Plan before editing.',
+    },
+    runtime: {
+      modelId: 'openai/gpt-5.5',
+      modelLabel: 'gpt-5.5 · xhigh',
+      modelVariant: 'xhigh',
+      runtimeId: 'default',
+      runtimeLabel: 'Default',
+      permissionModeId: 'default',
+      permissionModeLabel: 'Default',
+    },
+    action: 'freeform',
+    message: '你能干什么呢',
+    context: {
+      workspace: {
+        name: 'agents-gui',
+        rootPath: '/Users/t/6bt/myproject/agents-gui',
+      },
+      diagnostics: [],
+    },
+    locale: 'zh-cn',
+  });
+
+  assert.match(prompt, /Runtime selection from Agents GUI:/);
+  assert.equal(normalizeCliOutput(`"${prompt}`, 'opencode'), '');
+  assert.equal(normalizeCliOutput(`"${prompt}"我可以帮你处理代码任务。`, 'opencode'), '我可以帮你处理代码任务。');
+});
+
+test('filterPromptEchoChunk buffers streamed OpenCode runtime prompt echoes', () => {
+  const prompt = buildAssistantPrompt({
+    provider: { id: 'opencode', name: 'OpenCode' },
+    mode: 'agent',
+    agentMode: {
+      id: 'plan',
+      label: 'plan',
+      instruction: 'Plan before editing.',
+    },
+    runtime: {
+      modelId: 'openai/gpt-5.5',
+      modelLabel: 'gpt-5.5 · xhigh',
+      modelVariant: 'xhigh',
+      runtimeId: 'default',
+      runtimeLabel: 'Default',
+      permissionModeId: 'default',
+      permissionModeLabel: 'Default',
+    },
+    action: 'freeform',
+    message: '你能干什么呢',
+    context: {
+      workspace: {
+        name: 'agents-gui',
+        rootPath: '/Users/t/6bt/myproject/agents-gui',
+      },
+      diagnostics: [],
+    },
+    locale: 'zh-cn',
+  });
+  const runtimeIndex = prompt.indexOf('Runtime selection from Agents GUI:');
+  const endIndex = prompt.indexOf('- Risks and caveats: call out assumptions, follow-up work, and edge cases.');
+
+  const first = filterPromptEchoChunk(`"${prompt.slice(0, runtimeIndex)}`, 'opencode');
+  assert.equal(first.text, '');
+  assert.ok(first.buffer);
+
+  const second = filterPromptEchoChunk(prompt.slice(runtimeIndex, endIndex), 'opencode', first.buffer);
+  assert.equal(second.text, '');
+  assert.ok(second.buffer);
+
+  const third = filterPromptEchoChunk(
+    `${prompt.slice(endIndex)}"我可以帮你读代码、改代码和跑验证。`,
+    'opencode',
+    second.buffer
+  );
+  assert.equal(third.text, '我可以帮你读代码、改代码和跑验证。');
+  assert.equal(third.buffer, '');
 });
 
 test('normalizeCliOutputChunk removes echoed OpenCode prompt wrappers from thinking details', () => {

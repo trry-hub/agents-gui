@@ -18,6 +18,7 @@ const webviewAssets = [
   'slashCommands.js',
   'openCodeDialogState.js',
   'claudeActions.js',
+  'inlineMarkdown.js',
   'main.js',
 ];
 for (const file of webviewAssets) {
@@ -35,6 +36,7 @@ const conversationStoreUri = './conversationStore.js';
 const slashCommandsUri = './slashCommands.js';
 const openCodeDialogStateUri = './openCodeDialogState.js';
 const claudeActionsUri = './claudeActions.js';
+const inlineMarkdownUri = './inlineMarkdown.js';
 const mainJsUri = './main.js';
 const cssUri = './main.css';
 
@@ -208,6 +210,7 @@ html = html
   .replace('__SLASH_COMMANDS_JS_URI__', slashCommandsUri)
   .replace('__OPEN_CODE_DIALOG_STATE_JS_URI__', openCodeDialogStateUri)
   .replace('__CLAUDE_ACTIONS_JS_URI__', claudeActionsUri)
+  .replace('__INLINE_MARKDOWN_JS_URI__', inlineMarkdownUri)
   .replace('__MAIN_JS_URI__', mainJsUri)
   .replace(/__NONCE__/g, 'preview')
   .replace(/__LOCALE__/g, 'zh-CN')

@@ -8,8 +8,10 @@
   const slashCommands = window.AgentsGuiSlashCommands;
   const openCodeDialogState = window.AgentsGuiOpenCodeDialogState;
   const claudeActions = window.AgentsGuiClaudeActions;
+  const inlineMarkdown = window.AgentsGuiInlineMarkdown;
   const normalizeMessageText = messageText.normalizeMessageText;
   const stripInlineMarkdown = messageText.stripInlineMarkdown;
+  const appendInlineMarkdown = inlineMarkdown.appendInlineMarkdown;
   i18n.apply();
 
   // Inject critical styles via JS to bypass webview CSS caching
@@ -102,12 +104,14 @@
     includeSelection: true,
     includeDiagnostics: true,
   });
+  const SETUP_PROVIDER_ORDER = Object.freeze(['opencode', 'codex', 'claude', 'gemini', 'goose', 'aider']);
 
   const saved = vscode.getState() || {};
   let profiles = [];
+  let setupProfiles = [];
   let profilesLoading = true;
   let activeId = saved.activeId || '';
-  let activeAgentModeByProvider = saved.activeAgentModeByProvider || {};
+  let activeAgentModeByProvider = persistableAgentModeMap(saved.activeAgentModeByProvider);
   let activeModelByProvider = {};
   let recentModelByProvider = saved.recentModelByProvider || {};
   let favoriteModelByProvider = saved.favoriteModelByProvider || {};
@@ -154,6 +158,7 @@
   let openCodeDialogOpenedAt = 0;
   let openCodeDialogCommandEchoQuery = '';
   let openCodeDialogEchoCleanupPending = false;
+  let openCodeDialogHistory = [];
 
   const taskBoard = document.getElementById('taskBoard');
   const sidebar = document.getElementById('sidebar');
@@ -294,7 +299,7 @@
   function persist() {
     vscode.setState({
       activeId,
-      activeAgentModeByProvider,
+      activeAgentModeByProvider: persistableAgentModeMap(activeAgentModeByProvider),
       recentModelByProvider,
       favoriteModelByProvider,
       disabledMcpByProvider,
@@ -323,6 +328,18 @@
     );
   }
 
+  function usesProviderNativeAgentConfig(providerId) {
+    return providerId === 'opencode';
+  }
+
+  function persistableAgentModeMap(value) {
+    return Object.fromEntries(
+      Object.entries(persistedSelectionMap(value)).filter(([providerId]) => (
+        !usesProviderNativeAgentConfig(providerId)
+      ))
+    );
+  }
+
   function schedulePersistUserSelection() {
     if (persistUserSelectionTimer) {
       clearTimeout(persistUserSelectionTimer);
@@ -337,7 +354,7 @@
     vscode.postMessage({
       command: 'saveSelectionState',
       activeProviderId: activeId,
-      activeAgentModeByProvider,
+      activeAgentModeByProvider: persistableAgentModeMap(activeAgentModeByProvider),
       recentModelByProvider,
       favoriteModelByProvider,
       disabledMcpByProvider,
@@ -364,6 +381,56 @@
 
   function installedProfiles() {
     return profiles.filter((profile) => profile.installed);
+  }
+
+  function normalizeSetupProfile(profile) {
+    if (!profile || typeof profile !== 'object') {
+      return undefined;
+    }
+
+    const id = String(profile.id || '').trim();
+    const name = String(profile.name || id).trim();
+    const installHint = String(profile.installHint || '').trim();
+    if (!id || !name || !installHint) {
+      return undefined;
+    }
+
+    return {
+      ...profile,
+      id,
+      name,
+      description: String(profile.description || '').trim(),
+      installHint,
+      installed: profile.installed === true,
+    };
+  }
+
+  function normalizeSetupProfiles(value) {
+    const seen = new Set();
+    return (Array.isArray(value) ? value : [])
+      .map(normalizeSetupProfile)
+      .filter((profile) => {
+        if (!profile || seen.has(profile.id)) {
+          return false;
+        }
+        seen.add(profile.id);
+        return true;
+      });
+  }
+
+  function setupProfilesForOnboarding() {
+    const rank = new Map(SETUP_PROVIDER_ORDER.map((id, index) => [id, index]));
+    return setupProfiles
+      .filter((profile) => !profile.installed)
+      .slice()
+      .sort((a, b) => (
+        (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999)
+        || a.name.localeCompare(b.name)
+      ));
+  }
+
+  function recommendedSetupProfile(list = setupProfilesForOnboarding()) {
+    return list.find((profile) => profile.id === 'opencode') || list[0];
   }
 
   function configurableAgentProfiles() {
@@ -989,8 +1056,17 @@
   function activeAgentModeId(cliId = activeId) {
     const profile = profiles.find((item) => item.id === cliId);
     const legacy = legacyWorkflowMode ? mapLegacyWorkflowMode(profile, legacyWorkflowMode) : undefined;
-    const value = activeAgentModeByProvider[cliId] || legacy;
-    const normalized = normalizeAgentModeId(profile, value);
+    const requested = activeAgentModeByProvider[cliId] || legacy;
+    const normalized = normalizeAgentModeId(profile, requested);
+    if (usesProviderNativeAgentConfig(cliId)) {
+      if (requested && requested === normalized) {
+        activeAgentModeByProvider[cliId] = normalized;
+      } else {
+        delete activeAgentModeByProvider[cliId];
+      }
+      return normalized;
+    }
+
     activeAgentModeByProvider[cliId] = normalized;
     return normalized;
   }
@@ -1156,6 +1232,15 @@
       return options[0];
     }
     return options.find((option) => option.id === activeModelId(profile?.id)) || options[0];
+  }
+
+  function activeModelVariant(cliId = activeId) {
+    const profile = profiles.find((item) => item.id === cliId);
+    if (profile?.id !== 'opencode') {
+      return '';
+    }
+
+    return openCodeSelectedModelVariant(activeModel(profile));
   }
 
   function activeRuntime(profile = activeProfile()) {
@@ -3475,6 +3560,93 @@
     return openCodeDialogState.modelFooter(option, providerId);
   }
 
+  function modelSummaryText(option, displayOption) {
+    const base = displayOption?.summaryLabel || displayOption?.label || option?.label || i18n.t('model.short');
+    const variant = String(option?.variant || '').trim();
+    return variant && !base.includes(`· ${variant}`) ? `${base} · ${variant}` : base;
+  }
+
+  function openCodeVariantLabel(variant) {
+    const id = String(variant || '').trim();
+    const key = `opencode.variant.${id}`;
+    const translated = i18n.t(key);
+    return translated === key ? id : translated;
+  }
+
+  function openCodeModelVariantModelId(option) {
+    const id = String(option?.configuredModelId || option?.id || '').trim();
+    return id && id.includes('/') ? id : '';
+  }
+
+  function openCodeModelVariantOptions(option) {
+    const seen = new Set();
+    const values = [];
+    const push = (value) => {
+      const cleanValue = String(value || '').trim();
+      if (!cleanValue || seen.has(cleanValue)) {
+        return;
+      }
+
+      seen.add(cleanValue);
+      values.push(cleanValue);
+    };
+    if (Array.isArray(option?.variantOptions)) {
+      option.variantOptions.forEach(push);
+    }
+    push(option?.variant);
+    return values;
+  }
+
+  function openCodeSelectedModelVariant(option) {
+    const current = String(option?.variant || '').trim();
+    const options = openCodeModelVariantOptions(option);
+    return current && options.includes(current) ? current : '';
+  }
+
+  function openCodeActiveVariantModel(profile = activeProfile()) {
+    const option = activeModel(profile);
+    const modelId = openCodeModelVariantModelId(option);
+    const variants = openCodeModelVariantOptions(option);
+    return {
+      option,
+      modelId,
+      variants,
+      selected: openCodeSelectedModelVariant(option),
+    };
+  }
+
+  function updateOpenCodeModelVariant(profile, modelId, variant) {
+    if (!profile || !modelId || !variant) {
+      return;
+    }
+
+    for (const option of modelOptionsFor(profile)) {
+      const optionModelId = openCodeModelVariantModelId(option);
+      if (option.id !== modelId && optionModelId !== modelId) {
+        continue;
+      }
+
+      option.variant = variant;
+      if (option.id === 'configured') {
+        const [, ...modelParts] = modelId.split('/');
+        const modelLabel = modelParts.join('/') || modelId;
+        option.summaryLabel = `${modelLabel} · ${variant}`;
+      }
+    }
+  }
+
+  function maybeShowOpenCodeVariantDialog(option, options = {}) {
+    if (activeId !== 'opencode' || openCodeModelVariantOptions(option).length === 0) {
+      return false;
+    }
+
+    showOpenCodeStatusDialog('variants', {
+      commandQuery: 'variants',
+      returnTo: options.returnTo,
+    });
+    return true;
+  }
+
   function openCodeDialogModelOptions() {
     const profile = activeProfile();
     const selectedId = activeModel(profile).id;
@@ -3525,9 +3697,10 @@
 
   function openCodeStatusLines(profile) {
     const model = activeModel(profile);
+    const displayModel = localizedCliOption(model, 'model');
     const modelLabel = model.custom && activeCustomModel(activeId)
       ? activeCustomModel(activeId)
-      : localizedCliOption(model, 'model')?.label;
+      : modelSummaryText(model, displayModel);
     const mode = localizedCliOption(activeAgentMode(profile), 'agentMode');
     const mcpServers = Array.isArray(contextSummary?.mcpServers) ? contextSummary.mcpServers : [];
     const connectedMcpCount = mcpServers.filter((entry) => entry?.status === 'connected').length;
@@ -3555,7 +3728,17 @@
   }
 
   function openCodeVariantLines() {
-    return [{ text: 'No model variants configured' }];
+    const state = openCodeActiveVariantModel(activeProfile());
+    if (state.variants.length === 0) {
+      return [{ text: 'Current model does not expose reasoning depth options' }];
+    }
+
+    const display = localizedCliOption(state.option, 'model');
+    return [
+      { text: `Model ${display.summaryLabel || display.label || state.modelId || 'Configured'}` },
+      { text: `Current reasoning depth ${state.selected ? openCodeVariantLabel(state.selected) : 'Configured default'}` },
+      { text: `Available ${state.variants.map(openCodeVariantLabel).join(', ')}` },
+    ];
   }
 
   function openCodeOrgLines() {
@@ -3573,7 +3756,7 @@
       return contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.empty');
     }
     if (kind === 'variants') {
-      return 'No model variants configured';
+      return 'Current model does not expose reasoning depth options';
     }
     return 'No options';
   }
@@ -3631,7 +3814,9 @@
       return 'LSPs auto-detected from file types';
     }
     if (kind === 'variants') {
-      return 'Select a model variant';
+      const state = openCodeActiveVariantModel(activeProfile());
+      const display = localizedCliOption(state.option, 'model');
+      return `Current model: ${display.summaryLabel || display.label || state.modelId || 'Configured'}`;
     }
     if (kind === 'org') {
       return 'Switch OpenCode organization';
@@ -3708,6 +3893,18 @@
       });
     }
 
+    if (kind === 'variants') {
+      const state = openCodeActiveVariantModel(profile);
+      const display = localizedCliOption(state.option, 'model');
+      const modelLabel = display.summaryLabel || display.label || state.modelId || 'Configured';
+      return state.variants.map((variant) => ({
+        id: variant,
+        label: openCodeVariantLabel(variant),
+        meta: modelLabel,
+        selected: variant === state.selected,
+      }));
+    }
+
     return [];
   }
 
@@ -3781,15 +3978,53 @@
     });
   }
 
+  function openCodeDialogSnapshot(kind = openCodeDialogKind) {
+    return {
+      kind,
+      query: openCodeDialogQuery,
+      activeIndex: openCodeDialogActiveIndex,
+      commandEchoQuery: openCodeDialogCommandEchoQuery,
+      echoCleanupPending: openCodeDialogEchoCleanupPending,
+    };
+  }
+
   function closeOpenCodeStatusDialog({ focusPrompt = true } = {}) {
     openCodeDialogKind = '';
     openCodeDialogQuery = '';
     openCodeDialogCommandEchoQuery = '';
     openCodeDialogEchoCleanupPending = false;
+    openCodeDialogHistory = [];
     renderOpenCodeStatusDialog();
     if (focusPrompt) {
       focusPromptInputAfterDialogClose();
     }
+  }
+
+  function restoreOpenCodeStatusDialog(snapshot) {
+    if (!snapshot?.kind) {
+      return false;
+    }
+
+    openCodeDialogKind = snapshot.kind;
+    openCodeDialogQuery = snapshot.query || '';
+    openCodeDialogCommandEchoQuery = snapshot.commandEchoQuery || '';
+    openCodeDialogEchoCleanupPending = Boolean(snapshot.echoCleanupPending);
+    openCodeDialogOpenSequence += 1;
+    openCodeDialogOpenedAt = Date.now();
+    openCodeDialogActiveIndex = Number.isFinite(snapshot.activeIndex)
+      ? snapshot.activeIndex
+      : initialOpenCodeDialogActiveIndex(snapshot.kind);
+    renderOpenCodeStatusDialog();
+    return true;
+  }
+
+  function dismissOpenCodeStatusDialog(options = {}) {
+    const previous = openCodeDialogHistory.pop();
+    if (previous && restoreOpenCodeStatusDialog(previous)) {
+      return;
+    }
+
+    closeOpenCodeStatusDialog(options);
   }
 
   function showOpenCodeStatusDialog(kind, options = {}) {
@@ -3797,6 +4032,7 @@
     openCodeDialogQuery = '';
     openCodeDialogCommandEchoQuery = normalizeOpenCodeDialogCommandQuery(options.commandQuery);
     openCodeDialogEchoCleanupPending = Boolean(openCodeDialogCommandEchoQuery);
+    openCodeDialogHistory = options.returnTo ? [options.returnTo] : [];
     openCodeDialogOpenSequence += 1;
     openCodeDialogOpenedAt = Date.now();
     openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex(kind);
@@ -3845,7 +4081,7 @@
     close.type = 'button';
     close.setAttribute('aria-label', 'Close');
     close.textContent = 'esc';
-    close.addEventListener('click', closeOpenCodeStatusDialog);
+    close.addEventListener('click', () => dismissOpenCodeStatusDialog());
 
     header.append(titleWrap, close);
     dialog.appendChild(header);
@@ -4266,16 +4502,23 @@
 
     if (kind === 'models') {
       const option = modelOptionsFor(activeProfile()).find((item) => item.id === value);
+      const returnTo = openCodeDialogKind === 'models' ? openCodeDialogSnapshot('models') : undefined;
       activeModelByProvider[activeId] = value;
       modelSelect.value = value;
       rememberRecentModel(activeId, value);
       persist();
       persistUserSelection();
-      closeOpenCodeStatusDialog();
-      renderAll();
       if (option?.custom) {
+        closeOpenCodeStatusDialog();
+        renderAll();
         modelMenu.open = true;
         customModelInput.focus();
+      } else if (maybeShowOpenCodeVariantDialog(option, { returnTo })) {
+        renderAll();
+        return;
+      } else {
+        closeOpenCodeStatusDialog();
+        renderAll();
       }
       return;
     }
@@ -4286,6 +4529,25 @@
       legacyWorkflowMode = undefined;
       persist();
       persistUserSelection();
+      closeOpenCodeStatusDialog();
+      renderAll();
+      return;
+    }
+
+    if (kind === 'variants') {
+      const profile = activeProfile();
+      const state = openCodeActiveVariantModel(profile);
+      const selectedVariant = state.variants.includes(value) ? value : '';
+      if (!state.modelId || !selectedVariant) {
+        return;
+      }
+
+      updateOpenCodeModelVariant(profile, state.modelId, selectedVariant);
+      vscode.postMessage({
+        command: 'setOpenCodeModelVariant',
+        modelId: state.modelId,
+        variant: selectedVariant,
+      });
       closeOpenCodeStatusDialog();
       renderAll();
       return;
@@ -4524,17 +4786,8 @@
     }
 
     if (!activeId || !selectedProfile) {
-      const firstInstallHintProfile = profiles.find((profile) => profile?.installHint && !profile.installed);
-      const noProviderSubtitle = firstInstallHintProfile
-        ? providerUnavailableMessage(firstInstallHintProfile)
-        : i18n.t('provider.unavailable');
       syncMessageStatusTimer(false);
-      appendEmptyState(
-        i18n.t('provider.noInstalled'),
-        noProviderSubtitle,
-        true,
-        firstInstallHintProfile?.installHint
-      );
+      appendCliSetupState();
       restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
       return;
     }
@@ -4542,12 +4795,7 @@
     if (conversation.length === 0 && !isPending) {
       syncMessageStatusTimer(false);
       if (!selectedProfile.installed) {
-        appendEmptyState(
-          i18n.t('provider.noInstalled'),
-          providerUnavailableMessage(selectedProfile),
-          true,
-          selectedProfile.installHint
-        );
+        appendCliSetupState(selectedProfile);
         restoreMessageScroll(shouldStickToBottom, previousScrollTop, messageThreadKey);
         return;
       }
@@ -4978,6 +5226,138 @@
     messages.appendChild(empty);
   }
 
+  function appendCliSetupState(fallbackProfile) {
+    const setupList = setupProfilesForOnboarding();
+    const recommended = recommendedSetupProfile(setupList)
+      || normalizeSetupProfile(fallbackProfile);
+    if (setupList.length === 0 && !recommended) {
+      appendEmptyState(
+        i18n.t('provider.noInstalled'),
+        i18n.t('provider.unavailable'),
+        true
+      );
+      return;
+    }
+
+    const empty = document.createElement('div');
+    empty.className = 'empty-state cli-setup-state';
+
+    const title = document.createElement('div');
+    title.className = 'empty-title';
+    title.textContent = i18n.t('setup.title');
+    empty.appendChild(title);
+
+    const subtitle = document.createElement('div');
+    subtitle.className = 'empty-subtitle';
+    subtitle.textContent = i18n.t('setup.subtitle');
+    empty.appendChild(subtitle);
+
+    const cards = document.createElement('div');
+    cards.className = 'cli-setup-list';
+    for (const profile of setupList) {
+      cards.appendChild(createCliSetupCard(profile, profile.id === recommended?.id));
+    }
+    empty.appendChild(cards);
+
+    const footer = document.createElement('div');
+    footer.className = 'suggestion-list cli-setup-footer';
+    [
+      ['refreshProviders', 'setup.refresh'],
+      ['copyInstall', 'setup.copyRecommended'],
+      ['openSettings', 'setup.openSettings'],
+    ].forEach(([action, labelKey]) => {
+      const button = document.createElement('button');
+      button.className = 'suggestion-button';
+      button.dataset.action = action;
+      if (action === 'copyInstall' && recommended?.installHint) {
+        button.dataset.installCommand = recommended.installHint;
+      }
+      if (action === 'openSettings') {
+        button.dataset.settingsSection = 'agents';
+      }
+      button.textContent = i18n.t(labelKey);
+      footer.appendChild(button);
+    });
+    empty.appendChild(footer);
+    messages.appendChild(empty);
+  }
+
+  function createCliSetupCard(profile, recommended) {
+    const card = document.createElement('div');
+    card.className = 'cli-setup-card';
+    if (recommended) {
+      card.classList.add('is-recommended');
+    }
+    card.dataset.cliId = profile.id;
+
+    const header = document.createElement('div');
+    header.className = 'cli-setup-card-header';
+
+    const icon = document.createElement('span');
+    icon.className = 'cli-setup-icon';
+    const iconUri = providerIconUri(profile);
+    if (iconUri) {
+      const logo = document.createElement('img');
+      logo.src = iconUri;
+      logo.alt = '';
+      logo.draggable = false;
+      icon.appendChild(logo);
+    } else {
+      icon.textContent = profile.icon || profile.name.slice(0, 1);
+    }
+    header.appendChild(icon);
+
+    const heading = document.createElement('div');
+    heading.className = 'cli-setup-heading';
+    const name = document.createElement('div');
+    name.className = 'cli-setup-name';
+    name.textContent = profile.name;
+    heading.appendChild(name);
+    const badge = document.createElement('div');
+    badge.className = 'cli-setup-badge';
+    badge.textContent = recommended ? i18n.t('setup.recommendedBadge') : i18n.t('provider.missing');
+    heading.appendChild(badge);
+    header.appendChild(heading);
+    card.appendChild(header);
+
+    const description = document.createElement('div');
+    description.className = 'cli-setup-description';
+    description.textContent = recommended
+      ? i18n.t('setup.openCodeDescription')
+      : profile.description;
+    card.appendChild(description);
+
+    const command = document.createElement('code');
+    command.className = 'cli-setup-command';
+    command.textContent = profile.installHint;
+    card.appendChild(command);
+
+    const actions = document.createElement('div');
+    actions.className = 'cli-setup-actions';
+
+    const installButton = document.createElement('button');
+    installButton.className = 'suggestion-button';
+    if (recommended) {
+      installButton.classList.add('suggestion-button--primary');
+    }
+    installButton.dataset.action = 'installCli';
+    installButton.dataset.cliId = profile.id;
+    installButton.textContent = recommended
+      ? i18n.t('setup.installRecommended')
+      : i18n.t('setup.installCli', { provider: profile.name });
+    actions.appendChild(installButton);
+
+    const copyButton = document.createElement('button');
+    copyButton.className = 'suggestion-button cli-setup-copy';
+    copyButton.dataset.action = 'copyInstall';
+    copyButton.dataset.installCommand = profile.installHint;
+    copyButton.textContent = i18n.t('empty.copyInstall');
+    actions.appendChild(copyButton);
+
+    card.appendChild(actions);
+    return card;
+  }
+
   function appendClaudeCodeHeader() {
     const header = document.createElement('div');
     header.className = 'claude-code-header';
@@ -5326,7 +5706,7 @@
     modelSelect.title = displayModel.description || i18n.t('model.label');
     modelSummaryLabel.textContent = model.custom && activeCustomModel(activeId)
       ? activeCustomModel(activeId)
-      : displayModel.summaryLabel || displayModel.label || i18n.t('model.short');
+      : modelSummaryText(model, displayModel);
     modelSummary?.setAttribute('title', displayModel.description || i18n.t('model.label'));
     const readonlyModel = profile?.id === 'opencode';
     modelMenu?.classList.toggle('is-readonly', Boolean(readonlyModel));
@@ -5487,6 +5867,38 @@
 
       agentModeOptionList.appendChild(button);
     });
+  }
+
+  function focusAgentModeOption(modeId) {
+    const buttons = Array.from(agentModeOptionList?.querySelectorAll('.option-list-item') || []);
+    const button = buttons.find((item) => item.dataset.value === modeId);
+    button?.focus();
+  }
+
+  function setActiveAgentMode(value, options = {}) {
+    activeAgentModeByProvider[activeId] = value;
+    agentModeSelect.value = value;
+    legacyWorkflowMode = undefined;
+    persist();
+    persistUserSelection();
+    renderAll();
+    if (options.keepMenuOpen && modeMenu) {
+      modeMenu.open = true;
+      requestAnimationFrame(() => focusAgentModeOption(value));
+    }
+  }
+
+  function switchAgentModeByDelta(delta) {
+    const profile = activeProfile();
+    const modes = agentModesFor(profile).filter((mode) => !mode.disabled);
+    if (modes.length <= 1) {
+      return;
+    }
+
+    const currentId = activeAgentModeId(activeId);
+    const currentIndex = Math.max(0, modes.findIndex((mode) => mode.id === currentId));
+    const next = modes[(currentIndex + delta + modes.length) % modes.length];
+    setActiveAgentMode(next.id, { keepMenuOpen: true });
   }
 
   function renderContextControls() {
@@ -5667,6 +6079,7 @@
       mode: 'agent',
       agentMode: preferredWorkflowMode || activeAgentModeId(providerId),
       model: activeModelId(providerId),
+      modelVariant: activeModelVariant(providerId),
       customModel: activeCustomModel(providerId),
       runtime: activeRuntimeId(providerId),
       permissionMode: activePermissionId(providerId),
@@ -7847,45 +8260,6 @@
     });
   }
 
-  function appendInlineMarkdown(container, text) {
-    const pattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|`[^`]+`)/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = pattern.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        container.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
-      }
-
-      const token = match[0];
-      if (token.startsWith('[')) {
-        const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-        const anchor = document.createElement('a');
-        anchor.className = 'md-link';
-        anchor.textContent = link?.[1] || token;
-        anchor.href = link?.[2] || '#';
-        anchor.title = link?.[2] || '';
-        container.appendChild(anchor);
-      } else if (token.startsWith('**')) {
-        const strong = document.createElement('strong');
-        strong.className = 'md-strong';
-        strong.textContent = token.slice(2, -2);
-        container.appendChild(strong);
-      } else {
-        const code = document.createElement('code');
-        code.className = 'md-code';
-        code.textContent = token.slice(1, -1);
-        container.appendChild(code);
-      }
-
-      lastIndex = pattern.lastIndex;
-    }
-
-    if (lastIndex < text.length) {
-      container.appendChild(document.createTextNode(text.slice(lastIndex)));
-    }
-  }
-
   function promptInputMaxHeight() {
     const parsedMaxHeight = Number.parseFloat(window.getComputedStyle(input).maxHeight);
     return Number.isFinite(parsedMaxHeight) && parsedMaxHeight > 0
@@ -8291,11 +8665,7 @@
   actionSelect.addEventListener('change', renderComposer);
 
   agentModeSelect.addEventListener('change', () => {
-    activeAgentModeByProvider[activeId] = agentModeSelect.value;
-    legacyWorkflowMode = undefined;
-    persist();
-    persistUserSelection();
-    renderAll();
+    setActiveAgentMode(agentModeSelect.value);
   });
 
   agentModeOptionList?.addEventListener('click', (event) => {
@@ -8304,13 +8674,17 @@
       return;
     }
 
-    activeAgentModeByProvider[activeId] = button.dataset.value;
-    agentModeSelect.value = button.dataset.value;
-    legacyWorkflowMode = undefined;
-    persist();
-    persistUserSelection();
-    renderAll();
+    setActiveAgentMode(button.dataset.value);
     modeMenu.open = false;
+  });
+
+  modeMenu?.addEventListener('keydown', (event) => {
+    if (!modeMenu.open || event.key !== 'Tab') {
+      return;
+    }
+
+    event.preventDefault();
+    switchAgentModeByDelta(event.shiftKey ? -1 : 1);
   });
 
   modelSummary?.addEventListener('click', (event) => {
@@ -8333,11 +8707,15 @@
   });
 
   modelSelect.addEventListener('change', () => {
+    const option = modelOptionsFor(activeProfile()).find((item) => item.id === modelSelect.value);
     activeModelByProvider[activeId] = modelSelect.value;
     rememberRecentModel(activeId, modelSelect.value);
     persist();
     persistUserSelection();
     renderAll();
+    if (option && !option.custom) {
+      maybeShowOpenCodeVariantDialog(option);
+    }
   });
 
   modelOptionList?.addEventListener('click', (event) => {
@@ -8357,6 +8735,9 @@
     if (option?.custom) {
       modelMenu.open = true;
       customModelInput.focus();
+    } else if (maybeShowOpenCodeVariantDialog(option)) {
+      claudeModelMenuExplicit = false;
+      modelMenu.open = false;
     } else {
       claudeModelMenuExplicit = false;
       modelMenu.open = false;
@@ -8504,7 +8885,23 @@
     if (action === 'openSettings') {
       event.preventDefault();
       event.stopPropagation();
-      vscode.postMessage({ command: 'openSettings', section: 'apiProviders' });
+      vscode.postMessage({ command: 'openSettings', section: button.dataset.settingsSection || 'apiProviders' });
+      return;
+    }
+
+    if (action === 'refreshProviders') {
+      event.preventDefault();
+      event.stopPropagation();
+      profilesLoading = true;
+      vscode.postMessage({ command: 'checkProfiles' });
+      renderAll();
+      return;
+    }
+
+    if (action === 'installCli') {
+      event.preventDefault();
+      event.stopPropagation();
+      vscode.postMessage({ command: 'installCli', cliId: button.dataset.cliId });
       return;
     }
 
@@ -8557,7 +8954,7 @@
     if (event.key === 'Escape') {
       if (openCodeDialogKind) {
         event.preventDefault();
-        closeOpenCodeStatusDialog();
+        dismissOpenCodeStatusDialog();
         return;
       }
       if (apiSettingsPage && !apiSettingsPage.hidden) {
@@ -8585,13 +8982,18 @@
   window.addEventListener('message', (event) => {
     const message = event.data;
     switch (message.command) {
+      case 'refreshStarted':
+        profilesLoading = true;
+        renderAll();
+        break;
       case 'profiles':
         profilesLoading = false;
         profiles = message.profiles || [];
+        setupProfiles = normalizeSetupProfiles(message.setupProfiles);
         apiProviderSettings = normalizeApiProviderSettings(apiProviderSettings);
         {
           const availableProfiles = visibleInstalledProfiles();
-          const storedAgentModes = persistedSelectionMap(message.activeAgentModeByProvider);
+          const storedAgentModes = persistableAgentModeMap(message.activeAgentModeByProvider);
           const storedRecentModels = persistedSelectionMap(message.recentModelByProvider);
           const storedFavoriteModels = persistedSelectionMap(message.favoriteModelByProvider);
           const storedCustomModels = persistedSelectionMap(message.customModelByProvider);

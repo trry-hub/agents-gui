@@ -11,8 +11,12 @@ import {
 } from './cliPathResolver';
 import {
   OpenCodeAgentDiscovery,
+  OpenCodeModelMetadataMap,
+  OpenCodeModelState,
   parseOpenCodeDebugConfigOutput,
   parseOpenCodeAgentListLine,
+  parseOpenCodeModelMetadata,
+  parseOpenCodeModelState,
   parseOpenCodeModelsOutput,
 } from './opencodeAgents';
 import type { OpenCodeServerClient } from './openCodeServerClient';
@@ -48,8 +52,12 @@ export class CliDiscovery {
         if (installed && p.id === 'opencode') {
           const command = await this.resolveCommandPath(p.command);
           let discovery: OpenCodeAgentDiscovery = { modes: [] };
+          let modelState: OpenCodeModelState = { recentModelIds: [], variants: {} };
+          let modelMetadata: OpenCodeModelMetadataMap = {};
           let discoveredModels: CliModelOption[] = [];
           if (command) {
+            modelState = this.getOpenCodeModelState();
+            modelMetadata = this.getOpenCodeModelMetadata();
             [discovery, discoveredModels] = await Promise.all([
               this.getOpenCodeAgentModes(command),
               this.getOpenCodeModelOptions(command),
@@ -57,20 +65,25 @@ export class CliDiscovery {
           }
           const agentModes = discovery.modes;
           if (agentModes.length > 0) {
+            const mergedAgentModes = mergeOpenCodeAgentModes(
+              profile.agentModes,
+              agentModes,
+              discovery.defaultAgentId,
+              { includeBaseWhenDiscovered: true }
+            );
             profile = {
               ...profile,
-              agentModes,
-              defaultAgentMode: preferredOpenCodeDefaultAgent(
-                agentModes,
-                discovery.defaultAgentId ?? profile.defaultAgentMode
-              ),
+              agentModes: mergedAgentModes,
+              defaultAgentMode: pickOpenCodeDefaultAgentMode(mergedAgentModes, discovery.defaultAgentId),
             };
           }
           if (discoveredModels.length > 0) {
             const modelOptions = mergeOpenCodeModelOptions(
               profile.modelOptions ?? [],
               discoveredModels,
-              discovery.defaultModelId
+              discovery.defaultModelId ?? modelState.currentModelId,
+              modelState.variants,
+              modelMetadata
             );
             profile = {
               ...profile,
@@ -211,18 +224,25 @@ export class CliDiscovery {
   private async getOpenCodeAgentModes(command: string): Promise<OpenCodeAgentDiscovery> {
     const cwd = this.options.workspaceRoot();
     const discovery = await this.getOpenCodeAgentModesFromDebugConfig(command, cwd);
-    if (discovery.modes.length > 0) {
+    const listModes = filterOpenCodeVisibleAgentModes(
+      await this.getOpenCodeAgentModesFromCliList(command, cwd),
+      discovery.modelBoundAgentIds
+    );
+    if (listModes.length > 0) {
       return {
         ...discovery,
         modes: mergeOpenCodeAgentModes(
           discovery.modes,
-          await this.getOpenCodeAgentModesFromCliList(command, cwd)
+          listModes,
+          discovery.defaultAgentId,
+          { includeBaseWhenDiscovered: true }
         ),
       };
     }
 
     return {
-      modes: await this.getOpenCodeAgentModesFromCliList(command, cwd),
+      ...discovery,
+      modes: filterOpenCodeVisibleAgentModes(discovery.modes, discovery.modelBoundAgentIds),
     };
   }
 
@@ -431,6 +451,24 @@ export class CliDiscovery {
     });
   }
 
+  private getOpenCodeModelState(): OpenCodeModelState {
+    const statePath = path.join(os.homedir(), '.local', 'state', 'opencode', 'model.json');
+    try {
+      return parseOpenCodeModelState(JSON.parse(fs.readFileSync(statePath, 'utf8')));
+    } catch {
+      return { recentModelIds: [], variants: {} };
+    }
+  }
+
+  private getOpenCodeModelMetadata(): OpenCodeModelMetadataMap {
+    const statePath = path.join(os.homedir(), '.cache', 'opencode', 'models.json');
+    try {
+      return parseOpenCodeModelMetadata(JSON.parse(fs.readFileSync(statePath, 'utf8')));
+    } catch {
+      return {};
+    }
+  }
+
   private getCommandVersion(profile: CliProfile): Promise<string | undefined> {
     return this.resolveCommandPath(profile.command).then((command) => {
       if (!command) {
@@ -488,35 +526,84 @@ export function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-function preferredOpenCodeDefaultAgent(modes: CliAgentMode[], fallback: string): string {
-  const runnableModes = modes.filter((mode) => !mode.disabled);
-  return (
-    runnableModes.find((mode) => mode.id === fallback)?.id ??
-    runnableModes[0]?.id ??
-    fallback
-  );
-}
-
-function mergeOpenCodeAgentModes(...groups: CliAgentMode[][]): CliAgentMode[] {
+function mergeOpenCodeAgentModes(
+  baseModes: CliAgentMode[],
+  discoveredModes: CliAgentMode[],
+  configuredAgentId?: string,
+  options: { includeBaseWhenDiscovered?: boolean } = {}
+): CliAgentMode[] {
+  const baseVisibleModes = discoveredModes.length > 0 && !options.includeBaseWhenDiscovered
+    ? []
+    : baseModes;
   const seen = new Set<string>();
   const merged: CliAgentMode[] = [];
-  for (const group of groups) {
+  for (const group of [baseVisibleModes, discoveredModes]) {
     for (const mode of group) {
       if (seen.has(mode.id)) {
         continue;
       }
 
       seen.add(mode.id);
-      merged.push(mode);
+      merged.push(decorateOpenCodeConfiguredAgentMode(mode, configuredAgentId));
     }
   }
   return merged;
 }
 
+function filterOpenCodeVisibleAgentModes(
+  modes: CliAgentMode[],
+  modelBoundAgentIds: string[] | undefined
+): CliAgentMode[] {
+  const hidden = new Set(modelBoundAgentIds ?? []);
+  return orderOpenCodeAgentModes(modes.filter((mode) => !hidden.has(mode.id)));
+}
+
+function orderOpenCodeAgentModes(modes: CliAgentMode[]): CliAgentMode[] {
+  const priority = new Map<string, number>([
+    ['build', 0],
+    ['plan', 1],
+  ]);
+  return modes
+    .map((mode, index) => ({ mode, index }))
+    .sort((left, right) => {
+      const leftPriority = priority.get(left.mode.id) ?? 100;
+      const rightPriority = priority.get(right.mode.id) ?? 100;
+      return leftPriority - rightPriority || left.index - right.index;
+    })
+    .map((item) => item.mode);
+}
+
+function pickOpenCodeDefaultAgentMode(
+  modes: CliAgentMode[],
+  configuredAgentId: string | undefined
+): string {
+  const selectableModes = modes.filter((mode) => !mode.disabled);
+  return selectableModes.find((mode) => mode.id === configuredAgentId)?.id
+    ?? selectableModes.find((mode) => mode.id === 'build')?.id
+    ?? selectableModes[0]?.id
+    ?? 'configured';
+}
+
+function decorateOpenCodeConfiguredAgentMode(
+  mode: CliAgentMode,
+  configuredAgentId: string | undefined
+): CliAgentMode {
+  if (mode.id !== 'configured' || !configuredAgentId) {
+    return mode;
+  }
+
+  return {
+    ...mode,
+    description: `${mode.description} Current OpenCode configured agent: ${configuredAgentId}.`,
+  };
+}
+
 function mergeOpenCodeModelOptions(
   baseOptions: CliModelOption[],
   discoveredOptions: CliModelOption[],
-  configuredModelId?: string
+  configuredModelId?: string,
+  variants: Record<string, string> = {},
+  modelMetadata: OpenCodeModelMetadataMap = {}
 ): CliModelOption[] {
   const baseVisibleOptions = discoveredOptions.length > 0
     ? baseOptions.filter((option) => option.id !== 'default')
@@ -525,6 +612,13 @@ function mergeOpenCodeModelOptions(
   const customOptions = baseVisibleOptions.filter((option) => option.custom);
   const seen = new Set<string>();
   const merged: CliModelOption[] = [];
+  const variantOptionsByModel = new Map<string, string[]>();
+  for (const option of [...baseOptions, ...discoveredOptions]) {
+    const variantOptions = normalizeOpenCodeVariantOptions(option.variantOptions);
+    if (variantOptions.length > 0) {
+      variantOptionsByModel.set(option.id, variantOptions);
+    }
+  }
 
   for (const option of [...defaultOptions, ...discoveredOptions, ...customOptions]) {
     if (seen.has(option.id)) {
@@ -532,27 +626,88 @@ function mergeOpenCodeModelOptions(
     }
 
     seen.add(option.id);
-    merged.push(decorateOpenCodeConfiguredModelOption(option, configuredModelId));
+    merged.push(decorateOpenCodeModelOption(
+      option,
+      configuredModelId,
+      variants,
+      modelMetadata,
+      variantOptionsByModel
+    ));
   }
 
   return merged;
 }
 
-function decorateOpenCodeConfiguredModelOption(
+function decorateOpenCodeModelOption(
   option: CliModelOption,
-  configuredModelId: string | undefined
+  configuredModelId: string | undefined,
+  variants: Record<string, string>,
+  modelMetadata: OpenCodeModelMetadataMap,
+  variantOptionsByModel: Map<string, string[]>
 ): CliModelOption {
-  if (option.id !== 'configured' || !configuredModelId) {
+  const variant = variants[option.id];
+  const variantOptions = variantOptionsByModel.get(option.id)
+    ?? normalizeOpenCodeVariantOptions(modelMetadata[option.id]?.variantOptions);
+  if (option.id !== 'configured') {
+    return {
+      ...option,
+      ...(variant ? { variant } : {}),
+      ...(variantOptions.length > 0 ? { variantOptions } : {}),
+      description: variant
+        ? `${option.description} Current OpenCode variant: ${variant}.`
+        : option.description,
+    };
+  }
+
+  if (!configuredModelId) {
     return option;
   }
 
+  const configuredVariantOptions = variantOptionsByModel.get(configuredModelId)
+    ?? normalizeOpenCodeVariantOptions(modelMetadata[configuredModelId]?.variantOptions);
   const [, ...modelParts] = configuredModelId.split('/');
-  const summaryLabel = modelParts.join('/') || configuredModelId;
+  const summaryLabel = formatConfiguredOpenCodeModelSummary(
+    modelParts.join('/') || configuredModelId,
+    variants[configuredModelId]
+  );
+  const variantText = variants[configuredModelId]
+    ? ` Current OpenCode variant: ${variants[configuredModelId]}.`
+    : '';
   return {
     ...option,
+    configuredModelId,
     summaryLabel,
-    description: `${option.description} Current OpenCode configured model: ${configuredModelId}.`,
+    variant: variants[configuredModelId],
+    ...(configuredVariantOptions.length > 0 ? { variantOptions: configuredVariantOptions } : {}),
+    description: `${option.description} Current OpenCode configured model: ${configuredModelId}.${variantText}`,
   };
+}
+
+function formatConfiguredOpenCodeModelSummary(modelLabel: string, variant: string | undefined): string {
+  return variant ? `${modelLabel} · ${variant}` : modelLabel;
+}
+
+function normalizeOpenCodeVariantOptions(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      continue;
+    }
+
+    const cleanItem = item.trim();
+    if (!cleanItem || seen.has(cleanItem)) {
+      continue;
+    }
+
+    seen.add(cleanItem);
+    result.push(cleanItem);
+  }
+  return result;
 }
 
 function normalizeCommandVersionOutput(output: string): string | undefined {

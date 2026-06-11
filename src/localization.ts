@@ -7,7 +7,9 @@ type RuntimeMessageKey =
   | 'statusBar.tooltip'
   | 'notification.stoppedAll'
   | 'notification.installCommandCopied'
+  | 'notification.installCommandSent'
   | 'notification.messageCopied'
+  | 'notification.refreshingProviders'
   | 'warning.starting'
   | 'error.unknownProvider'
   | 'error.activationFailed'
@@ -27,7 +29,9 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'statusBar.tooltip': 'Open Agents GUI',
     'notification.stoppedAll': 'All AI CLI processes stopped.',
     'notification.installCommandCopied': 'Installation command copied to clipboard.',
+    'notification.installCommandSent': 'Installation command sent to the terminal. Click refresh after it finishes.',
     'notification.messageCopied': 'Message copied to clipboard.',
+    'notification.refreshingProviders': 'Refreshing Agents GUI providers...',
     'warning.starting': 'Agents GUI is still starting. Try again in a moment.',
     'error.unknownProvider': 'Unknown provider: {provider}',
     'error.activationFailed': 'Agents GUI failed to activate: {message}',
@@ -48,7 +52,9 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'statusBar.tooltip': '打开 Agents GUI',
     'notification.stoppedAll': '已停止所有 AI CLI 进程。',
     'notification.installCommandCopied': '安装命令已复制到剪贴板。',
+    'notification.installCommandSent': '安装命令已发送到终端。完成后点击重新检测。',
     'notification.messageCopied': '消息已复制到剪贴板。',
+    'notification.refreshingProviders': '正在刷新 Agents GUI 提供方...',
     'warning.starting': 'Agents GUI 正在启动，请稍后再试。',
     'error.unknownProvider': '未知提供方：{provider}',
     'error.activationFailed': 'Agents GUI 激活失败：{message}',

@@ -514,7 +514,7 @@ export class CommitMessageCommand {
       copyInstallCommand
     );
     if (choice === openSetup) {
-      await this.openCommitMessageSettings();
+      await this.openProviderSetup();
     }
     if (choice === copyInstallCommand) {
       await vscode.env.clipboard.writeText(preferred.installHint);
@@ -597,6 +597,11 @@ export class CommitMessageCommand {
 
   private async openCommitMessageSettings(): Promise<void> {
     await vscode.commands.executeCommand('agents-gui.openProviderSettings', 'commitMessage');
+  }
+
+  private async openProviderSetup(): Promise<void> {
+    await vscode.commands.executeCommand('agents-gui.openPanel');
+    await vscode.commands.executeCommand('agents-gui.refreshProviders');
   }
 
   private async generateCommitMessage(

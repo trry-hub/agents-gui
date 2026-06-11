@@ -334,6 +334,10 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /if \(installedProfiles\.length === 0\) \{\s*await this\.promptProviderSetup\(locale, preferred\);\s*return undefined;\s*\}/s);
   assert.match(source, /pickInstalledProfile\(\s*locale,\s*this\.t\(locale, 'chooseCommitCli'\),\s*false,\s*installedProfiles\s*\)/s);
   assert.match(source, /private async promptProviderSetup\(locale: RuntimeLocale, preferred: CliProfile\): Promise<void>/);
+  assert.match(source, /await this\.openProviderSetup\(\);/);
+  assert.match(source, /private async openProviderSetup\(\): Promise<void>/);
+  assert.match(source, /executeCommand\('agents-gui\.openPanel'\)/);
+  assert.match(source, /executeCommand\('agents-gui\.refreshProviders'\)/);
   assert.match(source, /persistSelection \? 'useProviderForCommitMessage' : 'useOnceForCommitMessage'/);
   assert.match(source, /installedProfiles: CliProfile\[\]/);
   assert.match(source, /showQuickPick\(providerItems/);

@@ -84,6 +84,8 @@ can migrate incrementally behind this port without a full rewrite.
 - `media/claudeActions.js` owns Claude action drawer definitions, label
   derivation, trailing metadata, active toggle state, and query matching
   independently from drawer DOM rendering.
+- `media/inlineMarkdown.js` owns lightweight inline Markdown rendering and link
+  scheme allowlisting so transcript links cannot bypass the Webview boundary.
 
 ## Architecture guardrails
 

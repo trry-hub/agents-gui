@@ -6,7 +6,7 @@
   }
   root.AgentsGuiOpenCodeDialogState = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
-  const OPTION_DIALOG_KINDS = Object.freeze(['sessions', 'models', 'agents']);
+  const OPTION_DIALOG_KINDS = Object.freeze(['sessions', 'models', 'agents', 'variants']);
 
   function optionDialogKinds() {
     return new Set(OPTION_DIALOG_KINDS);
@@ -175,10 +175,11 @@
 
   function modelFooter(option, providerId) {
     const id = String(option?.id || '');
+    const variant = String(option?.variant || '').trim();
     if (providerId === 'opencode' || /(?:^|-)free$/.test(id)) {
-      return 'Free';
+      return ['Free', variant].filter(Boolean).join(' · ');
     }
-    return '';
+    return variant;
   }
 
   function groupModelOptions(options, settings = {}) {

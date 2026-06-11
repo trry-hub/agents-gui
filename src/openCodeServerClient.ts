@@ -1473,7 +1473,32 @@ export class OpenCodeServerClient {
   private errorMessage(errorOwner: Record<string, unknown>): string | undefined {
     const error = this.firstObject(errorOwner.error, errorOwner);
     const data = this.firstObject(error.data);
-    return this.pickString(data.message, error.message);
+    const message = this.pickString(data.message, error.message);
+    const responseMessage = this.responseBodyMessage(
+      this.pickString(data.responseBody, error.responseBody)
+    );
+    if (responseMessage && (!message || this.isGenericServerError(message))) {
+      return responseMessage;
+    }
+
+    return message ?? responseMessage;
+  }
+
+  private responseBodyMessage(responseBody: string | undefined): string | undefined {
+    if (!responseBody) {
+      return undefined;
+    }
+
+    const record = this.parseHttpErrorObject(responseBody);
+    if (!record) {
+      return undefined;
+    }
+
+    return this.httpErrorObjectMessage(record);
+  }
+
+  private isGenericServerError(message: string): boolean {
+    return /^Unexpected server error\. Check server logs for details\.?$/i.test(message.trim());
   }
 
   private normalizeProviderError(message: string): string {
