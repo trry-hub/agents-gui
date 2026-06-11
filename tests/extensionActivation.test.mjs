@@ -56,7 +56,7 @@ test('refresh providers title action reloads the full sidebar state', () => {
   );
   assert.match(
     sidebarSource,
-    /async refreshProviders\(\): Promise<void> \{\s*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);\s*await this\.sendProfiles\(\);\s*await this\.sendContextSummary\(\);\s*await this\.sendHomeAgentSettings\(\);\s*await this\.sendApiProviderSettings\(\);\s*await this\.sendCommitMessageSettings\(\);\s*\}/s
+    /async refreshProviders\(\): Promise<void> \{\s*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);\s*await this\.sendProfiles\(\{ force: true \}\);\s*await this\.sendContextSummary\(\);\s*await this\.sendHomeAgentSettings\(\);\s*await this\.sendApiProviderSettings\(\);\s*await this\.sendCommitMessageSettings\(\);\s*\}/s
   );
 });
 
@@ -66,7 +66,7 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(extensionSource, /const agentRuntime = new CliAgentRuntime\(cliManager\);/);
   assert.match(extensionSource, /const openCodeCapability = new CliOpenCodeAgentCapability\(cliManager\);/);
   assert.match(extensionSource, /new SidebarProvider\(context\.extensionUri, agentRuntime, \{/);
-  assert.match(sidebarSource, /import type \{ AgentRuntime, AgentSession \} from '\.\/agentRuntime';/);
+  assert.match(sidebarSource, /import type \{ AgentProfileStatusOptions, AgentRuntime, AgentSession \} from '\.\/agentRuntime';/);
   assert.match(sidebarSource, /import type \{ OpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/);
   assert.doesNotMatch(sidebarSource, /import \{ CliManager, Session \} from '\.\/cliManager';/);
   assert.match(sidebarSource, /private readonly agentRuntime: AgentRuntime/);
@@ -143,13 +143,15 @@ test('opencode server IO stays behind the server client adapter', () => {
 test('CLI discovery stays behind a dedicated provider discovery adapter', () => {
   assert.match(cliSource, /import \{ CliDiscovery, stableHash \} from '\.\/cliDiscovery';/);
   assert.match(cliSource, /private readonly cliDiscovery = new CliDiscovery/);
-  assert.match(cliSource, /this\.cliDiscovery\.getProfilesWithStatus\(CLI_PROFILES\)/);
+  assert.match(cliSource, /this\.cliDiscovery\.getProfilesWithStatus\(CLI_PROFILES, options\)/);
   assert.match(cliSource, /this\.cliDiscovery\.expandProfileEnv/);
   assert.doesNotMatch(cliSource, /import \* as fs from 'fs';/);
   assert.doesNotMatch(cliSource, /import \* as os from 'os';/);
   assert.match(cliDiscoverySource, /export class CliDiscovery/);
   assert.match(cliDiscoverySource, /async resolveCommandPath\(command: string\)/);
-  assert.match(cliDiscoverySource, /async getProfilesWithStatus\(baseProfiles: CliProfile\[\]\)/);
+  assert.match(cliDiscoverySource, /PROFILE_STATUS_CACHE_MS = 10_000/);
+  assert.match(cliDiscoverySource, /private profileStatusInflight\?/);
+  assert.match(cliDiscoverySource, /async getProfilesWithStatus\(\s*baseProfiles: CliProfile\[\],\s*options: CliProfileStatusOptions = \{\}/s);
   assert.match(cliDiscoverySource, /expandProfileEnv/);
   assert.match(cliDiscoverySource, /import \* as fs from 'fs';/);
   assert.match(cliDiscoverySource, /import \* as os from 'os';/);

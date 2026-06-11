@@ -49,6 +49,7 @@ export async function runExtensionSmokeProbe(
       {} as vscode.WebviewViewResolveContext,
       new vscode.CancellationTokenSource().token
     );
+    await webview.receive({ command: 'checkProfiles' });
     await waitFor(() => postedMessages.some((message) => message.command === 'profiles'), 'profiles');
 
     await webview.receive({ command: 'checkProfiles' });

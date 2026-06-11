@@ -43,7 +43,7 @@ export type WebviewToHostMessage =
     }
   | { command: 'stop'; cliId?: string; providerId?: string }
   | { command: 'sendSessionInput'; cliId?: string; providerId?: string; text?: string }
-  | { command: 'checkProfiles' }
+  | { command: 'checkProfiles'; force?: boolean }
   | {
       command: 'refreshContext';
       cliId?: string;

@@ -8,9 +8,13 @@ export interface AgentStartPromptOptions {
   promptArgs?: string[];
 }
 
+export interface AgentProfileStatusOptions {
+  force?: boolean;
+}
+
 export interface AgentRuntime {
   checkInstalled(profileId: string): Promise<boolean>;
-  getProfilesWithStatus(): Promise<CliProfile[]>;
+  getProfilesWithStatus(options?: AgentProfileStatusOptions): Promise<CliProfile[]>;
   startPrompt(
     cliId: string,
     initialInput?: string,
@@ -32,8 +36,8 @@ export class CliAgentRuntime implements AgentRuntime {
     return this.cliManager.checkInstalled(profileId);
   }
 
-  getProfilesWithStatus(): Promise<CliProfile[]> {
-    return this.cliManager.getProfilesWithStatus();
+  getProfilesWithStatus(options: AgentProfileStatusOptions = {}): Promise<CliProfile[]> {
+    return this.cliManager.getProfilesWithStatus(options);
   }
 
   startPrompt(

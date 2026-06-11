@@ -18,6 +18,7 @@ import { CliDiscovery, stableHash } from './cliDiscovery';
 import { CliProcessRunner } from './cliProcessRunner';
 import { OpenCodeServerClient, type OpenCodeEventStream } from './openCodeServerClient';
 import { getSystemProxyEnv } from './systemProxyEnv';
+import type { AgentProfileStatusOptions } from './agentRuntime';
 
 export type AgentRunTransport = 'process' | 'sse';
 export type AgentRunOutputStream = 'stdout' | 'stderr';
@@ -103,9 +104,9 @@ export class CliManager {
     return this.cliDiscovery.resolveCommandPath(command);
   }
 
-  async getProfilesWithStatus(): Promise<CliProfile[]> {
+  async getProfilesWithStatus(options: AgentProfileStatusOptions = {}): Promise<CliProfile[]> {
     const { CLI_PROFILES } = await import('./cliProfiles');
-    return this.cliDiscovery.getProfilesWithStatus(CLI_PROFILES);
+    return this.cliDiscovery.getProfilesWithStatus(CLI_PROFILES, options);
   }
 
   /** Start a CLI in prompt (non-interactive) mode. */

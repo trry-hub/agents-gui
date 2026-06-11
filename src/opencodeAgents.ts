@@ -4,23 +4,6 @@ const ANSI_PATTERN =
   // eslint-disable-next-line no-control-regex
   /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 
-export function parseOpenCodeAgentListOutput(output: string): CliAgentMode[] {
-  const seen = new Set<string>();
-  const modes: CliAgentMode[] = [];
-
-  for (const line of output.split(/\r?\n/)) {
-    const mode = parseOpenCodeAgentListLine(line);
-    if (!mode || seen.has(mode.id)) {
-      continue;
-    }
-
-    seen.add(mode.id);
-    modes.push(mode);
-  }
-
-  return modes;
-}
-
 export interface OpenCodeAgentDiscovery {
   modes: CliAgentMode[];
   defaultAgentId?: string;
@@ -302,26 +285,6 @@ export function parseOpenCodeModelId(modelId: string | undefined): OpenCodeModel
   }
 
   return { providerID, modelID: modelName };
-}
-
-export function parseOpenCodeAgentListLine(line: string): CliAgentMode | undefined {
-  const cleaned = line.replace(ANSI_PATTERN, '').trim();
-  const match = /^(.+?)\s+\((primary|subagent)\)$/.exec(cleaned);
-  if (!match) {
-    return undefined;
-  }
-
-  const id = match[1].trim();
-  if (!id) {
-    return undefined;
-  }
-
-  const role = match[2] as 'primary' | 'subagent';
-  if (isInternalOpenCodeAgent(id)) {
-    return undefined;
-  }
-
-  return createOpenCodeAgentMode(id, role);
 }
 
 function createOpenCodeAgentMode(

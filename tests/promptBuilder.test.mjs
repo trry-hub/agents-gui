@@ -39,7 +39,6 @@ const { getProviderExtensionBridge } = require('../.test-dist/providerExtensions
 const {
   parseOpenCodeDebugConfigOutput,
   parseOpenCodeConfigAgents,
-  parseOpenCodeAgentListOutput,
   parseOpenCodeModelsOutput,
   parseOpenCodeModelState,
   parseOpenCodeModelId,
@@ -436,33 +435,8 @@ test('opencode profile uses run command with prompt as argument', () => {
   assert.equal(profile.modelOptions.find((option) => option.id === 'default'), undefined);
   assert.equal(profile.agentModes.find((mode) => mode.id === 'default'), undefined);
   assert.equal(profile.agentModes.find((mode) => mode.id === 'configured'), undefined);
-  assert.deepEqual(profile.agentModes.find((mode) => mode.id === 'build')?.args, ['--agent', 'build']);
-  assert.deepEqual(profile.agentModes.find((mode) => mode.id === 'plan')?.args, ['--agent', 'plan']);
-});
-
-test('opencode agent list output is parsed into provider-native agent modes', () => {
-  const modes = parseOpenCodeAgentListOutput(
-    [
-      'build (subagent)',
-      '  [',
-      '    {"permission":"*","action":"allow"}',
-      '  ]',
-      'plan (subagent)',
-      '\u200bSisyphus - Ultraworker (primary)',
-      'summary (primary)',
-      'title (primary)',
-      'compaction (primary)',
-    ].join('\n')
-  );
-
-  assert.deepEqual(
-    modes.map((mode) => [mode.id, mode.label, mode.args, mode.disabled]),
-    [
-      ['build', 'build', ['--agent', 'build'], undefined],
-      ['plan', 'plan', ['--agent', 'plan'], undefined],
-      ['\u200bSisyphus - Ultraworker', 'Sisyphus - Ultraworker', ['--agent', '\u200bSisyphus - Ultraworker'], undefined],
-    ]
-  );
+  assert.equal(profile.agentModes.find((mode) => mode.id === 'build')?.args, undefined);
+  assert.equal(profile.agentModes.find((mode) => mode.id === 'plan')?.args, undefined);
 });
 
 test('opencode models output is parsed into provider-native model options', () => {
@@ -640,6 +614,35 @@ test('opencode server config exposes current primary and custom agents', () => {
   assert.deepEqual(discovery.modelBoundAgentIds, ['nvidia-chat']);
 });
 
+test('opencode config exposes plugin-defined primary agents as native agent modes', () => {
+  const discovery = parseOpenCodeConfigAgents({
+    default_agent: 'build',
+    agent: {
+      build: {
+        mode: 'primary',
+        description: 'Build workflow provided by an OpenCode plugin.',
+      },
+      plan: {
+        mode: 'primary',
+        description: 'Plan workflow provided by an OpenCode plugin.',
+      },
+      helper: {
+        mode: 'subagent',
+        description: 'Not selectable from Agents GUI.',
+      },
+    },
+  });
+
+  assert.deepEqual(
+    discovery.modes.map((mode) => [mode.id, mode.label, mode.args]),
+    [
+      ['build', 'build', ['--agent', 'build']],
+      ['plan', 'plan', ['--agent', 'plan']],
+    ]
+  );
+  assert.deepEqual(discovery.modelBoundAgentIds, []);
+});
+
 test('opencode debug config text exposes default agent without parsing full prompts', () => {
   const discovery = parseOpenCodeDebugConfigOutput(
     [
@@ -681,7 +684,8 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /private readonly cliDiscovery = new CliDiscovery/);
   assert.match(discoverySource, /getOpenCodeAgentModes/);
   assert.match(discoverySource, /\['debug', 'config'\]/);
-  assert.match(discoverySource, /opencode-agent-list/);
+  assert.doesNotMatch(discoverySource, /opencode-agent-list/);
+  assert.doesNotMatch(discoverySource, /\['agent', 'list'\]/);
   assert.match(discoverySource, /filterOpenCodeVisibleAgentModes/);
   assert.match(discoverySource, /discovery\.modelBoundAgentIds/);
   assert.match(discoverySource, /orderOpenCodeAgentModes/);
@@ -689,6 +693,8 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(discoverySource, /\['plan', 1\]/);
   assert.match(discoverySource, /includeBaseWhenDiscovered: true/);
   assert.match(discoverySource, /baseVisibleModes\s*=\s*discoveredModes\.length > 0 && !options\.includeBaseWhenDiscovered\s*\?\s*\[\]\s*:\s*baseModes/s);
+  assert.match(discoverySource, /const upsert = \(mode: CliAgentMode\)/);
+  assert.match(discoverySource, /merged\[index\] = decorated/);
   assert.match(discoverySource, /defaultAgentMode:\s*pickOpenCodeDefaultAgentMode\(mergedAgentModes, discovery\.defaultAgentId\)/);
   assert.match(discoverySource, /selectableModes\.find\(\(mode\) => mode\.id === 'build'\)/);
   assert.match(discoverySource, /decorateOpenCodeConfiguredAgentMode/);
@@ -1222,6 +1228,7 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.match(script, /button\.classList\.add\('suggestion-button--primary'\)/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'installCli', cliId: button\.dataset\.cliId \}\)/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\)/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles', force: true \}\)/);
   assert.match(sidebarSource, /case 'openSettings':/);
   assert.match(sidebarSource, /case 'copyInstallCommand':/);
   assert.match(sidebarSource, /case 'installCli':/);
@@ -2324,7 +2331,7 @@ test('webview refreshes context after a concrete provider is active', () => {
   assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
   assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
-  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*refreshActiveContext\(\);\s*renderAll\(\);/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*renderAll\(\);/);
 });
 
 test('webview empty state is visible in large blank panels', () => {

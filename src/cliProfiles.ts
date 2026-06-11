@@ -650,7 +650,6 @@ export const CLI_PROFILES: CliProfile[] = [
         description: 'OpenCode build mode.',
         instruction:
           'OpenCode build mode: use the provider-native build workflow configured by OpenCode.',
-        args: ['--agent', 'build'],
       },
       {
         id: 'plan',
@@ -658,7 +657,6 @@ export const CLI_PROFILES: CliProfile[] = [
         description: 'OpenCode plan mode.',
         instruction:
           'OpenCode plan mode: inspect the workspace and propose a plan before making changes.',
-        args: ['--agent', 'plan'],
       },
     ],
     installHint: 'brew install opencode-ai/tap/opencode',

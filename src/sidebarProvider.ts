@@ -24,7 +24,7 @@ import {
   AssistantWebviewRequest,
 } from './assistantTypes';
 import { actionRequiresActiveFile, actionRequiresSelection } from './actionGuards';
-import type { AgentRuntime, AgentSession } from './agentRuntime';
+import type { AgentProfileStatusOptions, AgentRuntime, AgentSession } from './agentRuntime';
 import {
   buildCliOptionArgs,
   CLI_PROFILES,
@@ -161,8 +161,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this.getHtml(webviewView.webview);
-    void this.sendProfiles();
-    void this.sendContextSummary();
     void this.sendHomeAgentSettings();
     void this.sendApiProviderSettings();
     void this.sendCommitMessageSettings();
@@ -199,7 +197,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.handleSessionInput(message);
           break;
         case 'checkProfiles':
-          await this.sendProfiles();
+          await this.sendProfiles({ force: Boolean(message.force) });
           break;
         case 'refreshContext':
           await this.sendContextSummary(message.contextOptions, this.resolveCliId(message), message.modelId);
@@ -345,7 +343,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   async refreshProviders(): Promise<void> {
     await this.postToWebview({ command: 'refreshStarted' });
-    await this.sendProfiles();
+    await this.sendProfiles({ force: true });
     await this.sendContextSummary();
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
@@ -390,8 +388,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async sendProfiles(): Promise<void> {
-    const profiles = await this.agentRuntime.getProfilesWithStatus();
+  private async sendProfiles(options: AgentProfileStatusOptions = {}): Promise<void> {
+    const profiles = await this.agentRuntime.getProfilesWithStatus(options);
     const installedProfiles = profiles.filter((profile) => profile.installed);
     this.profilesById.clear();
     installedProfiles.forEach((profile) => {

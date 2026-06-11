@@ -2760,7 +2760,7 @@
         scheduleComposerPopoverPosition();
         return;
       case 'refresh':
-        vscode.postMessage({ command: 'checkProfiles' });
+        vscode.postMessage({ command: 'checkProfiles', force: true });
         vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
         return;
       case 'stop':
@@ -8893,7 +8893,7 @@
       event.preventDefault();
       event.stopPropagation();
       profilesLoading = true;
-      vscode.postMessage({ command: 'checkProfiles' });
+      vscode.postMessage({ command: 'checkProfiles', force: true });
       renderAll();
       return;
     }
@@ -9213,6 +9213,5 @@
 
   vscode.postMessage({ command: 'checkProfiles' });
   vscode.postMessage({ command: 'refreshApiProviderSettings' });
-  refreshActiveContext();
   renderAll();
 })();

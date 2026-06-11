@@ -14,7 +14,6 @@ import {
   OpenCodeModelMetadataMap,
   OpenCodeModelState,
   parseOpenCodeDebugConfigOutput,
-  parseOpenCodeAgentListLine,
   parseOpenCodeModelMetadata,
   parseOpenCodeModelState,
   parseOpenCodeModelsOutput,
@@ -26,8 +25,23 @@ interface CliDiscoveryOptions {
   openCodeClient: OpenCodeServerClient;
 }
 
+export interface CliProfileStatusOptions {
+  force?: boolean;
+}
+
+const PROFILE_STATUS_CACHE_MS = 10_000;
+
 export class CliDiscovery {
   private commandPathCache = new Map<string, string>();
+  private profileStatusCache?: {
+    key: string;
+    createdAt: number;
+    profiles: CliProfile[];
+  };
+  private profileStatusInflight?: {
+    key: string;
+    promise: Promise<CliProfile[]>;
+  };
 
   constructor(private readonly options: CliDiscoveryOptions) {}
 
@@ -39,7 +53,42 @@ export class CliDiscovery {
     return Boolean(await this.resolveCommandPath(profile.command));
   }
 
-  async getProfilesWithStatus(baseProfiles: CliProfile[]): Promise<CliProfile[]> {
+  async getProfilesWithStatus(
+    baseProfiles: CliProfile[],
+    options: CliProfileStatusOptions = {}
+  ): Promise<CliProfile[]> {
+    const key = this.profileStatusCacheKey(baseProfiles);
+    const now = Date.now();
+    if (
+      !options.force &&
+      this.profileStatusCache?.key === key &&
+      now - this.profileStatusCache.createdAt < PROFILE_STATUS_CACHE_MS
+    ) {
+      return cloneCliProfiles(this.profileStatusCache.profiles);
+    }
+
+    if (!options.force && this.profileStatusInflight?.key === key) {
+      return cloneCliProfiles(await this.profileStatusInflight.promise);
+    }
+
+    const promise = this.loadProfilesWithStatus(baseProfiles);
+    this.profileStatusInflight = { key, promise };
+    try {
+      const profiles = await promise;
+      this.profileStatusCache = {
+        key,
+        createdAt: Date.now(),
+        profiles: cloneCliProfiles(profiles),
+      };
+      return cloneCliProfiles(profiles);
+    } finally {
+      if (this.profileStatusInflight?.promise === promise) {
+        this.profileStatusInflight = undefined;
+      }
+    }
+  }
+
+  private async loadProfilesWithStatus(baseProfiles: CliProfile[]): Promise<CliProfile[]> {
     const results = await Promise.all(
       baseProfiles.map(async (p) => {
         const installed = await this.checkInstalled(p);
@@ -97,6 +146,17 @@ export class CliDiscovery {
       })
     );
     return results;
+  }
+
+  private profileStatusCacheKey(baseProfiles: CliProfile[]): string {
+    return [
+      this.options.workspaceRoot(),
+      ...baseProfiles.map((profile) => [
+        profile.id,
+        profile.command,
+        (profile.versionArgs ?? ['--version']).join(' '),
+      ].join(':')),
+    ].join('|');
   }
 
   async resolveCommandPath(command: string): Promise<string | undefined> {
@@ -224,22 +284,6 @@ export class CliDiscovery {
   private async getOpenCodeAgentModes(command: string): Promise<OpenCodeAgentDiscovery> {
     const cwd = this.options.workspaceRoot();
     const discovery = await this.getOpenCodeAgentModesFromDebugConfig(command, cwd);
-    const listModes = filterOpenCodeVisibleAgentModes(
-      await this.getOpenCodeAgentModesFromCliList(command, cwd),
-      discovery.modelBoundAgentIds
-    );
-    if (listModes.length > 0) {
-      return {
-        ...discovery,
-        modes: mergeOpenCodeAgentModes(
-          discovery.modes,
-          listModes,
-          discovery.defaultAgentId,
-          { includeBaseWhenDiscovered: true }
-        ),
-      };
-    }
-
     return {
       ...discovery,
       modes: filterOpenCodeVisibleAgentModes(discovery.modes, discovery.modelBoundAgentIds),
@@ -306,75 +350,6 @@ export class CliDiscovery {
         finish(parseOpenCodeDebugConfigOutput(output));
       });
       proc.on('error', () => finish());
-    });
-  }
-
-  private getOpenCodeAgentModesFromCliList(command: string, cwd: string): Promise<CliAgentMode[]> {
-    return new Promise<CliAgentMode[]>((resolve) => {
-      const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-      const env = {
-        ...process.env,
-        PATH: mergePathEntries([
-          commandDir,
-          buildCliLookupPath(process.env.PATH, process.env.HOME),
-        ]),
-        OPENCODE_DB: path.join(
-          os.tmpdir(),
-          `agents-gui-opencode-agent-list-${stableHash(cwd).toString(16)}-${process.pid}.db`
-        ),
-        OMO_DISABLE_POSTHOG: '1',
-        OMO_SEND_ANONYMOUS_TELEMETRY: '0',
-      };
-      const proc = spawn(command, ['agent', 'list'], {
-        cwd,
-        env,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const seen = new Set<string>();
-      const modes: CliAgentMode[] = [];
-      let buffer = '';
-      let settled = false;
-
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        clearTimeout(timeout);
-        parseLines(buffer);
-        resolve(modes);
-      };
-
-      const parseLines = (text: string) => {
-        for (const line of text.split(/\r?\n/)) {
-          const mode = parseOpenCodeAgentListLine(line);
-          if (!mode || seen.has(mode.id)) {
-            continue;
-          }
-
-          seen.add(mode.id);
-          modes.push(mode);
-        }
-      };
-
-      const timeout = setTimeout(() => {
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // Process may already be gone.
-        }
-        finish();
-      }, 5000);
-
-      proc.stdout?.on('data', (data: Buffer) => {
-        buffer += data.toString();
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() ?? '';
-        parseLines(lines.join('\n'));
-      });
-      proc.on('close', finish);
-      proc.on('error', finish);
     });
   }
 
@@ -517,6 +492,36 @@ export class CliDiscovery {
   }
 }
 
+function cloneCliProfiles(profiles: CliProfile[]): CliProfile[] {
+  return profiles.map((profile) => ({
+    ...profile,
+    modelOptions: profile.modelOptions?.map((option) => ({
+      ...option,
+      args: option.args ? [...option.args] : undefined,
+      variantOptions: option.variantOptions ? [...option.variantOptions] : undefined,
+    })),
+    runtimeModes: profile.runtimeModes?.map((mode) => ({
+      ...mode,
+      args: mode.args ? [...mode.args] : undefined,
+    })),
+    permissionModes: profile.permissionModes?.map((mode) => ({
+      ...mode,
+      args: mode.args ? [...mode.args] : undefined,
+    })),
+    agentModes: profile.agentModes.map((mode) => ({
+      ...mode,
+      args: mode.args ? [...mode.args] : undefined,
+    })),
+    slashCommands: profile.slashCommands?.map((command) => ({
+      ...command,
+      aliases: command.aliases ? [...command.aliases] : undefined,
+    })),
+    capabilities: [...profile.capabilities],
+    promptArgs: [...profile.promptArgs],
+    env: profile.env ? { ...profile.env } : undefined,
+  }));
+}
+
 export function stableHash(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -535,17 +540,23 @@ function mergeOpenCodeAgentModes(
   const baseVisibleModes = discoveredModes.length > 0 && !options.includeBaseWhenDiscovered
     ? []
     : baseModes;
-  const seen = new Set<string>();
   const merged: CliAgentMode[] = [];
-  for (const group of [baseVisibleModes, discoveredModes]) {
-    for (const mode of group) {
-      if (seen.has(mode.id)) {
-        continue;
-      }
-
-      seen.add(mode.id);
-      merged.push(decorateOpenCodeConfiguredAgentMode(mode, configuredAgentId));
+  const upsert = (mode: CliAgentMode) => {
+    const decorated = decorateOpenCodeConfiguredAgentMode(mode, configuredAgentId);
+    const index = merged.findIndex((item) => item.id === decorated.id);
+    if (index >= 0) {
+      merged[index] = decorated;
+      return;
     }
+
+    merged.push(decorated);
+  };
+
+  for (const mode of baseVisibleModes) {
+    upsert(mode);
+  }
+  for (const mode of discoveredModes) {
+    upsert(mode);
   }
   return merged;
 }
