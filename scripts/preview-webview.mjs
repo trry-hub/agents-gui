@@ -16,6 +16,7 @@ const webviewAssets = [
   'providerRunState.js',
   'providerCapabilities.js',
   'conversationStore.js',
+  'sessionHistory.js',
   'slashCommands.js',
   'openCodeDialogState.js',
   'claudeActions.js',
@@ -35,6 +36,7 @@ const messageChoicesUri = './messageChoices.js';
 const providerRunStateUri = './providerRunState.js';
 const providerCapabilitiesUri = './providerCapabilities.js';
 const conversationStoreUri = './conversationStore.js';
+const sessionHistoryUri = './sessionHistory.js';
 const slashCommandsUri = './slashCommands.js';
 const openCodeDialogStateUri = './openCodeDialogState.js';
 const claudeActionsUri = './claudeActions.js';
@@ -210,6 +212,7 @@ html = html
   .replace('__PROVIDER_RUN_STATE_JS_URI__', providerRunStateUri)
   .replace('__PROVIDER_CAPABILITIES_JS_URI__', providerCapabilitiesUri)
   .replace('__CONVERSATION_STORE_JS_URI__', conversationStoreUri)
+  .replace('__SESSION_HISTORY_JS_URI__', sessionHistoryUri)
   .replace('__SLASH_COMMANDS_JS_URI__', slashCommandsUri)
   .replace('__OPEN_CODE_DIALOG_STATE_JS_URI__', openCodeDialogStateUri)
   .replace('__CLAUDE_ACTIONS_JS_URI__', claudeActionsUri)

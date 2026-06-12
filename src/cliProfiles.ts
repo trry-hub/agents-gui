@@ -34,6 +34,10 @@ export interface CliPermissionMode extends CliProfileOption {
   instruction?: string;
 }
 
+export type CliAuthAction = 'login' | 'logout' | 'status';
+
+export type CliAuthCommands = Partial<Record<CliAuthAction, string[]>>;
+
 export interface CliOptionSelection {
   model?: string;
   customModel?: string;
@@ -129,6 +133,8 @@ export interface CliProfile {
   defaultAgentMode: string;
   /** Install hint shown when CLI is not found */
   installHint: string;
+  /** Provider-native authentication commands run in a visible VS Code terminal. */
+  authCommands?: CliAuthCommands;
   env?: Record<string, string>;
   installed: boolean;
   version?: string;
@@ -385,6 +391,11 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'curl -fsSL https://claude.ai/install.sh | bash',
+    authCommands: {
+      login: ['auth', 'login'],
+      logout: ['auth', 'logout'],
+      status: ['auth', 'status'],
+    },
     installed: false,
   },
   {
@@ -592,6 +603,11 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'npm install -g @openai/codex',
+    authCommands: {
+      login: ['login'],
+      logout: ['logout'],
+      status: ['login', 'status'],
+    },
     installed: false,
   },
   {
@@ -660,6 +676,11 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'brew install opencode-ai/tap/opencode',
+    authCommands: {
+      login: ['auth', 'login'],
+      logout: ['auth', 'logout'],
+      status: ['auth', 'list'],
+    },
     installed: false,
   },
   {

@@ -10,7 +10,7 @@ export const PROVIDER_EXTENSION_BRIDGES: ProviderExtensionBridge[] = [
     providerId: 'codex',
     extensionId: 'openai.chatgpt',
     displayName: 'Codex',
-    openCommands: ['chatgpt.newCodexPanel', 'chatgpt.openSidebar'],
+    openCommands: ['chatgpt.openSidebar', 'chatgpt.newCodexPanel'],
   },
   {
     providerId: 'claude',

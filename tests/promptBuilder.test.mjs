@@ -57,6 +57,7 @@ const { extractMessageChoiceLineKeys, extractMessageChoices } = require('../medi
 const providerRunState = require('../media/providerRunState.js');
 const providerCapabilities = require('../media/providerCapabilities.js');
 const conversationStore = require('../media/conversationStore.js');
+const sessionHistory = require('../media/sessionHistory.js');
 const slashCommands = require('../media/slashCommands.js');
 const openCodeDialogState = require('../media/openCodeDialogState.js');
 const claudeActions = require('../media/claudeActions.js');
@@ -1041,6 +1042,10 @@ test('CLI profiles include detected agent version status', () => {
   assert.match(profilesSource, /runtimeModes\?: CliRuntimeMode\[\]/);
   assert.match(profilesSource, /permissionModes\?: CliPermissionMode\[\]/);
   assert.match(profilesSource, /slashCommands\?: CliSlashCommand\[\]/);
+  assert.match(profilesSource, /authCommands\?: CliAuthCommands/);
+  assert.match(profilesSource, /authCommands:\s*\{\s*login:\s*\['auth', 'login'\],\s*logout:\s*\['auth', 'logout'\],\s*status:\s*\['auth', 'status'\]/);
+  assert.match(profilesSource, /authCommands:\s*\{\s*login:\s*\['login'\],\s*logout:\s*\['logout'\],\s*status:\s*\['login', 'status'\]/);
+  assert.match(profilesSource, /authCommands:\s*\{\s*login:\s*\['auth', 'login'\],\s*logout:\s*\['auth', 'logout'\],\s*status:\s*\['auth', 'list'\]/);
   assert.match(profilesSource, /provider: 'openai'/);
   assert.match(profilesSource, /provider: 'anthropic'/);
   assert.match(discoverySource, /version: installed \? await this\.getCommandVersion\(p\) : undefined/);
@@ -1143,7 +1148,7 @@ test('development mode watches webview assets for live reload', () => {
   assert.match(extensionSource, /extensionMode:\s*context\.extensionMode/);
   assert.match(sidebarSource, /vscode\.ExtensionMode\.Development/);
   assert.match(sidebarSource, /createFileSystemWatcher/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
   assert.match(sidebarSource, /webviewAssetVersion/);
   assert.match(sidebarSource, /reloadWebviewForDevelopment/);
 });
@@ -1226,11 +1231,18 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.match(script, /'refreshProviders'/);
   assert.match(script, /'installCli'/);
   assert.match(script, /'copyInstall'/);
+  assert.match(script, /function createHomeAgentAuthActions\(profile\)/);
+  assert.match(script, /button\.dataset\.cliAuthAction = action/);
+  assert.match(script, /command: 'runCliAuthAction'/);
   assert.match(script, /button\.classList\.add\('suggestion-button--primary'\)/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'installCli', cliId: button\.dataset\.cliId \}\)/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\)/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles', force: true \}\)/);
   assert.match(sidebarSource, /case 'openSettings':/);
+  assert.match(sidebarSource, /case 'runCliAuthAction':/);
+  assert.match(sidebarSource, /private async runCliAuthAction\(cliId: string, action: unknown\): Promise<void>/);
+  assert.match(sidebarSource, /profile\?\.authCommands\?\.\[authAction\]/);
+  assert.match(sidebarSource, /const command = \[profile\.command, \.\.\.args\]\.map\(shellQuote\)\.join\(' '\)/);
   assert.match(sidebarSource, /case 'copyInstallCommand':/);
   assert.match(sidebarSource, /case 'installCli':/);
   assert.match(sidebarSource, /private async installCli\(cliId: unknown\): Promise<void>/);
@@ -1245,6 +1257,10 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.match(css, /\.cli-setup-state\s*\{/);
   assert.match(css, /\.cli-setup-card\.is-recommended\s*\{/);
   assert.match(css, /\.cli-setup-command\s*\{/);
+  assert.match(css, /\.home-agent-auth-actions\s*\{/);
+  assert.match(css, /\.home-agent-auth-button\.is-danger\s*\{/);
+  assert.match(i18nScript, /'homeAgents\.signOut': 'Sign out'/);
+  assert.match(i18nScript, /'homeAgents\.signOut': '退出登录'/);
   assert.match(i18nScript, /'setup\.title': 'Install a CLI Agent to start'/);
   assert.match(i18nScript, /'setup\.title': '安装一个 CLI Agent 后开始使用'/);
   assert.match(i18nScript, /'setup\.recommendedBadge': 'Recommended · Quick start'/);
@@ -1368,9 +1384,20 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(script, /modelSummary\?\.addEventListener\('click'/);
   assert.match(i18nScript, /'input\.placeholderProvider': 'Ask \{provider\}…'/);
   assert.match(i18nScript, /'input\.placeholderProvider': '问 \{provider\}\.\.\.'/);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-area:\s*session-history;/s);
+  assert.match(css, /\.session-history\[hidden\]\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
+  assert.match(css, /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.sidebar\s*\{\s*[^}]*grid-area:\s*sidebar;/s);
   assert.match(css, /\.sidebar\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /body\[data-provider="opencode"\] \.sidebar\s*\{\s*[^}]*display:\s*flex;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-session-title\s*\{/);
   assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-heading\.is-toggle\s*\{/);
@@ -1386,6 +1413,7 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(html, /class="context-row"[\s\S]*class="context-menu"/);
   assert.match(css, /\.context-row\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(html, /<aside class="sidebar" id="sidebar"/);
+  assert.match(html, /<div class="main-content">\s*<main class="messages" id="messages"[\s\S]*?<\/div>\s*<aside class="sidebar" id="sidebar"/);
   assert.match(i18nScript, /'sidebar\.mcp': 'MCP'/);
   assert.match(i18nScript, /'sidebar\.lsp': 'LSP'/);
   assert.match(html, /id="composerSettingsBtn"/);
@@ -1422,6 +1450,7 @@ test('webview composer follows the selected provider identity', () => {
 test('opencode sidebar collapses by default at compact widths', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
+  assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";[\s\S]*?grid-template-columns:\s*minmax\(176px,\s*210px\) minmax\(0,\s*1fr\);/s);
   assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.main-content\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?border-right:\s*0;/s);
   assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.sidebar\s*\{[\s\S]*?display:\s*none;/s);
 });
@@ -1623,7 +1652,7 @@ test('provider extension bridges use the corresponding VS Code extension command
     providerId: 'codex',
     extensionId: 'openai.chatgpt',
     displayName: 'Codex',
-    openCommands: ['chatgpt.newCodexPanel', 'chatgpt.openSidebar'],
+    openCommands: ['chatgpt.openSidebar', 'chatgpt.newCodexPanel'],
   });
   assert.deepEqual(getProviderExtensionBridge('claude'), {
     providerId: 'claude',
@@ -1655,6 +1684,12 @@ test('sidebar opens provider VS Code extensions through a whitelisted bridge', (
   assert.match(source, /const bridge = getProviderExtensionBridge\(cliId\);/);
   assert.match(source, /for \(const command of bridge\.openCommands\)/);
   assert.match(source, /await vscode\.commands\.executeCommand\(command\);/);
+  assert.match(source, /interface ProviderClientTerminalState\s*\{\s*terminal: vscode\.Terminal;\s*started: boolean;\s*\}/s);
+  assert.match(source, /private providerClientTerminals = new Map<string, ProviderClientTerminalState>\(\);/);
+  assert.match(source, /private async openProviderCliTerminal\(profile: CliProfile\): Promise<void>/);
+  assert.match(source, /vscode\.window\.createTerminal\(\{\s*name: `Agents GUI Client: \$\{profile\.name\}`,\s*cwd: workspaceFolder\?\.uri\.fsPath,/s);
+  assert.match(source, /vscode\.window\.onDidCloseTerminal\(\(terminal\) => \{/);
+  assert.match(source, /if \(!entry\.started\) \{\s*entry\.terminal\.sendText\(profile\.command, true\);\s*entry\.started = true;/s);
 });
 
 test('webview renders a Claude Code style composer when Claude is selected', () => {
@@ -2031,7 +2066,8 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(sidebarSource, /command:\s*'settingsSaveResult'/);
   assert.match(sidebarSource, /section,\s*ok:\s*true/);
   assert.match(sidebarSource, /section,\s*ok:\s*false/);
-  assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /\.api-settings-page\s*\{\s*[^}]*grid-area:\s*1 \/ 1 \/ -1 \/ -1;/s);
+  assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.session-history,\s*body\.is-api-settings-open \.sidebar,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /\.settings-save-status\s*\{/);
   assert.match(css, /\.settings-save-status\.is-success\s*\{[^}]*font-weight:\s*600;/s);
   assert.match(css, /\.settings-save-status\.is-info\s*\{/);
@@ -2263,9 +2299,13 @@ test('webview composer popovers avoid viewport clipping', () => {
 test('webview pins composer to the bottom when task board is hidden', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-rows:\s*max-content minmax\(0,\s*1fr\) max-content;/s);
   assert.match(css, /\.toolbar\s*\{\s*[^}]*grid-area:\s*toolbar;/s);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-area:\s*session-history;/s);
+  assert.match(css, /\.sidebar\s*\{\s*[^}]*grid-area:\s*sidebar;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
   assert.doesNotMatch(css, /\.task-board\s*\{\s*[^}]*grid-area:/s);
   assert.match(css, /\.main-content\s*\{\s*[^}]*grid-area:\s*main-content;/s);
   assert.match(css, /\.messages\s*\{\s*[^}]*grid-area:\s*auto;/s);
@@ -2275,9 +2315,9 @@ test('webview pins composer to the bottom when task board is hidden', () => {
 test('webview composer controls wrap before narrow sidebars clip the send button', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.prompt-selectors\s*\{[\s\S]*?flex-wrap:\s*wrap;/s);
-  assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.provider-tabs\s*\{[\s\S]*?max-width:\s*min\(58vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
-  assert.match(css, /@media \(max-width:\s*460px\)\s*\{[\s\S]*?\.provider-tabs:hover,\s*\.provider-tabs:focus-within\s*\{[\s\S]*?width:\s*min\(58vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
+  assert.match(css, /@media \(max-width:\s*620px\)\s*\{[\s\S]*?\.prompt-selectors\s*\{[\s\S]*?flex-wrap:\s*wrap;/s);
+  assert.match(css, /@media \(max-width:\s*620px\)\s*\{[\s\S]*?\.provider-tabs\s*\{[\s\S]*?max-width:\s*min\(58vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
+  assert.match(css, /@media \(max-width:\s*620px\)\s*\{[\s\S]*?\.provider-tabs:hover,\s*\.provider-tabs:focus-within\s*\{[\s\S]*?width:\s*min\(58vw,\s*var\(--provider-tabs-expanded-width\)\);/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*min-width:\s*0;/s);
   assert.match(css, /\.composer\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.prompt-shell\s*\{\s*[^}]*min-width:\s*0;/s);
@@ -2406,6 +2446,40 @@ test('webview sends recent thread conversation as provider context', () => {
   assert.match(script, /\.slice\(-8\)/);
   assert.match(script, /conversationHistory: conversationHistoryForSend\(providerId\)/);
   assert.match(providerSource, /conversationHistory: message\.conversationHistory/);
+});
+
+test('webview renders a provider-wide session history list with derived states', () => {
+  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+
+  assert.match(html, /<aside class="session-history" id="sessionHistory"[^>]*data-i18n-aria="history\.label"/);
+  assert.match(html, /<\/section>\s*<aside class="session-history" id="sessionHistory"[\s\S]*?<div class="main-content">/);
+  assert.match(html, /__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__/);
+  assert.match(script, /const sessionHistoryState = window\.AgentsGuiSessionHistory/);
+  assert.match(script, /const sessionHistory = document\.getElementById\('sessionHistory'\);/);
+  assert.match(script, /function renderSessionHistory\(\)/);
+  assert.match(script, /document\.body\.classList\.remove\('is-session-history-hidden'\)/);
+  assert.match(script, /sessionHistory\.hidden = false/);
+  assert.match(script, /function historyStatusForThread\(providerId, thread\)/);
+  assert.match(script, /sessionHistoryState\.threadStatus\(thread, \{/);
+  assert.match(script, /pendingByProvider,\s*runningByProvider,\s*pendingThreadByProvider,/);
+  assert.match(script, /function activateHistoryThread\(providerId, threadId\)/);
+  assert.match(script, /activeThreadByProvider\[providerId\] = thread\.id;/);
+  assert.match(script, /sessionHistory\?\.addEventListener\('click'/);
+  assert.match(script, /activateHistoryThread\(row\.dataset\.providerId, row\.dataset\.threadId\)/);
+  assert.match(script, /renderSessionHistory\(\);/);
+  assert.match(script, /sessionHistory\.hidden = true;\s*document\.body\.classList\.add\('is-session-history-hidden'\);/);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*border-right:\s*1px solid var\(--assistant-border\);/s);
+  assert.match(css, /\.session-history-row\s*\{/);
+  assert.match(css, /\.session-history-row\.is-running \.session-history-status-dot\s*\{/);
+  assert.match(css, /\.session-history-row\.is-answered \.session-history-status-dot\s*\{/);
+  assert.match(css, /\.session-history-row\.is-completed \.session-history-status-dot\s*\{/);
+  assert.match(css, /@media \(max-width:\s*620px\)\s*\{[\s\S]*?\.session-history\s*\{[\s\S]*?display:\s*none;/s);
+  assert.match(i18nScript, /'history\.status\.running': '会话中'/);
+  assert.match(i18nScript, /'history\.status\.answered': '有问答'/);
+  assert.match(i18nScript, /'history\.status\.completed': '已完成'/);
 });
 
 test('webview closes composer menus when clicking outside or pressing escape', () => {
@@ -2788,7 +2862,7 @@ test('webview exposes a provider-aware slash command palette', () => {
   const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
 
   assert.match(html, /id="slashPalette"[^>]*role="listbox"/);
-  assert.match(html, /__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(html, /__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__MAIN_JS_URI__/);
   assert.match(script, /const slashCommands = window\.AgentsGuiSlashCommands/);
   assert.match(script, /const openCodeDialogState = window\.AgentsGuiOpenCodeDialogState/);
   assert.match(script, /const SLASH_COMMANDS = slashCommands\.createBaseSlashCommands/);
@@ -3080,7 +3154,7 @@ test('webview keeps running status singular and supports quick choices', () => {
   assert.doesNotMatch(script, /appendStreamingCursor/);
   assert.doesNotMatch(script, /message-streaming-cursor/);
   assert.doesNotMatch(script, /className = 'cursor/);
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
   assert.match(html, /__MESSAGE_CHOICES_JS_URI__/);
   assert.match(script, /const messageText = window\.AgentsGuiMessageText/);
   assert.match(script, /const inlineMarkdown = window\.AgentsGuiInlineMarkdown/);
@@ -3153,9 +3227,10 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
   const inlineSource = readFileSync(new URL('../media/inlineMarkdown.js', import.meta.url), 'utf8');
   const runStateSource = readFileSync(new URL('../media/providerRunState.js', import.meta.url), 'utf8');
   const capabilitySource = readFileSync(new URL('../media/providerCapabilities.js', import.meta.url), 'utf8');
+  const sessionHistorySource = readFileSync(new URL('../media/sessionHistory.js', import.meta.url), 'utf8');
 
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
 
   assert.doesNotMatch(script, /function serializeThreadsForState\(source\)/);
   assert.match(conversationSource, /function serializeThreadsForState\(source\)/);
@@ -3177,6 +3252,9 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
 
   assert.doesNotMatch(script, /function createProviderRunState\(\)/);
   assert.match(runStateSource, /function createProviderRunState\(\)/);
+
+  assert.doesNotMatch(script, /function threadStatus\(thread, options = \{\}\)/);
+  assert.match(sessionHistorySource, /function threadStatus\(thread, options = \{\}\)/);
 
   assert.doesNotMatch(script, /const CONTROL_CONFIG = Object\.freeze/);
   assert.match(capabilitySource, /const CONTROL_CONFIG = Object\.freeze/);
@@ -3321,6 +3399,53 @@ test('conversation store normalizes restored messages and serializes safe state'
   conversationStore.setActiveThread(threadsByProvider, activeThreadByProvider, 'codex', older);
   assert.equal(activeThreadByProvider.codex, 'older');
   assert.equal(conversationStore.latestThread(threadsByProvider.codex), created);
+});
+
+test('session history derives thread states for multi-task groundwork', () => {
+  const emptyThread = { id: 'thread-empty', messages: [], updatedAt: 10 };
+  const answeredThread = {
+    id: 'thread-answered',
+    messages: [
+      { role: 'user', text: '帮我分析' },
+      { role: 'assistant', text: '可以' },
+    ],
+    updatedAt: 30,
+  };
+  const completedThread = {
+    id: 'thread-completed',
+    messages: [{ role: 'user', text: '跑测试' }],
+    updatedAt: 20,
+  };
+  const tasks = [
+    { providerId: 'opencode', threadId: 'thread-completed', status: 'completed', updatedAt: 100 },
+    { providerId: 'opencode', threadId: 'thread-running', status: 'running', updatedAt: 120 },
+  ];
+
+  assert.equal(sessionHistory.threadStatus(emptyThread, { providerId: 'opencode', tasks }), 'empty');
+  assert.equal(sessionHistory.threadStatus(answeredThread, { providerId: 'opencode', tasks }), 'answered');
+  assert.equal(sessionHistory.threadStatus(completedThread, { providerId: 'opencode', tasks }), 'completed');
+  assert.equal(
+    sessionHistory.threadStatus(
+      { id: 'thread-running', messages: [], updatedAt: 40 },
+      { providerId: 'opencode', tasks }
+    ),
+    'running'
+  );
+  assert.equal(
+    sessionHistory.threadStatus(
+      { id: 'thread-pending', messages: [], updatedAt: 50 },
+      {
+        providerId: 'codex',
+        pendingByProvider: { codex: true },
+        pendingThreadByProvider: { codex: 'thread-pending' },
+      }
+    ),
+    'preparing'
+  );
+  assert.deepEqual(
+    sessionHistory.sortedThreads([emptyThread, answeredThread, completedThread]).map((thread) => thread.id),
+    ['thread-answered', 'thread-completed', 'thread-empty']
+  );
 });
 
 test('message choice parser ignores incidental numbered lists without choice intent', () => {
@@ -3577,6 +3702,7 @@ test('preview webview streams markdown with real line breaks', () => {
     'providerRunState.js',
     'providerCapabilities.js',
     'conversationStore.js',
+    'sessionHistory.js',
     'slashCommands.js',
     'openCodeDialogState.js',
     'claudeActions.js',
@@ -3589,6 +3715,7 @@ test('preview webview streams markdown with real line breaks', () => {
   assert.match(script, /__PROVIDER_RUN_STATE_JS_URI__/);
   assert.match(script, /__PROVIDER_CAPABILITIES_JS_URI__/);
   assert.match(script, /__CONVERSATION_STORE_JS_URI__/);
+  assert.match(script, /__SESSION_HISTORY_JS_URI__/);
   assert.match(script, /__SLASH_COMMANDS_JS_URI__/);
   assert.match(script, /__OPEN_CODE_DIALOG_STATE_JS_URI__/);
   assert.match(script, /__INLINE_MARKDOWN_JS_URI__/);

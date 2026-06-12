@@ -6,6 +6,7 @@
   const providerRunState = window.AgentsGuiProviderRunState;
   const providerCapabilities = window.AgentsGuiProviderCapabilities;
   const conversationStore = window.AgentsGuiConversationStore;
+  const sessionHistoryState = window.AgentsGuiSessionHistory;
   const slashCommands = window.AgentsGuiSlashCommands;
   const openCodeDialogState = window.AgentsGuiOpenCodeDialogState;
   const claudeActions = window.AgentsGuiClaudeActions;
@@ -162,6 +163,7 @@
   let openCodeDialogHistory = [];
 
   const taskBoard = document.getElementById('taskBoard');
+  const sessionHistory = document.getElementById('sessionHistory');
   const sidebar = document.getElementById('sidebar');
   const providerSelect = document.getElementById('providerSelect');
   const providerTabs = document.getElementById('providerTabs');
@@ -1018,6 +1020,7 @@
     Object.assign(task, updates, { updatedAt: Date.now() });
     persist();
     renderTaskBoard();
+    renderSessionHistory();
     return task;
   }
 
@@ -1569,6 +1572,11 @@
       copy.appendChild(meta);
       row.appendChild(copy);
 
+      const authActions = createHomeAgentAuthActions(profile);
+      if (authActions) {
+        row.appendChild(authActions);
+      }
+
       const sort = document.createElement('span');
       sort.className = 'home-agent-sort';
       sort.appendChild(createHomeAgentMoveButton(profile, 'up', index === 0));
@@ -1577,6 +1585,40 @@
 
       homeAgentList.appendChild(row);
     });
+  }
+
+  function createHomeAgentAuthActions(profile) {
+    const commands = profile?.authCommands || {};
+    const actions = ['status', 'login', 'logout'].filter((action) => Array.isArray(commands[action]));
+    if (actions.length === 0) {
+      return null;
+    }
+
+    const container = document.createElement('span');
+    container.className = 'home-agent-auth-actions';
+    actions.forEach((action) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `home-agent-auth-button${action === 'logout' ? ' is-danger' : ''}`;
+      button.dataset.homeAgentId = profile.id;
+      button.dataset.cliAuthAction = action;
+      button.textContent = homeAgentAuthLabel(action);
+      button.title = `${profile.name} · ${button.textContent}`;
+      container.appendChild(button);
+    });
+    return container;
+  }
+
+  function homeAgentAuthLabel(action) {
+    switch (action) {
+      case 'login':
+        return i18n.t('homeAgents.signIn');
+      case 'logout':
+        return i18n.t('homeAgents.signOut');
+      case 'status':
+      default:
+        return i18n.t('homeAgents.authStatus');
+    }
   }
 
   function createHomeAgentMoveButton(profile, direction, disabled) {
@@ -2366,6 +2408,208 @@
     threadSelect.disabled = threads.length <= 1;
     deleteThreadBtn.disabled = !canDeleteActiveThread(activeId);
     newChatBtn.disabled = !activeId;
+  }
+
+  function historyProviderIds() {
+    const ids = new Set();
+    profiles.forEach((profile) => {
+      if (profile?.installed) {
+        ids.add(profile.id);
+      }
+    });
+    Object.keys(threadsByProvider || {}).forEach((providerId) => {
+      if (ensureThreadList(providerId).length > 0) {
+        ids.add(providerId);
+      }
+    });
+    if (activeId) {
+      ids.add(activeId);
+    }
+    return Array.from(ids);
+  }
+
+  function historyProviderName(providerId) {
+    return profiles.find((profile) => profile.id === providerId)?.name || providerId || i18n.t('provider.label');
+  }
+
+  function historyStatusForThread(providerId, thread) {
+    return sessionHistoryState.threadStatus(thread, {
+      providerId,
+      tasks,
+      pendingByProvider,
+      runningByProvider,
+      pendingThreadByProvider,
+      activeThreadId: activeThreadByProvider[providerId],
+    });
+  }
+
+  function historyStatusLabel(status) {
+    return i18n.t(`history.status.${status}`);
+  }
+
+  function formatHistoryRelativeTime(timestamp) {
+    const time = sessionHistoryState.threadTimestamp({ updatedAt: timestamp });
+    if (!time) {
+      return '';
+    }
+
+    const elapsed = Math.max(0, Date.now() - time);
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    const week = 7 * day;
+    if (elapsed < minute) {
+      return i18n.t('history.time.now');
+    }
+    if (elapsed < hour) {
+      return i18n.t('history.time.minutes', { count: String(Math.max(1, Math.floor(elapsed / minute))) });
+    }
+    if (elapsed < day) {
+      return i18n.t('history.time.hours', { count: String(Math.max(1, Math.floor(elapsed / hour))) });
+    }
+    if (elapsed < week) {
+      return i18n.t('history.time.days', { count: String(Math.max(1, Math.floor(elapsed / day))) });
+    }
+    return i18n.t('history.time.weeks', { count: String(Math.max(1, Math.floor(elapsed / week))) });
+  }
+
+  function renderSessionHistory() {
+    if (!sessionHistory) {
+      return;
+    }
+
+    sessionHistory.innerHTML = '';
+    document.body.classList.remove('is-session-history-hidden');
+    sessionHistory.hidden = false;
+
+    const header = document.createElement('div');
+    header.className = 'session-history-header';
+
+    const title = document.createElement('div');
+    title.className = 'session-history-title';
+    title.textContent = i18n.t('history.label');
+    header.appendChild(title);
+
+    const newSession = document.createElement('button');
+    newSession.type = 'button';
+    newSession.className = 'session-history-new';
+    newSession.dataset.historyNew = 'true';
+    newSession.title = i18n.t('history.newThread');
+    newSession.setAttribute('aria-label', i18n.t('history.newThread'));
+    newSession.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>';
+    newSession.disabled = !activeId;
+    header.appendChild(newSession);
+    sessionHistory.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'session-history-body';
+
+    let rendered = 0;
+    for (const providerId of historyProviderIds()) {
+      const threads = sessionHistoryState.sortedThreads(threadsByProvider[providerId] || []);
+      if (threads.length === 0) {
+        continue;
+      }
+
+      const group = document.createElement('section');
+      group.className = 'session-history-group';
+      group.dataset.providerId = providerId;
+
+      const groupTitle = document.createElement('div');
+      groupTitle.className = 'session-history-group-title';
+      groupTitle.textContent = historyProviderName(providerId);
+      group.appendChild(groupTitle);
+
+      threads.forEach((thread) => {
+        const status = historyStatusForThread(providerId, thread);
+        const selected = providerId === activeId && thread.id === activeThreadId(activeId);
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = [
+          'session-history-row',
+          `is-${status}`,
+          selected ? 'is-active' : '',
+        ].filter(Boolean).join(' ');
+        row.dataset.providerId = providerId;
+        row.dataset.threadId = thread.id;
+        row.setAttribute('aria-current', selected ? 'true' : 'false');
+        row.title = [
+          historyProviderName(providerId),
+          historyStatusLabel(status),
+          thread.title || i18n.t('history.untitled'),
+        ].filter(Boolean).join(' · ');
+
+        const statusDot = document.createElement('span');
+        statusDot.className = 'session-history-status-dot';
+        statusDot.setAttribute('aria-hidden', 'true');
+        row.appendChild(statusDot);
+
+        const content = document.createElement('span');
+        content.className = 'session-history-content';
+
+        const rowTitle = document.createElement('span');
+        rowTitle.className = 'session-history-row-title';
+        rowTitle.textContent = thread.title || i18n.t('history.untitled');
+        content.appendChild(rowTitle);
+
+        const meta = document.createElement('span');
+        meta.className = 'session-history-meta';
+
+        const statusLabel = document.createElement('span');
+        statusLabel.textContent = historyStatusLabel(status);
+        meta.appendChild(statusLabel);
+
+        const time = formatHistoryRelativeTime(sessionHistoryState.threadTimestamp(thread));
+        if (time) {
+          const timeLabel = document.createElement('span');
+          timeLabel.textContent = time;
+          meta.appendChild(timeLabel);
+        }
+        content.appendChild(meta);
+        row.appendChild(content);
+
+        group.appendChild(row);
+        rendered += 1;
+      });
+
+      body.appendChild(group);
+    }
+
+    if (rendered === 0) {
+      if (profilesLoading) {
+        const empty = document.createElement('div');
+        empty.className = 'session-history-empty';
+        empty.textContent = i18n.t('provider.loading');
+        body.appendChild(empty);
+      } else {
+        sessionHistory.hidden = true;
+        document.body.classList.add('is-session-history-hidden');
+      }
+    }
+
+    sessionHistory.appendChild(body);
+  }
+
+  function activateHistoryThread(providerId, threadId) {
+    const profile = profiles.find((item) => item.id === providerId);
+    const thread = findThread(providerId, threadId);
+    if (!thread || (profile && !profile.installed)) {
+      return;
+    }
+
+    activeId = providerId;
+    activeThreadByProvider[providerId] = thread.id;
+    activeAgentModeId(activeId);
+    activeModelId(activeId);
+    activeRuntimeId(activeId);
+    activePermissionId(activeId);
+    claudeModelMenuExplicit = false;
+    closeComposerMenus();
+    persist();
+    persistUserSelection();
+    renderAll();
+    refreshActiveContext();
+    input.focus();
   }
 
   function renderProviderHint() {
@@ -6038,6 +6282,7 @@
     renderProviderTabs();
     renderTaskBoard();
     renderThreadSelect();
+    renderSessionHistory();
     renderWorkflowMode();
     renderContextControls();
     renderProviderHint();
@@ -6144,6 +6389,7 @@
     if (cliId === activeId) {
       renderMessages();
     }
+    renderSessionHistory();
     return { threadId: thread?.id || '', index: conversation.length - 1 };
   }
 
@@ -8571,6 +8817,17 @@
   });
 
   homeAgentList?.addEventListener('click', (event) => {
+    const authButton = event.target.closest('button[data-cli-auth-action]');
+    if (authButton) {
+      event.preventDefault();
+      vscode.postMessage({
+        command: 'runCliAuthAction',
+        cliId: authButton.dataset.homeAgentId,
+        action: authButton.dataset.cliAuthAction,
+      });
+      return;
+    }
+
     const button = event.target.closest('button[data-home-agent-move]');
     if (!button) {
       return;
@@ -8672,6 +8929,22 @@
     }
     persist();
     renderAll();
+  });
+
+  sessionHistory?.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const newButton = target?.closest('[data-history-new]');
+    if (newButton) {
+      startNewThread(activeId);
+      return;
+    }
+
+    const row = target?.closest('[data-thread-id]');
+    if (!row) {
+      return;
+    }
+
+    activateHistoryThread(row.dataset.providerId, row.dataset.threadId);
   });
 
   providerSelect.addEventListener('change', () => {

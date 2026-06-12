@@ -8,6 +8,7 @@ type RuntimeMessageKey =
   | 'notification.stoppedAll'
   | 'notification.installCommandCopied'
   | 'notification.installCommandSent'
+  | 'notification.authCommandSent'
   | 'notification.messageCopied'
   | 'notification.refreshingProviders'
   | 'warning.starting'
@@ -21,7 +22,8 @@ type RuntimeMessageKey =
   | 'warning.apiProviderMissingKey'
   | 'providerExtension.notConfigured'
   | 'providerExtension.notInstalled'
-  | 'providerExtension.openFailed';
+  | 'providerExtension.openFailed'
+  | 'providerAuth.unsupported';
 
 const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>> = {
   en: {
@@ -30,6 +32,7 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'notification.stoppedAll': 'All AI CLI processes stopped.',
     'notification.installCommandCopied': 'Installation command copied to clipboard.',
     'notification.installCommandSent': 'Installation command sent to the terminal. Click refresh after it finishes.',
+    'notification.authCommandSent': '{provider} authentication command sent to the terminal.',
     'notification.messageCopied': 'Message copied to clipboard.',
     'notification.refreshingProviders': 'Refreshing Agents GUI providers...',
     'warning.starting': 'Agents GUI is still starting. Try again in a moment.',
@@ -46,6 +49,7 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'providerExtension.notConfigured': 'No VS Code extension bridge is configured for {provider}.',
     'providerExtension.notInstalled': '{extension} is not installed. Opening the Extensions search.',
     'providerExtension.openFailed': 'Failed to open {extension}.',
+    'providerAuth.unsupported': '{provider} does not expose a supported authentication command.',
   },
   'zh-CN': {
     'statusBar.text': '$(sparkle) Agents GUI',
@@ -53,6 +57,7 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'notification.stoppedAll': '已停止所有 AI CLI 进程。',
     'notification.installCommandCopied': '安装命令已复制到剪贴板。',
     'notification.installCommandSent': '安装命令已发送到终端。完成后点击重新检测。',
+    'notification.authCommandSent': '{provider} 认证命令已发送到终端。',
     'notification.messageCopied': '消息已复制到剪贴板。',
     'notification.refreshingProviders': '正在刷新 Agents GUI 提供方...',
     'warning.starting': 'Agents GUI 正在启动，请稍后再试。',
@@ -69,6 +74,7 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'providerExtension.notConfigured': '{provider} 还没有配置对应的 VS Code 扩展入口。',
     'providerExtension.notInstalled': '尚未安装 {extension}，已打开扩展搜索。',
     'providerExtension.openFailed': '无法打开 {extension}。',
+    'providerAuth.unsupported': '{provider} 没有可安全调用的认证命令。',
   },
 };
 

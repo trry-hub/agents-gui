@@ -6,7 +6,7 @@ import type {
   AssistantWebviewRequest,
 } from './assistantTypes';
 import type { ApiProviderSettings } from './apiProviders';
-import type { CliProfile } from './cliProfiles';
+import type { CliAuthAction, CliProfile } from './cliProfiles';
 
 export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | string;
 
@@ -59,6 +59,7 @@ export type WebviewToHostMessage =
   | { command: 'deleteOpenCodeSession'; openCodeSessionId?: string }
   | { command: 'openFilePalette' }
   | { command: 'openProviderExtension'; cliId?: string; providerId?: string }
+  | { command: 'runCliAuthAction'; cliId?: string; action?: CliAuthAction }
   | { command: 'copyInstallCommand'; installCommand?: string }
   | { command: 'installCli'; cliId?: string }
   | { command: 'setOpenCodeModelVariant'; modelId?: string; variant?: string }

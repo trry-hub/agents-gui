@@ -3,6 +3,7 @@ dist/
 .test-dist/
 .vscode-test/
 .playwright-mcp/
+.tmp/
 *.vsix
 WCDB_Contact*.sqlite*
 .aider*

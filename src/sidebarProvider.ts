@@ -34,6 +34,7 @@ import {
   getCliProfile,
   getCliRuntimeMode,
   inferContextWindowTokens,
+  type CliAuthAction,
   type CliModelOption,
   type CliProfile,
 } from './cliProfiles';
@@ -98,6 +99,11 @@ interface CommitMessageSettings {
   maxDiffChars: number;
 }
 
+interface ProviderClientTerminalState {
+  terminal: vscode.Terminal;
+  started: boolean;
+}
+
 const MAX_IMAGE_ATTACHMENTS = 8;
 const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const IMAGE_ATTACHMENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -121,6 +127,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private promptEchoBuffers = new Map<string, string>();
   private noOutputNoticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private setupTerminals = new Map<string, vscode.Terminal>();
+  private authTerminals = new Map<string, vscode.Terminal>();
+  private providerClientTerminals = new Map<string, ProviderClientTerminalState>();
   private openCodeStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private openCodeStatusRefreshAttempts = new Map<string, number>();
   private profilesById = new Map<string, CliProfile>();
@@ -145,6 +153,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openCodeCapability = options.openCodeCapability;
     this.state = options.state;
     this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui');
+    this.disposables.push(
+      vscode.window.onDidCloseTerminal((terminal) => {
+        for (const [providerId, entry] of this.providerClientTerminals) {
+          if (entry.terminal === terminal) {
+            this.providerClientTerminals.delete(providerId);
+          }
+        }
+      })
+    );
     this.registerDevelopmentWebviewWatcher();
   }
 
@@ -213,6 +230,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'openProviderExtension':
           await this.openProviderExtension(this.resolveCliId(message));
+          break;
+        case 'runCliAuthAction':
+          await this.runCliAuthAction(this.resolveCliId(message), message.action);
           break;
         case 'copyInstallCommand':
           await this.copyInstallCommand(message.installCommand);
@@ -1188,40 +1208,59 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async openProviderExtension(cliId: string): Promise<void> {
     const bridge = getProviderExtensionBridge(cliId);
-    const profile = getCliProfile(cliId);
+    const profile = this.profilesById.get(cliId) ?? getCliProfile(cliId);
     if (!bridge) {
-      vscode.window.showInformationMessage(
-        runtimeT(this.locale, 'providerExtension.notConfigured', {
-          provider: profile?.name ?? cliId,
-        })
-      );
+      if (profile) {
+        await this.openProviderCliTerminal(profile);
+        return;
+      }
+      vscode.window.showInformationMessage(runtimeT(this.locale, 'providerExtension.notConfigured', { provider: cliId }));
       return;
     }
 
     const extension = vscode.extensions.getExtension(bridge.extensionId);
-    if (!extension) {
-      vscode.window.showWarningMessage(
-        runtimeT(this.locale, 'providerExtension.notInstalled', {
-          extension: bridge.displayName,
-        })
-      );
-      await vscode.commands.executeCommand('workbench.extensions.search', `@id:${bridge.extensionId}`);
-      return;
-    }
-
-    await extension.activate();
-    for (const command of bridge.openCommands) {
-      try {
-        await vscode.commands.executeCommand(command);
-        return;
-      } catch {
-        // Try the next public command exposed by the provider extension.
+    if (extension) {
+      await extension.activate();
+      for (const command of bridge.openCommands) {
+        try {
+          await vscode.commands.executeCommand(command);
+          return;
+        } catch {
+          // Try the next public command exposed by the provider extension.
+        }
       }
     }
 
+    if (profile && this.profilesById.has(profile.id)) {
+      await this.openProviderCliTerminal(profile);
+      return;
+    }
+
     vscode.window.showWarningMessage(
-      runtimeT(this.locale, 'providerExtension.openFailed', { extension: bridge.displayName })
+      runtimeT(this.locale, extension ? 'providerExtension.openFailed' : 'providerExtension.notInstalled', {
+        extension: bridge.displayName,
+      })
     );
+    await vscode.commands.executeCommand('workbench.extensions.search', `@id:${bridge.extensionId}`);
+  }
+
+  private async openProviderCliTerminal(profile: CliProfile): Promise<void> {
+    let entry = this.providerClientTerminals.get(profile.id);
+    if (!entry) {
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      const terminal = vscode.window.createTerminal({
+        name: `Agents GUI Client: ${profile.name}`,
+        cwd: workspaceFolder?.uri.fsPath,
+      });
+      entry = { terminal, started: false };
+      this.providerClientTerminals.set(profile.id, entry);
+    }
+
+    entry.terminal.show();
+    if (!entry.started) {
+      entry.terminal.sendText(profile.command, true);
+      entry.started = true;
+    }
   }
 
   private async copyInstallCommand(installCommand: unknown): Promise<void> {
@@ -1253,6 +1292,33 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     terminal.show(true);
     terminal.sendText(command, true);
     vscode.window.showInformationMessage(runtimeT(this.locale, 'notification.installCommandSent'));
+  }
+
+  private async runCliAuthAction(cliId: string, action: unknown): Promise<void> {
+    const authAction = normalizeCliAuthAction(action);
+    const profile = this.profilesById.get(cliId) ?? getCliProfile(cliId);
+    const args = authAction ? profile?.authCommands?.[authAction] : undefined;
+    if (!profile || !authAction || !args) {
+      vscode.window.showWarningMessage(
+        runtimeT(this.locale, 'providerAuth.unsupported', {
+          provider: profile?.name || cliId || 'unknown',
+        })
+      );
+      return;
+    }
+
+    let terminal = this.authTerminals.get(profile.id);
+    if (!terminal || terminal.exitStatus) {
+      terminal = vscode.window.createTerminal({ name: `Agents GUI Auth: ${profile.name}` });
+      this.authTerminals.set(profile.id, terminal);
+    }
+
+    const command = [profile.command, ...args].map(shellQuote).join(' ');
+    terminal.show(true);
+    terminal.sendText(command, true);
+    vscode.window.showInformationMessage(
+      runtimeT(this.locale, 'notification.authCommandSent', { provider: profile.name })
+    );
   }
 
   private async setOpenCodeModelVariant(modelId: unknown, variant: unknown): Promise<void> {
@@ -1375,7 +1441,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return normalizeContextOptions(this.state?.get<Partial<AssistantContextOptions>>(CONTEXT_OPTIONS_STATE_KEY, {}));
   }
 
-  private resolveCliId(message: AssistantWebviewRequest): string {
+  private resolveCliId(message: { cliId?: string; providerId?: string }): string {
     return message.cliId ?? message.providerId ?? this.getDefaultCliId();
   }
 
@@ -1512,7 +1578,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const pattern = new vscode.RelativePattern(
       this.extensionUri,
-      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,providerCapabilities.js,conversationStore.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js}'
+      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,providerCapabilities.js,conversationStore.js,sessionHistory.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js}'
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
@@ -1612,6 +1678,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.getWebviewUri(webview, 'media', 'conversationStore.js')
     );
     html = html.replace(
+      /__SESSION_HISTORY_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'sessionHistory.js')
+    );
+    html = html.replace(
       /__SLASH_COMMANDS_JS_URI__/g,
       this.getWebviewUri(webview, 'media', 'slashCommands.js')
     );
@@ -1644,6 +1714,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openCodeStatusRefreshAttempts.clear();
     this.outputBuffers.clear();
     this.promptEchoBuffers.clear();
+    this.providerClientTerminals.clear();
     for (const [, session] of this.activeSessions) {
       this.agentRuntime.stop(session.id);
     }
@@ -1780,6 +1851,17 @@ function normalizeContextOptions(value: unknown): Partial<AssistantContextOption
 
 function usesProviderNativeAgentConfig(providerId: string): boolean {
   return providerId === 'opencode';
+}
+
+function normalizeCliAuthAction(action: unknown): CliAuthAction | undefined {
+  return action === 'login' || action === 'logout' || action === 'status' ? action : undefined;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function decodeImageDataUrl(
