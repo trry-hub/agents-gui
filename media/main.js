@@ -4,6 +4,7 @@
   const messageText = window.AgentsGuiMessageText;
   const messageChoices = window.AgentsGuiMessageChoices;
   const providerRunState = window.AgentsGuiProviderRunState;
+  const providerCapabilities = window.AgentsGuiProviderCapabilities;
   const conversationStore = window.AgentsGuiConversationStore;
   const slashCommands = window.AgentsGuiSlashCommands;
   const openCodeDialogState = window.AgentsGuiOpenCodeDialogState;
@@ -329,7 +330,7 @@
   }
 
   function usesProviderNativeAgentConfig(providerId) {
-    return providerId === 'opencode';
+    return providerCapabilities.usesNativeAgentConfig(providerId);
   }
 
   function persistableAgentModeMap(value) {
@@ -1081,24 +1082,42 @@
   }
 
   function optionListFor(profile, key, fallbackLabelKey) {
-    const options = Array.isArray(profile?.[key]) ? profile[key] : [];
-    return options.length > 0
-      ? options
-      : [{ id: 'default', label: i18n.t(fallbackLabelKey), description: '' }];
+    const control = key === 'agentModes'
+      ? 'agentMode'
+      : key === 'modelOptions'
+        ? 'model'
+        : key === 'runtimeModes'
+          ? 'runtime'
+          : key === 'permissionModes'
+            ? 'permission'
+            : undefined;
+    if (control) {
+      return providerCapabilities.optionList(profile, control, (labelKey) => i18n.t(labelKey));
+    }
+
+    return [{ id: 'default', label: i18n.t(fallbackLabelKey), description: '' }];
   }
 
   function selectableOption(option) {
-    return !option?.disabled && !option?.actionOnly;
+    return providerCapabilities.selectableOption(option);
   }
 
   function normalizeOptionId(profile, value, key, defaultKey, fallbackLabelKey) {
-    const options = optionListFor(profile, key, fallbackLabelKey);
-    const selectableOptions = options.filter(selectableOption);
-    const pool = selectableOptions.length > 0 ? selectableOptions : options;
-    const option = pool.find((item) => item.id === value)
-      || pool.find((item) => item.id === profile?.[defaultKey])
-      || pool[0];
+    const control = key === 'modelOptions'
+      ? 'model'
+      : key === 'runtimeModes'
+        ? 'runtime'
+        : key === 'permissionModes'
+          ? 'permission'
+          : undefined;
+    if (control) {
+      return providerCapabilities.normalizeOptionId(profile, value, control, (labelKey) => i18n.t(labelKey));
+    }
 
+    const options = optionListFor(profile, key, fallbackLabelKey);
+    const option = options.find((item) => item.id === value)
+      || options.find((item) => item.id === profile?.[defaultKey])
+      || options[0];
     return option.id;
   }
 
@@ -1236,7 +1255,7 @@
 
   function activeModelVariant(cliId = activeId) {
     const profile = profiles.find((item) => item.id === cliId);
-    if (profile?.id !== 'opencode') {
+    if (!providerCapabilities.supportsModelVariants(profile)) {
       return '';
     }
 
@@ -3636,7 +3655,7 @@
   }
 
   function maybeShowOpenCodeVariantDialog(option, options = {}) {
-    if (activeId !== 'opencode' || openCodeModelVariantOptions(option).length === 0) {
+    if (!providerCapabilities.supportsModelVariants(activeProfile()) || openCodeModelVariantOptions(option).length === 0) {
       return false;
     }
 
@@ -5147,12 +5166,12 @@
   }
 
   function formatDurationMs(durationMs) {
-    const duration = Number(durationMs);
-    if (!Number.isFinite(duration) || duration < 0) {
+    const duration = conversationStore.normalizeDurationMs(durationMs);
+    if (duration === undefined) {
       return '';
     }
 
-    const totalSeconds = Math.max(0, Math.floor(duration / 1000));
+    const totalSeconds = Math.floor(duration / 1000);
     if (totalSeconds < 60) {
       return `${totalSeconds}s`;
     }
@@ -5160,6 +5179,15 @@
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = String(totalSeconds % 60).padStart(2, '0');
     return `${minutes}m ${seconds}s`;
+  }
+
+  function completedMessageDurationMs(startedAt) {
+    const start = Number(startedAt);
+    if (!Number.isFinite(start) || start <= 0) {
+      return undefined;
+    }
+
+    return conversationStore.normalizeDurationMs(Date.now() - start);
   }
 
   function appendMessageAttachments(container, attachments) {
@@ -5708,7 +5736,7 @@
       ? activeCustomModel(activeId)
       : modelSummaryText(model, displayModel);
     modelSummary?.setAttribute('title', displayModel.description || i18n.t('model.label'));
-    const readonlyModel = profile?.id === 'opencode';
+    const readonlyModel = providerCapabilities.supportsModelVariants(profile);
     modelMenu?.classList.toggle('is-readonly', Boolean(readonlyModel));
     if (modelSummary) {
       if (readonlyModel) {
@@ -5729,7 +5757,7 @@
         (
           readonlyModel ||
           (
-            options.length > 1 &&
+            providerCapabilities.controlVisibility(profile, 'model', { translate: (labelKey) => i18n.t(labelKey) }) &&
             (profile.id !== 'claude' || (claudeModelMenuExplicit && modelMenu?.open))
           )
         )
@@ -5756,7 +5784,10 @@
         runtime.dangerous ? i18n.t('option.danger') : '',
       ].filter(Boolean).join(' · ')
     );
-    runtimeMenu?.classList.toggle('is-visible', Boolean(profile && options.length > 1));
+    runtimeMenu?.classList.toggle(
+      'is-visible',
+      providerCapabilities.controlVisibility(profile, 'runtime', { translate: (labelKey) => i18n.t(labelKey) })
+    );
     runtimeMenu?.classList.toggle('is-danger', Boolean(runtime?.dangerous));
     runtimeMenu?.classList.toggle(
       'is-default',
@@ -5780,7 +5811,10 @@
         permission.dangerous ? i18n.t('option.danger') : '',
       ].filter(Boolean).join(' · ')
     );
-    permissionMenu?.classList.toggle('is-visible', Boolean(profile && options.length > 1));
+    permissionMenu?.classList.toggle(
+      'is-visible',
+      providerCapabilities.controlVisibility(profile, 'permission', { translate: (labelKey) => i18n.t(labelKey) })
+    );
     permissionMenu?.classList.toggle('is-danger', Boolean(permission.dangerous));
     permissionMenu?.classList.toggle(
       'is-default',
@@ -5817,7 +5851,10 @@
         `${profile?.name || i18n.t('provider.label')} · ${displayMode?.description || displayMode?.label || ''}`.trim()
       );
     }
-    modeMenu?.classList.toggle('is-visible', Boolean(profile && (profile?.id === 'opencode' || modes.length > 1)));
+    modeMenu?.classList.toggle(
+      'is-visible',
+      providerCapabilities.controlVisibility(profile, 'agentMode', { translate: (labelKey) => i18n.t(labelKey) })
+    );
     modeMenu?.classList.toggle(
       'is-default',
       Boolean(profile && mode?.id === normalizeAgentModeId(profile, profile?.defaultAgentMode))
@@ -6262,7 +6299,12 @@
       const item = conversation[target.index];
       if (item) {
         item.running = false;
-        item.durationMs = Math.max(0, Date.now() - Number(item.startedAt || Date.now()));
+        const durationMs = completedMessageDurationMs(item.startedAt);
+        if (durationMs === undefined) {
+          delete item.durationMs;
+        } else {
+          item.durationMs = durationMs;
+        }
         item.thinking = sanitizeThinkingText(target.thinkingBuffer ?? item.thinking);
         delete item.runningNotice;
         if (removeEmpty && !normalizeMessageText(item.text).trim()) {

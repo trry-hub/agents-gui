@@ -6,6 +6,8 @@
   }
   root.AgentsGuiConversationStore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  const MAX_MESSAGE_DURATION_MS = 30 * 60 * 1000;
+
   function normalizeThreadMessages(threadMessages, options = {}) {
     const normalizeAssistantText =
       typeof options.normalizeAssistantText === 'function'
@@ -25,12 +27,18 @@
         return message;
       }
 
-      return {
-        ...message,
+      const { startedAt, durationMs, ...rest } = message;
+      const normalized = {
+        ...rest,
         running: false,
         text: normalizeAssistantText(message.text),
         thinking: sanitizeThinkingText(message.thinking),
       };
+      const safeDurationMs = normalizeDurationMs(durationMs);
+      if (safeDurationMs !== undefined) {
+        normalized.durationMs = safeDurationMs;
+      }
+      return normalized;
     });
   }
 
@@ -43,12 +51,31 @@
           if (!message || typeof message !== 'object') {
             return message;
           }
-          const { startedAt, ...rest } = message;
-          return { ...rest, running: false };
+          const { startedAt, durationMs, ...rest } = message;
+          const serializedMessage = { ...rest, running: false };
+          const safeDurationMs = normalizeDurationMs(durationMs);
+          if (safeDurationMs !== undefined) {
+            serializedMessage.durationMs = safeDurationMs;
+          }
+          return serializedMessage;
         }),
       }));
     });
     return serialized;
+  }
+
+  function normalizeDurationMs(value, options = {}) {
+    const duration = Number(value);
+    if (!Number.isFinite(duration) || duration < 0) {
+      return undefined;
+    }
+
+    const maxDuration = Number(options.maxDurationMs ?? MAX_MESSAGE_DURATION_MS);
+    if (Number.isFinite(maxDuration) && maxDuration > 0 && duration > maxDuration) {
+      return undefined;
+    }
+
+    return Math.floor(duration);
   }
 
   function makeThreadId(cliId, options = {}) {
@@ -159,6 +186,7 @@
     findThread,
     latestThread,
     makeThreadId,
+    normalizeDurationMs,
     normalizeThreadMessages,
     serializeThreadsForState,
     setActiveThread,

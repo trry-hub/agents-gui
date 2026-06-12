@@ -1512,7 +1512,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const pattern = new vscode.RelativePattern(
       this.extensionUri,
-      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,conversationStore.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js}'
+      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,providerCapabilities.js,conversationStore.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js}'
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
@@ -1602,6 +1602,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     html = html.replace(
       /__PROVIDER_RUN_STATE_JS_URI__/g,
       this.getWebviewUri(webview, 'media', 'providerRunState.js')
+    );
+    html = html.replace(
+      /__PROVIDER_CAPABILITIES_JS_URI__/g,
+      this.getWebviewUri(webview, 'media', 'providerCapabilities.js')
     );
     html = html.replace(
       /__CONVERSATION_STORE_JS_URI__/g,

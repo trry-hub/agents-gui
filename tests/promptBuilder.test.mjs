@@ -55,6 +55,7 @@ const { normalizeMessageText, stripInlineMarkdown } = require('../media/messageT
 const inlineMarkdown = require('../media/inlineMarkdown.js');
 const { extractMessageChoiceLineKeys, extractMessageChoices } = require('../media/messageChoices.js');
 const providerRunState = require('../media/providerRunState.js');
+const providerCapabilities = require('../media/providerCapabilities.js');
 const conversationStore = require('../media/conversationStore.js');
 const slashCommands = require('../media/slashCommands.js');
 const openCodeDialogState = require('../media/openCodeDialogState.js');
@@ -1142,7 +1143,7 @@ test('development mode watches webview assets for live reload', () => {
   assert.match(extensionSource, /extensionMode:\s*context\.extensionMode/);
   assert.match(sidebarSource, /vscode\.ExtensionMode\.Development/);
   assert.match(sidebarSource, /createFileSystemWatcher/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
   assert.match(sidebarSource, /webviewAssetVersion/);
   assert.match(sidebarSource, /reloadWebviewForDevelopment/);
 });
@@ -1274,7 +1275,7 @@ test('webview renders the Codex local mode menu like Code X', () => {
   assert.match(script, /i18n\.t\('runtime\.continue'\)/);
   assert.match(script, /displayRuntime\.summaryLabel \|\| displayRuntime\.label/);
   assert.match(script, /function selectableOption\(option\)/);
-  assert.match(script, /return !option\?\.disabled && !option\?\.actionOnly;/);
+  assert.match(script, /return providerCapabilities\.selectableOption\(option\);/);
   assert.match(script, /if \(!button \|\| button\.disabled\) \{/);
   assert.match(script, /if \(button\.classList\.contains\('is-action'\)\) \{/);
   assert.match(script, /runtimeMenu\.open = false;/);
@@ -1362,7 +1363,7 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(script, /meta\.textContent = profile\?\.id === 'opencode'/);
   assert.match(script, /modelSummaryText\(model, displayModel\)/);
   assert.match(script, /selectedAction === 'freeform' \? 'input\.placeholderProvider' : 'input\.placeholderAction'/);
-  assert.match(script, /const readonlyModel = profile\?\.id === 'opencode';/);
+  assert.match(script, /const readonlyModel = providerCapabilities\.supportsModelVariants\(profile\);/);
   assert.match(script, /modelMenu\?\.classList\.toggle\('is-readonly', Boolean\(readonlyModel\)\);/);
   assert.match(script, /modelSummary\?\.addEventListener\('click'/);
   assert.match(i18nScript, /'input\.placeholderProvider': 'Ask \{provider\}…'/);
@@ -1390,7 +1391,7 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(html, /id="composerSettingsBtn"/);
   assert.match(script, /const composerSettingsBtn = document\.getElementById\('composerSettingsBtn'\)/);
   assert.match(script, /composerSettingsBtn\?\.addEventListener\('click'/);
-  assert.match(script, /profile\?\.id === 'opencode' \|\| modes\.length > 1/);
+  assert.match(script, /providerCapabilities\.controlVisibility\(profile, 'agentMode'/);
   assert.match(css, /body\[data-provider="opencode"\] \.context-row\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.context-row\s*\{\s*[^}]*padding:\s*0;/s);
   assert.match(css, /body\[data-provider="opencode"\] #contextSummaryLabel\s*\{\s*[^}]*display:\s*none;/s);
@@ -1503,7 +1504,9 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /label\.textContent = openCodeThinkingSummaryText\(activity, options\.running, options\.startedAt, options\.durationMs\);/);
   assert.match(script, /chevron\.className = 'message-thinking-chevron';/);
   assert.match(script, /chevron\.innerHTML = THINKING_CHEVRON_SVG;/);
-  assert.match(script, /item\.durationMs = Math\.max\(0, Date\.now\(\) - Number\(item\.startedAt \|\| Date\.now\(\)\)\);/);
+  assert.match(script, /const durationMs = completedMessageDurationMs\(item\.startedAt\);/);
+  assert.match(script, /delete item\.durationMs;/);
+  assert.match(script, /item\.durationMs = durationMs;/);
   assert.match(script, /item\.thinking = sanitizeThinkingText\(target\.thinkingBuffer \?\? item\.thinking\);/);
   assert.match(script, /const thinkingText = sanitizeThinkingText\(normalized\);/);
   assert.match(script, /appendOpenCodeActivityDetails\(body, activity\.entries, detailKey \? `\$\{detailKey\}:activity` : ''\);/);
@@ -2521,7 +2524,7 @@ test('webview hides low-value default composer chips', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(script, /modeMenu\?\.classList\.toggle\('is-visible', Boolean\(profile && \(profile\?\.id === 'opencode' \|\| modes\.length > 1\)\)\);/);
+  assert.match(script, /modeMenu\?\.classList\.toggle\(\s*'is-visible',\s*providerCapabilities\.controlVisibility\(profile, 'agentMode'/s);
   assert.match(script, /forceContextMenuVisible/);
   assert.match(script, /contextSummary\.workspace/);
   assert.match(css, /\.mode-menu,\s*\.context-menu\s*\{\s*[^}]*display:\s*none;/s);
@@ -2737,8 +2740,9 @@ test('webview does not persist transient running message state', () => {
   assert.match(providerSource, /command:\s*'sessionInputResult'/);
   assert.match(providerSource, /runtimeT\(this\.locale,\s*'warning\.noOutput'/);
   assert.match(script, /threadsByProvider: conversationStore\.serializeThreadsForState\(threadsByProvider\)/);
-  assert.match(conversationSource, /const \{ startedAt, \.\.\.rest \} = message;/);
-  assert.match(conversationSource, /return \{ \.\.\.rest, running: false \};/);
+  assert.match(conversationSource, /const \{ startedAt, durationMs, \.\.\.rest \} = message;/);
+  assert.match(conversationSource, /const serializedMessage = \{ \.\.\.rest, running: false \};/);
+  assert.match(conversationSource, /const safeDurationMs = normalizeDurationMs\(durationMs\);/);
   assert.match(script, /normalizeAssistantText: \(text\) => filterInternalPromptEcho\(text\)\.text/);
   assert.match(conversationSource, /running: false,\s*text: normalizeAssistantText\(message\.text\)/s);
   assert.match(script, /case 'sessionNotice':\s*updateSessionNotice\(message\);/);
@@ -3076,7 +3080,7 @@ test('webview keeps running status singular and supports quick choices', () => {
   assert.doesNotMatch(script, /appendStreamingCursor/);
   assert.doesNotMatch(script, /message-streaming-cursor/);
   assert.doesNotMatch(script, /className = 'cursor/);
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
   assert.match(html, /__MESSAGE_CHOICES_JS_URI__/);
   assert.match(script, /const messageText = window\.AgentsGuiMessageText/);
   assert.match(script, /const inlineMarkdown = window\.AgentsGuiInlineMarkdown/);
@@ -3089,6 +3093,7 @@ test('webview keeps running status singular and supports quick choices', () => {
   assert.match(textScript, /function normalizeMessageText\(text\)/);
   assert.match(textScript, /function stripInlineMarkdown\(text\)/);
   assert.match(script, /const messageChoices = window\.AgentsGuiMessageChoices/);
+  assert.match(script, /const providerCapabilities = window\.AgentsGuiProviderCapabilities/);
   assert.match(script, /messageChoices\.extractMessageChoices\(text/);
   assert.doesNotMatch(script, /function extractMessageChoices\(text/);
   assert.match(choiceScript, /require\('\.\/messageText\.js'\)/);
@@ -3147,9 +3152,10 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
   const claudeSource = readFileSync(new URL('../media/claudeActions.js', import.meta.url), 'utf8');
   const inlineSource = readFileSync(new URL('../media/inlineMarkdown.js', import.meta.url), 'utf8');
   const runStateSource = readFileSync(new URL('../media/providerRunState.js', import.meta.url), 'utf8');
+  const capabilitySource = readFileSync(new URL('../media/providerCapabilities.js', import.meta.url), 'utf8');
 
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
 
   assert.doesNotMatch(script, /function serializeThreadsForState\(source\)/);
   assert.match(conversationSource, /function serializeThreadsForState\(source\)/);
@@ -3171,6 +3177,11 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
 
   assert.doesNotMatch(script, /function createProviderRunState\(\)/);
   assert.match(runStateSource, /function createProviderRunState\(\)/);
+
+  assert.doesNotMatch(script, /const CONTROL_CONFIG = Object\.freeze/);
+  assert.match(capabilitySource, /const CONTROL_CONFIG = Object\.freeze/);
+  assert.match(script, /providerCapabilities\.optionList/);
+  assert.match(script, /providerCapabilities\.controlVisibility/);
 
   assert.doesNotMatch(script, /SAFE_LINK_PROTOCOLS/);
   assert.match(inlineSource, /SAFE_LINK_PROTOCOLS/);
@@ -3232,8 +3243,8 @@ test('conversation store normalizes restored messages and serializes safe state'
   const normalizedMessages = conversationStore.normalizeThreadMessages(
     [
       { role: 'user', text: 'hello', running: true },
-      { role: 'assistant', text: 'raw assistant', running: true, thinking: 'raw thinking' },
-      { role: 'error', text: 'raw error', running: true },
+      { role: 'assistant', text: 'raw assistant', running: true, startedAt: 123, durationMs: 2000, thinking: 'raw thinking' },
+      { role: 'error', text: 'raw error', running: true, startedAt: 456, durationMs: 31 * 60 * 1000 },
     ],
     {
       normalizeAssistantText: (text) => `clean:${text}`,
@@ -3243,9 +3254,13 @@ test('conversation store normalizes restored messages and serializes safe state'
 
   assert.deepEqual(normalizedMessages, [
     { role: 'user', text: 'hello', running: true },
-    { role: 'assistant', text: 'clean:raw assistant', running: false, thinking: 'thinking:raw thinking' },
+    { role: 'assistant', text: 'clean:raw assistant', running: false, thinking: 'thinking:raw thinking', durationMs: 2000 },
     { role: 'error', text: 'clean:raw error', running: false, thinking: 'thinking:' },
   ]);
+
+  assert.equal(conversationStore.normalizeDurationMs(30 * 60 * 1000), 30 * 60 * 1000);
+  assert.equal(conversationStore.normalizeDurationMs(30 * 60 * 1000 + 1), undefined);
+  assert.equal(conversationStore.normalizeDurationMs(-1), undefined);
 
   assert.deepEqual(
     conversationStore.serializeThreadsForState({
@@ -3253,7 +3268,8 @@ test('conversation store normalizes restored messages and serializes safe state'
         {
           id: 'thread-1',
           messages: [
-            { role: 'assistant', text: 'answer', running: true, startedAt: 123 },
+            { role: 'assistant', text: 'answer', running: true, startedAt: 123, durationMs: 3000 },
+            { role: 'assistant', text: 'stale answer', running: false, startedAt: 456, durationMs: 31 * 60 * 1000 },
             { role: 'user', text: 'prompt', running: false },
           ],
         },
@@ -3265,7 +3281,8 @@ test('conversation store normalizes restored messages and serializes safe state'
         {
           id: 'thread-1',
           messages: [
-            { role: 'assistant', text: 'answer', running: false },
+            { role: 'assistant', text: 'answer', running: false, durationMs: 3000 },
+            { role: 'assistant', text: 'stale answer', running: false },
             { role: 'user', text: 'prompt', running: false },
           ],
         },
@@ -3506,6 +3523,35 @@ test('provider run state helper owns pending and running transitions', () => {
   assert.equal(state.pendingThreadByProvider.codex, undefined);
 });
 
+test('provider capability helper owns provider-native composer controls', () => {
+  const opencodeProfile = {
+    id: 'opencode',
+    defaultAgentMode: 'plan',
+    agentModes: [
+      { id: 'build', label: 'Build' },
+      { id: 'plan', label: 'Plan' },
+    ],
+    modelOptions: [{ id: 'configured', label: 'Configured' }],
+  };
+  const minimalProfile = { id: 'gemini' };
+
+  assert.equal(providerCapabilities.usesNativeAgentConfig(opencodeProfile), true);
+  assert.equal(providerCapabilities.usesNativeAgentConfig('codex'), false);
+  assert.equal(providerCapabilities.supportsModelVariants(opencodeProfile), true);
+  assert.equal(providerCapabilities.supportsModelVariants(minimalProfile), false);
+
+  assert.equal(
+    providerCapabilities.normalizeOptionId(opencodeProfile, 'missing', 'agentMode', (key) => key),
+    'plan'
+  );
+  assert.deepEqual(
+    providerCapabilities.optionList(minimalProfile, 'runtime', (key) => `translated:${key}`),
+    [{ id: 'default', label: 'translated:runtime.short', description: '' }]
+  );
+  assert.equal(providerCapabilities.controlVisibility(opencodeProfile, 'agentMode'), true);
+  assert.equal(providerCapabilities.controlVisibility(minimalProfile, 'runtime'), false);
+});
+
 test('webview uses a ring spinner for running message status', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const runningSpinnerRule = css.match(/\.message-status\.is-running \.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
@@ -3529,6 +3575,7 @@ test('preview webview streams markdown with real line breaks', () => {
     'messageText.js',
     'messageChoices.js',
     'providerRunState.js',
+    'providerCapabilities.js',
     'conversationStore.js',
     'slashCommands.js',
     'openCodeDialogState.js',
@@ -3540,6 +3587,7 @@ test('preview webview streams markdown with real line breaks', () => {
   assert.match(script, /__MESSAGE_TEXT_JS_URI__/);
   assert.match(script, /__MESSAGE_CHOICES_JS_URI__/);
   assert.match(script, /__PROVIDER_RUN_STATE_JS_URI__/);
+  assert.match(script, /__PROVIDER_CAPABILITIES_JS_URI__/);
   assert.match(script, /__CONVERSATION_STORE_JS_URI__/);
   assert.match(script, /__SLASH_COMMANDS_JS_URI__/);
   assert.match(script, /__OPEN_CODE_DIALOG_STATE_JS_URI__/);
@@ -3606,7 +3654,7 @@ test('agent mode select is persisted per provider', () => {
   assert.match(script, /function persistUserSelection\(\)/);
   assert.match(script, /function schedulePersistUserSelection\(\)/);
   assert.match(script, /function usesProviderNativeAgentConfig\(providerId\)/);
-  assert.match(script, /providerId === 'opencode'/);
+  assert.match(script, /providerCapabilities\.usesNativeAgentConfig\(providerId\)/);
   assert.match(script, /function persistableAgentModeMap\(value\)/);
   assert.match(script, /command: 'saveSelectionState'/);
   assert.match(script, /activeProviderId: activeId/);

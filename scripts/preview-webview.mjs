@@ -14,6 +14,7 @@ const webviewAssets = [
   'messageText.js',
   'messageChoices.js',
   'providerRunState.js',
+  'providerCapabilities.js',
   'conversationStore.js',
   'slashCommands.js',
   'openCodeDialogState.js',
@@ -32,6 +33,7 @@ const i18nUri = './i18n.js';
 const messageTextUri = './messageText.js';
 const messageChoicesUri = './messageChoices.js';
 const providerRunStateUri = './providerRunState.js';
+const providerCapabilitiesUri = './providerCapabilities.js';
 const conversationStoreUri = './conversationStore.js';
 const slashCommandsUri = './slashCommands.js';
 const openCodeDialogStateUri = './openCodeDialogState.js';
@@ -206,6 +208,7 @@ html = html
   .replace('__MESSAGE_TEXT_JS_URI__', messageTextUri)
   .replace('__MESSAGE_CHOICES_JS_URI__', messageChoicesUri)
   .replace('__PROVIDER_RUN_STATE_JS_URI__', providerRunStateUri)
+  .replace('__PROVIDER_CAPABILITIES_JS_URI__', providerCapabilitiesUri)
   .replace('__CONVERSATION_STORE_JS_URI__', conversationStoreUri)
   .replace('__SLASH_COMMANDS_JS_URI__', slashCommandsUri)
   .replace('__OPEN_CODE_DIALOG_STATE_JS_URI__', openCodeDialogStateUri)
