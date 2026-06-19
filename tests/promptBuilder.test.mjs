@@ -1536,7 +1536,12 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /const durationMs = completedMessageDurationMs\(item\.startedAt\);/);
   assert.match(script, /delete item\.durationMs;/);
   assert.match(script, /item\.durationMs = durationMs;/);
+  assert.match(script, /const finalText = finalStreamTargetText\(target, item\);/);
+  assert.match(script, /if \(finalText\) \{\s*item\.text = finalText;\s*\}/s);
   assert.match(script, /item\.thinking = sanitizeThinkingText\(target\.thinkingBuffer \?\? item\.thinking\);/);
+  assert.match(script, /function finalStreamTargetText\(target, item\)/);
+  assert.match(script, /function isEmptyAssistantStreamMessage\(item\)/);
+  assert.match(script, /if \(removeEmpty && isEmptyAssistantStreamMessage\(item\)\) \{/);
   assert.match(script, /const thinkingText = sanitizeThinkingText\(normalized\);/);
   assert.match(script, /appendOpenCodeActivityDetails\(body, activity\.entries, detailKey \? `\$\{detailKey\}:activity` : ''\);/);
   assert.match(script, /thinkingTextBlock\.className = 'message-thinking-detail-text';/);

@@ -7,6 +7,7 @@
 .aider*
 .aider*/**
 .test-dist/**
+.tmp/**
 docs/**
 tests/**
 src/**

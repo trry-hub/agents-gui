@@ -6544,6 +6544,10 @@
       const conversation = ensureConversation(target.cliId, target.threadId);
       const item = conversation[target.index];
       if (item) {
+        const finalText = finalStreamTargetText(target, item);
+        if (finalText) {
+          item.text = finalText;
+        }
         item.running = false;
         const durationMs = completedMessageDurationMs(item.startedAt);
         if (durationMs === undefined) {
@@ -6553,7 +6557,7 @@
         }
         item.thinking = sanitizeThinkingText(target.thinkingBuffer ?? item.thinking);
         delete item.runningNotice;
-        if (removeEmpty && !normalizeMessageText(item.text).trim()) {
+        if (removeEmpty && isEmptyAssistantStreamMessage(item)) {
           conversation.splice(target.index, 1);
         }
       }
@@ -6561,6 +6565,28 @@
     }
 
     return target;
+  }
+
+  function finalStreamTargetText(target, item) {
+    const candidates = [
+      target?.buffer,
+      item?.text,
+    ];
+    for (const candidate of candidates) {
+      const filtered = filterInternalPromptEcho(candidate);
+      const text = filtered.pending ? normalizeMessageText(candidate) : filtered.text;
+      if (normalizeMessageText(text).trim()) {
+        return text;
+      }
+    }
+    return '';
+  }
+
+  function isEmptyAssistantStreamMessage(item) {
+    return !normalizeMessageText(item?.text).trim()
+      && !sanitizeThinkingText(item?.thinking).trim()
+      && !hasOpenCodeActivity(item?.activity)
+      && !hasOpenCodeActivityTimeline(item?.activityTimeline);
   }
 
   function markSessionEnded(message) {
