@@ -95,15 +95,17 @@ select {
   min-width: 0;
   display: grid;
   grid-template-areas:
-    "session-history toolbar"
-    "session-history main-content"
-    "session-history composer";
-  grid-template-columns: minmax(184px, 220px) minmax(0, 1fr);
+    "toolbar"
+    "main-content"
+    "composer";
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: max-content minmax(0, 1fr) max-content;
 }
 
 .toolbar {
   grid-area: toolbar;
+  grid-column: 1;
+  grid-row: 1;
   padding: 6px 8px;
   border-bottom: 1px solid var(--assistant-border);
   background: color-mix(in srgb, var(--assistant-surface) 90%, var(--assistant-panel));
@@ -111,6 +113,8 @@ select {
 
 .main-content {
   grid-area: main-content;
+  grid-column: 1;
+  grid-row: 2;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -120,9 +124,11 @@ select {
 
 .session-history {
   grid-area: session-history;
+  grid-column: 1;
+  grid-row: 1 / 4;
   min-width: 0;
   min-height: 0;
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 6px;
   overflow: hidden;
@@ -131,11 +137,53 @@ select {
   background: color-mix(in srgb, var(--vscode-sideBar-background, var(--assistant-panel)) 82%, transparent);
 }
 
+body.is-session-history-visible .session-history:not([hidden]):not(:empty) {
+  display: flex;
+}
+
 .session-history[hidden] {
   display: none;
 }
 
+.session-history:empty {
+  display: none;
+}
+
 body.is-session-history-hidden .app-shell {
+  grid-template-areas:
+    "toolbar"
+    "main-content"
+    "composer";
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.is-session-history-visible .app-shell {
+  grid-template-areas:
+    "session-history toolbar"
+    "session-history main-content"
+    "session-history composer";
+  grid-template-columns: minmax(184px, 220px) minmax(0, 1fr);
+}
+
+body.is-session-history-visible .toolbar,
+body.is-session-history-visible .main-content,
+body.is-session-history-visible .composer {
+  grid-column: 2;
+}
+
+body.is-session-history-visible .session-history {
+  grid-column: 1;
+}
+
+.app-shell:has(> .session-history[hidden]) {
+  grid-template-areas:
+    "toolbar"
+    "main-content"
+    "composer";
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell:has(> .session-history:empty) {
   grid-template-areas:
     "toolbar"
     "main-content"
@@ -366,6 +414,8 @@ body.is-session-history-hidden .app-shell {
 
 .sidebar {
   grid-area: sidebar;
+  grid-column: 1;
+  grid-row: 1 / 4;
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
@@ -1399,6 +1449,99 @@ body.is-api-settings-open .composer {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
   overflow: hidden;
+}
+
+.mcp-settings-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.mcp-config-path {
+  margin-top: 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  color: var(--assistant-muted);
+  word-break: break-all;
+}
+
+.mcp-unsupported {
+  padding: 12px;
+  border: 1px solid var(--assistant-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--assistant-panel) 65%, transparent);
+  color: var(--assistant-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mcp-list-pane {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: max-content minmax(0, 1fr) max-content max-content;
+  gap: 8px;
+  padding: 12px;
+  border-right: 1px solid var(--assistant-border);
+  background: color-mix(in srgb, var(--assistant-panel) 42%, transparent);
+}
+
+.mcp-refresh-button {
+  margin-top: 4px;
+}
+
+.mcp-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 7px;
+  text-align: left;
+}
+
+.mcp-list-item-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--assistant-border);
+  color: var(--assistant-muted);
+  background: color-mix(in srgb, var(--assistant-surface) 88%, transparent);
+  white-space: nowrap;
+}
+
+.mcp-list-item-status.is-connected {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconPassed, #3fb950) 50%, var(--assistant-border));
+}
+
+.mcp-list-item-status.is-failed {
+  color: var(--vscode-testing-iconFailed, #f85149);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconFailed, #f85149) 50%, var(--assistant-border));
+}
+
+.mcp-list-item-status.is-disabled,
+.mcp-list-item-status.is-needs_auth {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}
+
+.mcp-cli-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.mcp-cli-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mcp-cli-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
 }
 
 .api-provider-list-pane {
@@ -3679,6 +3822,8 @@ textarea:focus {
 
 .composer {
   grid-area: composer;
+  grid-column: 1;
+  grid-row: 3;
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -4230,13 +4375,61 @@ body[data-provider="opencode"] .prompt-shell:focus-within {
 
 body[data-provider="opencode"] .app-shell {
   grid-template-areas:
+    "toolbar sidebar"
+    "main-content sidebar"
+    "composer sidebar";
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+body[data-provider="opencode"].is-session-history-visible .app-shell {
+  grid-template-areas:
     "session-history toolbar sidebar"
     "session-history main-content sidebar"
     "session-history composer sidebar";
   grid-template-columns: minmax(184px, 220px) minmax(0, 1fr) 340px;
 }
 
+body[data-provider="opencode"] .toolbar,
+body[data-provider="opencode"] .main-content,
+body[data-provider="opencode"] .composer {
+  grid-column: 1;
+}
+
+body[data-provider="opencode"] .sidebar {
+  grid-column: 2;
+}
+
+body[data-provider="opencode"].is-session-history-visible .session-history {
+  grid-column: 1;
+}
+
+body[data-provider="opencode"].is-session-history-visible .toolbar,
+body[data-provider="opencode"].is-session-history-visible .main-content,
+body[data-provider="opencode"].is-session-history-visible .composer {
+  grid-column: 2;
+}
+
+body[data-provider="opencode"].is-session-history-visible .sidebar {
+  grid-column: 3;
+}
+
 body[data-provider="opencode"].is-session-history-hidden .app-shell {
+  grid-template-areas:
+    "toolbar sidebar"
+    "main-content sidebar"
+    "composer sidebar";
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+body[data-provider="opencode"] .app-shell:has(> .session-history[hidden]) {
+  grid-template-areas:
+    "toolbar sidebar"
+    "main-content sidebar"
+    "composer sidebar";
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+body[data-provider="opencode"] .app-shell:has(> .session-history:empty) {
   grid-template-areas:
     "toolbar sidebar"
     "main-content sidebar"
@@ -6208,13 +6401,61 @@ textarea:disabled {
   filter: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   body[data-provider="opencode"] .app-shell {
+    grid-template-areas:
+      "toolbar"
+      "main-content"
+      "composer";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body[data-provider="opencode"].is-session-history-visible .app-shell {
     grid-template-areas:
       "session-history toolbar"
       "session-history main-content"
       "session-history composer";
     grid-template-columns: minmax(176px, 210px) minmax(0, 1fr);
+  }
+
+  body[data-provider="opencode"] .toolbar,
+  body[data-provider="opencode"] .main-content,
+  body[data-provider="opencode"] .composer {
+    grid-column: 1;
+  }
+
+  body[data-provider="opencode"].is-session-history-visible .session-history {
+    grid-column: 1;
+  }
+
+  body[data-provider="opencode"].is-session-history-visible .toolbar,
+  body[data-provider="opencode"].is-session-history-visible .main-content,
+  body[data-provider="opencode"].is-session-history-visible .composer {
+    grid-column: 2;
+  }
+
+  body[data-provider="opencode"].is-session-history-hidden .app-shell {
+    grid-template-areas:
+      "toolbar"
+      "main-content"
+      "composer";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body[data-provider="opencode"] .app-shell:has(> .session-history[hidden]) {
+    grid-template-areas:
+      "toolbar"
+      "main-content"
+      "composer";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body[data-provider="opencode"] .app-shell:has(> .session-history:empty) {
+    grid-template-areas:
+      "toolbar"
+      "main-content"
+      "composer";
+    grid-template-columns: minmax(0, 1fr);
   }
 
   body[data-provider="opencode"] .main-content {
@@ -6224,6 +6465,36 @@ textarea:disabled {
 
   body[data-provider="opencode"] .sidebar {
     display: none;
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  body.is-session-history-visible .app-shell,
+  body[data-provider="opencode"].is-session-history-visible .app-shell {
+    grid-template-areas:
+      "toolbar"
+      "main-content"
+      "composer";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body.is-session-history-visible .session-history:not([hidden]):not(:empty) {
+    display: none;
+  }
+
+  body.is-session-history-visible .toolbar,
+  body.is-session-history-visible .main-content,
+  body.is-session-history-visible .composer,
+  body[data-provider="opencode"].is-session-history-visible .toolbar,
+  body[data-provider="opencode"].is-session-history-visible .main-content,
+  body[data-provider="opencode"].is-session-history-visible .composer {
+    grid-column: 1;
+  }
+
+  body.is-session-history-visible .session-history,
+  body[data-provider="opencode"].is-session-history-visible .session-history {
+    grid-column: 1;
   }
 }
 

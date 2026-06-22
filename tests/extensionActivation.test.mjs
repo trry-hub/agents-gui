@@ -9,10 +9,14 @@ const cliDiscoverySource = readFileSync(new URL('../src/cliDiscovery.ts', import
 const cliProcessRunnerSource = readFileSync(new URL('../src/cliProcessRunner.ts', import.meta.url), 'utf8');
 const apiProviderClientSource = readFileSync(new URL('../src/apiProviderClient.ts', import.meta.url), 'utf8');
 const agentRuntimeSource = readFileSync(new URL('../src/agentRuntime.ts', import.meta.url), 'utf8');
+const agentSessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
+const attachmentStoreSource = readFileSync(new URL('../src/attachmentStore.ts', import.meta.url), 'utf8');
 const openCodeAgentCapabilitySource = readFileSync(new URL('../src/openCodeAgentCapability.ts', import.meta.url), 'utf8');
+const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
 const openCodeServerClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
 const extensionSmokeHarnessSource = readFileSync(new URL('../src/extensionSmokeHarness.ts', import.meta.url), 'utf8');
 const webviewProtocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+const webviewHtmlRendererSource = readFileSync(new URL('../src/webviewHtmlRenderer.ts', import.meta.url), 'utf8');
 const architectureDoc = readFileSync(new URL('../docs/architecture/agent-runtime.md', import.meta.url), 'utf8');
 const extensionSmokeRunnerSource = readFileSync(new URL('../tests/extension-smoke/run.mjs', import.meta.url), 'utf8');
 const extensionSmokeSuiteSource = readFileSync(new URL('../tests/extension-smoke/suite/index.js', import.meta.url), 'utf8');
@@ -66,10 +70,16 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(extensionSource, /const agentRuntime = new CliAgentRuntime\(cliManager\);/);
   assert.match(extensionSource, /const openCodeCapability = new CliOpenCodeAgentCapability\(cliManager\);/);
   assert.match(extensionSource, /new SidebarProvider\(context\.extensionUri, agentRuntime, \{/);
-  assert.match(sidebarSource, /import type \{ AgentProfileStatusOptions, AgentRuntime, AgentSession \} from '\.\/agentRuntime';/);
+  assert.match(sidebarSource, /import type \{ AgentProfileStatusOptions, AgentRuntime \} from '\.\/agentRuntime';/);
+  assert.match(sidebarSource, /import \{ AgentSessionController \} from '\.\/agentSessionController';/);
+  assert.match(sidebarSource, /import \{ ImageAttachmentStore \} from '\.\/attachmentStore';/);
+  assert.match(sidebarSource, /import \{ OpenCodeLocalState \} from '\.\/openCodeLocalState';/);
   assert.match(sidebarSource, /import type \{ OpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/);
   assert.doesNotMatch(sidebarSource, /import \{ CliManager, Session \} from '\.\/cliManager';/);
   assert.match(sidebarSource, /private readonly agentRuntime: AgentRuntime/);
+  assert.match(sidebarSource, /private readonly sessionController: AgentSessionController/);
+  assert.match(sidebarSource, /private readonly attachmentStore: ImageAttachmentStore/);
+  assert.match(sidebarSource, /private readonly openCodeLocalState: OpenCodeLocalState/);
   assert.match(sidebarSource, /private readonly openCodeCapability\?: OpenCodeAgentCapability/);
   assert.match(sidebarSource, /openCodeCapability\?: OpenCodeAgentCapability/);
   assert.match(extensionSource, /openCodeCapability,/);
@@ -77,9 +87,22 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(sidebarSource, /private postToWebview\(message: HostToWebviewMessage\)/);
   assert.match(sidebarSource, /this\.postToWebview\(\{/);
   assert.doesNotMatch(sidebarSource, /this\.view\?\.webview\.postMessage\(\{/);
+  assert.match(sidebarSource, /import \{ renderWebviewHtml \} from '\.\/webviewHtmlRenderer';/);
+  assert.match(sidebarSource, /return renderWebviewHtml\(\{ extensionUri: this\.extensionUri, webview, locale: this\.locale \}\)/);
+  assert.doesNotMatch(sidebarSource, /fs\.readFileSync\(htmlPath/);
+  assert.match(webviewHtmlRendererSource, /export function renderWebviewHtml/);
+  assert.match(webviewHtmlRendererSource, /const WEBVIEW_ASSETS = \[/);
+  assert.match(webviewHtmlRendererSource, /'__WORKBENCH_LAYOUT_JS_URI__'/);
+  assert.match(webviewHtmlRendererSource, /'__TASK_BOARD_STATE_JS_URI__'/);
+  assert.match(webviewHtmlRendererSource, /'__COMPOSER_STATE_JS_URI__'/);
+  assert.match(webviewHtmlRendererSource, /'__PROVIDER_OPTIONS_JS_URI__'/);
+  assert.match(webviewHtmlRendererSource, /getWebviewUri\(options\.extensionUri, options\.webview/);
   assert.match(agentRuntimeSource, /export interface AgentRuntime/);
   assert.match(agentRuntimeSource, /export class CliAgentRuntime implements AgentRuntime/);
   assert.doesNotMatch(agentRuntimeSource, /OpenCodeAgentCapability/);
+  assert.match(agentSessionControllerSource, /export class AgentSessionController/);
+  assert.match(attachmentStoreSource, /export class ImageAttachmentStore/);
+  assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
   assert.match(openCodeAgentCapabilitySource, /export interface OpenCodeAgentCapability/);
   assert.match(openCodeAgentCapabilitySource, /export class CliOpenCodeAgentCapability implements OpenCodeAgentCapability/);
   const runtimeInterface = agentRuntimeSource.match(/export interface AgentRuntime \{[\s\S]*?\n\}/)?.[0] ?? '';
@@ -91,6 +114,49 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(architectureDoc, /ports-and-adapters architecture/);
   assert.match(architectureDoc, /AgentRuntime port/);
   assert.match(architectureDoc, /OpenCodeAgentCapability/);
+  assert.match(architectureDoc, /src\/agentSessionController\.ts/);
+  assert.match(architectureDoc, /src\/attachmentStore\.ts/);
+  assert.match(architectureDoc, /src\/openCodeLocalState\.ts/);
+  assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
+});
+
+test('session lifecycle stays behind a dedicated controller', () => {
+  assert.match(agentSessionControllerSource, /export class AgentSessionController/);
+  assert.match(agentSessionControllerSource, /private readonly activeSessions = new Map/);
+  assert.match(agentSessionControllerSource, /private readonly eventDisposables = new Map/);
+  assert.match(agentSessionControllerSource, /replace\(cliId: string\): void/);
+  assert.match(agentSessionControllerSource, /normalizeCliOutputChunk/);
+  assert.match(agentSessionControllerSource, /filterPromptEchoChunk/);
+  assert.match(agentSessionControllerSource, /command: 'sessionEnd'/);
+  assert.match(sidebarSource, /this\.sessionController\.register\(session\)/);
+  assert.match(sidebarSource, /this\.sessionController\.replace\(cliId\)/);
+  assert.match(sidebarSource, /this\.sessionController\.stopAll\(\)/);
+  assert.doesNotMatch(sidebarSource, /private activeSessions = new Map/);
+  assert.doesNotMatch(sidebarSource, /private outputBuffers = new Map/);
+  assert.doesNotMatch(sidebarSource, /this\.activeSessions\.delete\(cliId\)/);
+  assert.doesNotMatch(sidebarSource, /filterPromptEchoChunk/);
+});
+
+test('attachment persistence stays behind a dedicated store', () => {
+  assert.match(attachmentStoreSource, /export class ImageAttachmentStore/);
+  assert.match(attachmentStoreSource, /decodeImageDataUrl/);
+  assert.match(attachmentStoreSource, /safeAttachmentName/);
+  assert.match(attachmentStoreSource, /pasted-images/);
+  assert.match(sidebarSource, /this\.attachmentStore\.materialize\(message\.attachments\)/);
+  assert.doesNotMatch(sidebarSource, /decodeImageDataUrl/);
+  assert.doesNotMatch(sidebarSource, /safeAttachmentName/);
+  assert.doesNotMatch(sidebarSource, /MAX_IMAGE_ATTACHMENT_BYTES/);
+});
+
+test('OpenCode local state paths stay behind a dedicated adapter', () => {
+  assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
+  assert.match(openCodeLocalStateSource, /XDG_STATE_HOME/);
+  assert.match(openCodeLocalStateSource, /XDG_CACHE_HOME/);
+  assert.match(openCodeLocalStateSource, /LOCALAPPDATA/);
+  assert.match(cliDiscoverySource, /private readonly openCodeLocalState: OpenCodeLocalState/);
+  assert.match(sidebarSource, /this\.openCodeLocalState\.updateModelVariant/);
+  assert.doesNotMatch(cliDiscoverySource, /\.local', 'state', 'opencode'/);
+  assert.doesNotMatch(sidebarSource, /\.local', 'state', 'opencode'/);
 });
 
 test('extension smoke script covers command entrypoints and harnessed runtime flows', () => {

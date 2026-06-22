@@ -345,7 +345,7 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);
   assert.doesNotMatch(source, /FOLLOW_DEFAULT_COMMIT_MESSAGE_PROVIDER/);
   assert.match(source, /DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default'/);
-  assert.match(source, /clipboard\.writeText\(preferred\.installHint\)/);
+  assert.match(source, /clipboard\.writeText\(resolveCliInstallHint\(preferred\)\)/);
   assert.doesNotMatch(source, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.doesNotMatch(source, /CUSTOM_MODEL_STATE_KEY/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui\.commitMessageGenerating'/);

@@ -11,6 +11,10 @@
   const openCodeDialogState = window.AgentsGuiOpenCodeDialogState;
   const claudeActions = window.AgentsGuiClaudeActions;
   const inlineMarkdown = window.AgentsGuiInlineMarkdown;
+  const workbenchLayout = window.AgentsGuiWorkbenchLayout;
+  const taskBoardState = window.AgentsGuiTaskBoardState;
+  const composerState = window.AgentsGuiComposerState;
+  const providerOptions = window.AgentsGuiProviderOptions;
   const normalizeMessageText = messageText.normalizeMessageText;
   const stripInlineMarkdown = messageText.stripInlineMarkdown;
   const appendInlineMarkdown = inlineMarkdown.appendInlineMarkdown;
@@ -43,8 +47,6 @@
   ];
   const MAX_IMAGE_ATTACHMENTS = 8;
   const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
-  const TASK_STATUSES = ['preparing', 'running', 'completed', 'failed', 'stopped'];
-  const TASK_ACTIVE_STATUSES = ['preparing', 'running'];
   const VISUAL_TASK_BOARD_ENABLED = false;
   const MESSAGE_BOTTOM_STICKY_THRESHOLD = 48;
   const FILE_CARD_COLLAPSE_LIMIT = 3;
@@ -129,6 +131,12 @@
   let apiProviderModelFetchRequestId = 0;
   let activeSettingsSection = 'agents';
   const settingsSaveStatusTimers = {};
+  let mcpServersByCli = {};
+  let mcpConfigPathByCli = {};
+  let mcpSupportedByCli = {};
+  let mcpReasonByCli = {};
+  let editingMcpServerName = '';
+  let mcpServerFormDirty = false;
   let claudeTerminalBannerDismissed = Boolean(saved.claudeTerminalBannerDismissed);
   let claudeModelMenuExplicit = false;
   let taskBoardDismissed = Boolean(saved.taskBoardDismissed);
@@ -222,9 +230,36 @@
   const settingsNavAgents = document.getElementById('settingsNavAgents');
   const settingsNavApiProviders = document.getElementById('settingsNavApiProviders');
   const settingsNavCommitMessage = document.getElementById('settingsNavCommitMessage');
+  const settingsNavMcp = document.getElementById('settingsNavMcp');
   const settingsSectionAgents = document.getElementById('settingsSectionAgents');
   const settingsSectionApiProviders = document.getElementById('settingsSectionApiProviders');
   const settingsSectionCommitMessage = document.getElementById('settingsSectionCommitMessage');
+  const settingsSectionMcp = document.getElementById('settingsSectionMcp');
+  const mcpConfigPath = document.getElementById('mcpConfigPath');
+  const mcpUnsupported = document.getElementById('mcpUnsupported');
+  const mcpUnsupportedReason = document.getElementById('mcpUnsupportedReason');
+  const mcpSettingsBody = document.getElementById('mcpSettingsBody');
+  const mcpServerList = document.getElementById('mcpServerList');
+  const mcpServerAdd = document.getElementById('mcpServerAdd');
+  const mcpRefresh = document.getElementById('mcpRefresh');
+  const mcpServerForm = document.getElementById('mcpServerForm');
+  const mcpServerName = document.getElementById('mcpServerName');
+  const mcpServerType = document.getElementById('mcpServerType');
+  const mcpServerCommand = document.getElementById('mcpServerCommand');
+  const mcpServerCommandField = document.getElementById('mcpServerCommandField');
+  const mcpServerUrl = document.getElementById('mcpServerUrl');
+  const mcpServerUrlField = document.getElementById('mcpServerUrlField');
+  const mcpServerEnabled = document.getElementById('mcpServerEnabled');
+  const mcpCliToggles = document.getElementById('mcpCliToggles');
+  const mcpServerEnvList = document.getElementById('mcpServerEnvList');
+  const mcpServerAddEnv = document.getElementById('mcpServerAddEnv');
+  const mcpServerHeadersList = document.getElementById('mcpServerHeadersList');
+  const mcpServerAddHeader = document.getElementById('mcpServerAddHeader');
+  const mcpServerHeadersSection = document.getElementById('mcpServerHeadersSection');
+  const mcpServerError = document.getElementById('mcpServerError');
+  const mcpServerSaveStatus = document.getElementById('mcpServerSaveStatus');
+  const mcpServerDelete = document.getElementById('mcpServerDelete');
+  const mcpServerCancel = document.getElementById('mcpServerCancel');
   const homeAgentList = document.getElementById('homeAgentList');
   const homeAgentsReset = document.getElementById('homeAgentsReset');
   const homeAgentsSave = document.getElementById('homeAgentsSave');
@@ -705,21 +740,10 @@
   }
 
   function normalizeSavedTasks(savedTasks) {
-    return (Array.isArray(savedTasks) ? savedTasks : [])
-      .filter((task) => task && typeof task === 'object' && task.providerId)
-      .slice(0, 20)
-      .map((task) => ({
-        id: task.id || makeTaskId(task.providerId),
-        providerId: task.providerId,
-        providerName: task.providerName || task.providerId,
-        title: task.title || i18n.t('task.untitled'),
-        action: task.action || 'freeform',
-        agentMode: task.agentMode || '',
-        status: task.status === 'running' || task.status === 'preparing' ? 'stopped' : (task.status || 'completed'),
-        threadId: task.threadId || '',
-        createdAt: Number(task.createdAt) || Date.now(),
-        updatedAt: Number(task.updatedAt) || Date.now(),
-      }));
+    return taskBoardState.normalizeSavedTasks(savedTasks, {
+      fallbackTitle: i18n.t('task.untitled'),
+      limit: 20,
+    });
   }
 
   function makeThreadId(cliId) {
@@ -727,7 +751,7 @@
   }
 
   function makeTaskId(providerId) {
-    return `${providerId || 'task'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return taskBoardState.makeTaskId(providerId);
   }
 
   function createThread(cliId, messages) {
@@ -988,8 +1012,7 @@
   function createRunTask(providerId, action, text, agentMode) {
     const profile = profiles.find((item) => item.id === providerId);
     const now = Date.now();
-    const task = {
-      id: makeTaskId(providerId),
+    const task = taskBoardState.createTask({
       providerId,
       providerName: profile?.name || providerId,
       title: deriveThreadTitle(text) || i18n.t('task.untitled'),
@@ -997,11 +1020,10 @@
       agentMode: agentMode || '',
       status: 'preparing',
       threadId: activeThreadId(providerId),
-      createdAt: now,
-      updatedAt: now,
-    };
+      now,
+    });
 
-    tasks = [task, ...tasks.filter((item) => item.id !== task.id)].slice(0, 20);
+    tasks = taskBoardState.upsertRecentTask(tasks, task, { limit: 20 });
     persist();
     renderTaskBoard();
     return task;
@@ -1032,29 +1054,11 @@
   }
 
   function agentModesFor(profile) {
-    const modes = Array.isArray(profile?.agentModes) && profile.agentModes.length > 0
-      ? profile.agentModes
-      : [
-          {
-            id: 'agent',
-            label: 'Agent',
-            description: '',
-            instruction: 'Use this provider as a coding agent.',
-          },
-        ];
-    const selectableModes = modes.filter((mode) => !mode.disabled);
-    return selectableModes.length > 0 ? selectableModes : modes;
+    return providerOptions.agentModesFor(profile);
   }
 
   function normalizeAgentModeId(profile, value) {
-    const modes = agentModesFor(profile);
-    const selectableModes = modes.filter((item) => !item.disabled);
-    const mode = selectableModes.find((item) => item.id === value)
-      || selectableModes.find((item) => item.id === profile?.defaultAgentMode)
-      || selectableModes[0]
-      || modes[0];
-
-    return mode.id;
+    return providerOptions.normalizeAgentModeId(profile, value);
   }
 
   function activeAgentModeId(cliId = activeId) {
@@ -1085,20 +1089,13 @@
   }
 
   function optionListFor(profile, key, fallbackLabelKey) {
-    const control = key === 'agentModes'
-      ? 'agentMode'
-      : key === 'modelOptions'
-        ? 'model'
-        : key === 'runtimeModes'
-          ? 'runtime'
-          : key === 'permissionModes'
-            ? 'permission'
-            : undefined;
-    if (control) {
-      return providerCapabilities.optionList(profile, control, (labelKey) => i18n.t(labelKey));
-    }
-
-    return [{ id: 'default', label: i18n.t(fallbackLabelKey), description: '' }];
+    return providerOptions.optionListFor(
+      profile,
+      key,
+      fallbackLabelKey,
+      providerCapabilities,
+      (labelKey) => i18n.t(labelKey)
+    );
   }
 
   function selectableOption(option) {
@@ -1106,22 +1103,15 @@
   }
 
   function normalizeOptionId(profile, value, key, defaultKey, fallbackLabelKey) {
-    const control = key === 'modelOptions'
-      ? 'model'
-      : key === 'runtimeModes'
-        ? 'runtime'
-        : key === 'permissionModes'
-          ? 'permission'
-          : undefined;
-    if (control) {
-      return providerCapabilities.normalizeOptionId(profile, value, control, (labelKey) => i18n.t(labelKey));
-    }
-
-    const options = optionListFor(profile, key, fallbackLabelKey);
-    const option = options.find((item) => item.id === value)
-      || options.find((item) => item.id === profile?.[defaultKey])
-      || options[0];
-    return option.id;
+    return providerOptions.normalizeOptionId(
+      profile,
+      value,
+      key,
+      defaultKey,
+      fallbackLabelKey,
+      providerCapabilities,
+      (labelKey) => i18n.t(labelKey)
+    );
   }
 
   function modelOptionsFor(profile) {
@@ -1157,13 +1147,7 @@
   }
 
   function splitAgentModeLabel(label) {
-    const value = String(label || '').replace(/\u200b/g, '').trim();
-    const parts = value.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
-    if (parts.length <= 1) {
-      return { title: value, detail: '' };
-    }
-
-    return { title: parts[0], detail: parts.slice(1).join(' - ') };
+    return providerOptions.splitAgentModeLabel(label);
   }
 
   function localizedPermissionOption(option) {
@@ -1282,14 +1266,7 @@
   }
 
   function mapLegacyWorkflowMode(profile, value) {
-    const modes = agentModesFor(profile);
-    const desired = {
-      auto: profile?.defaultAgentMode,
-      plan: 'plan',
-      execute: profile?.defaultAgentMode,
-    }[value];
-
-    return modes.some((mode) => mode.id === desired) ? desired : undefined;
+    return providerOptions.mapLegacyWorkflowMode(profile, value);
   }
 
   function renderProviderSelect() {
@@ -1462,7 +1439,7 @@
     if (!apiSettingsPage) {
       return;
     }
-    activeSettingsSection = ['agents', 'apiProviders', 'commitMessage'].includes(section) ? section : 'agents';
+    activeSettingsSection = ['agents', 'apiProviders', 'commitMessage', 'mcp'].includes(section) ? section : 'agents';
     if (!editingApiProviderId) {
       editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
     }
@@ -1473,8 +1450,13 @@
       ? apiProviderName
       : activeSettingsSection === 'commitMessage'
         ? commitMessageProviderSelect
-        : homeAgentList?.querySelector('input');
+        : activeSettingsSection === 'mcp'
+          ? mcpServerList?.querySelector('.api-provider-list-item') || mcpServerAdd
+          : homeAgentList?.querySelector('input');
     focusTarget?.focus();
+    if (activeSettingsSection === 'mcp') {
+      requestMcpServers(activeProviderId());
+    }
   }
 
   function renderSettingsPage() {
@@ -1486,6 +1468,9 @@
       case 'commitMessage':
         renderCommitMessageSettings();
         break;
+      case 'mcp':
+        renderMcpSettings();
+        break;
       default:
         renderHomeAgentSettings();
         break;
@@ -1496,12 +1481,15 @@
     const isAgents = activeSettingsSection === 'agents';
     const isApiProviders = activeSettingsSection === 'apiProviders';
     const isCommitMessage = activeSettingsSection === 'commitMessage';
+    const isMcp = activeSettingsSection === 'mcp';
     settingsNavAgents?.classList.toggle('is-active', isAgents);
     settingsNavApiProviders?.classList.toggle('is-active', isApiProviders);
     settingsNavCommitMessage?.classList.toggle('is-active', isCommitMessage);
+    settingsNavMcp?.classList.toggle('is-active', isMcp);
     settingsNavAgents?.setAttribute('aria-current', isAgents ? 'page' : 'false');
     settingsNavApiProviders?.setAttribute('aria-current', isApiProviders ? 'page' : 'false');
     settingsNavCommitMessage?.setAttribute('aria-current', isCommitMessage ? 'page' : 'false');
+    settingsNavMcp?.setAttribute('aria-current', isMcp ? 'page' : 'false');
     if (settingsSectionAgents) {
       settingsSectionAgents.hidden = !isAgents;
     }
@@ -1510,6 +1498,9 @@
     }
     if (settingsSectionCommitMessage) {
       settingsSectionCommitMessage.hidden = !isCommitMessage;
+    }
+    if (settingsSectionMcp) {
+      settingsSectionMcp.hidden = !isMcp;
     }
   }
 
@@ -1696,6 +1687,8 @@
         return apiProviderSaveStatus;
       case 'commitMessage':
         return commitMessageSaveStatus;
+      case 'mcp':
+        return mcpServerSaveStatus;
       default:
         return null;
     }
@@ -1795,6 +1788,336 @@
     renderCommitMessageSettings();
     setSettingsSaveStatus('commitMessage', 'saving');
     vscode.postMessage({ command: 'saveCommitMessageSettings', settings: commitMessageSettings });
+  }
+
+  function currentMcpCliId() {
+    return activeProviderId() || 'opencode';
+  }
+
+  function activeMcpServers() {
+    const cliId = currentMcpCliId();
+    const servers = mcpServersByCli[cliId];
+    return Array.isArray(servers) ? servers : [];
+  }
+
+  function isMcpSupported() {
+    return mcpSupportedByCli[currentMcpCliId()] !== false;
+  }
+
+  function requestMcpServers(cliId) {
+    const target = cliId || currentMcpCliId();
+    vscode.postMessage({ command: 'loadMcpServers', cliId: target });
+  }
+
+  function mcpStatusLabel(status) {
+    const kind = mcpStatusKind(status);
+    if (kind === 'connected') {
+      return i18n.t('mcpSettings.statusConnected');
+    }
+    if (kind === 'failed') {
+      return i18n.t('mcpSettings.statusFailed');
+    }
+    if (kind === 'disabled') {
+      return i18n.t('mcpSettings.statusDisabled');
+    }
+    if (kind === 'needs_auth') {
+      return i18n.t('mcpSettings.statusNeedsAuth');
+    }
+    return i18n.t('mcpSettings.statusUnknown');
+  }
+
+  function mcpStatusKind(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (!normalized) {
+      return 'unknown';
+    }
+    if (normalized === 'connected' || normalized === 'ready' || normalized === 'running') {
+      return 'connected';
+    }
+    if (normalized === 'failed' || normalized === 'error') {
+      return 'failed';
+    }
+    if (normalized === 'disabled' || normalized === 'off') {
+      return 'disabled';
+    }
+    if (normalized.includes('auth')) {
+      return 'needs_auth';
+    }
+    return 'unknown';
+  }
+
+  function renderMcpSettings() {
+    const cliId = currentMcpCliId();
+    const supported = isMcpSupported();
+    if (mcpUnsupported) {
+      mcpUnsupported.hidden = supported;
+    }
+    if (mcpUnsupportedReason && !supported) {
+      const reason = mcpReasonByCli[cliId] || i18n.t('mcpSettings.unsupported');
+      mcpUnsupportedReason.textContent = reason;
+    }
+    if (mcpConfigPath) {
+      const path = mcpConfigPathByCli[cliId] || '';
+      mcpConfigPath.hidden = !path;
+      mcpConfigPath.textContent = path;
+    }
+    if (mcpSettingsBody) {
+      mcpSettingsBody.hidden = !supported;
+    }
+    if (!supported) {
+      return;
+    }
+    renderMcpServerList();
+    renderMcpServerForm();
+  }
+
+  function renderMcpServerList() {
+    if (!mcpServerList) {
+      return;
+    }
+    mcpServerList.innerHTML = '';
+    const servers = activeMcpServers();
+    if (servers.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'api-provider-status';
+      empty.textContent = i18n.t('mcpSettings.empty');
+      mcpServerList.appendChild(empty);
+      return;
+    }
+    servers.forEach((server) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'api-provider-list-item mcp-list-item';
+      button.dataset.mcpServerName = server.name;
+      if (server.name === editingMcpServerName) {
+        button.classList.add('is-active');
+      }
+      if (server.enabled === false) {
+        button.classList.add('is-disabled');
+      }
+
+      const label = document.createElement('span');
+      label.textContent = server.name;
+      button.appendChild(label);
+
+      const status = document.createElement('span');
+      status.className = `mcp-list-item-status is-${mcpStatusKind(server.runtimeStatus?.status)}`;
+      status.textContent = server.enabled === false
+        ? i18n.t('mcpSettings.statusDisabled')
+        : mcpStatusLabel(server.runtimeStatus?.status);
+      button.appendChild(status);
+
+      mcpServerList.appendChild(button);
+    });
+  }
+
+  const MCP_CLI_TOGGLE_IDS = ['claude', 'codex', 'gemini', 'opencode'];
+
+  function renderMcpCliToggles(enabledByCli) {
+    if (!mcpCliToggles) {
+      return;
+    }
+    mcpCliToggles.innerHTML = '';
+    const state = enabledByCli || {};
+    MCP_CLI_TOGGLE_IDS.forEach((cliId) => {
+      const label = document.createElement('label');
+      label.className = 'mcp-cli-toggle';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.mcpCliToggle = cliId;
+      checkbox.checked = state[cliId] !== false;
+      label.appendChild(checkbox);
+
+      const text = document.createElement('span');
+      text.textContent = i18n.t(`mcpSettings.cli.${cliId}`);
+      label.appendChild(text);
+
+      mcpCliToggles.appendChild(label);
+    });
+  }
+
+  function collectMcpCliToggles() {
+    const result = {};
+    if (!mcpCliToggles) {
+      return result;
+    }
+    mcpCliToggles.querySelectorAll('[data-mcp-cli-toggle]').forEach((checkbox) => {
+      const cliId = checkbox.dataset.mcpCliToggle;
+      if (cliId) {
+        result[cliId] = checkbox.checked;
+      }
+    });
+    return result;
+  }
+
+  function renderMcpServerForm() {
+    if (!mcpServerForm) {
+      return;
+    }
+    const server = activeMcpServers().find((entry) => entry.name === editingMcpServerName);
+    if (mcpServerName) {
+      mcpServerName.value = server?.name || '';
+      mcpServerName.disabled = Boolean(server);
+    }
+    if (mcpServerType) {
+      mcpServerType.value = server?.type === 'remote' ? 'remote' : 'local';
+    }
+    if (mcpServerCommand) {
+      const command = Array.isArray(server?.command) ? server.command.join(' ') : '';
+      mcpServerCommand.value = command;
+    }
+    if (mcpServerUrl) {
+      mcpServerUrl.value = server?.url || '';
+    }
+    if (mcpServerEnabled) {
+      mcpServerEnabled.value = server?.enabled === false ? 'false' : 'true';
+    }
+    renderMcpCliToggles(server?.enabledByCli);
+    renderEnvList(mcpServerEnvList, server?.environment || {});
+    renderEnvList(mcpServerHeadersList, server?.headers || {});
+    updateMcpFormVisibility();
+    if (mcpServerError) {
+      mcpServerError.hidden = true;
+    }
+    if (mcpServerDelete) {
+      mcpServerDelete.disabled = !server;
+    }
+  }
+
+  function renderEnvList(container, values) {
+    if (!container) {
+      return;
+    }
+    container.innerHTML = '';
+    const entries = Object.entries(values || {});
+    if (entries.length === 0) {
+      entries.push(['', '']);
+    }
+    entries.forEach(([key, value]) => {
+      container.appendChild(createExtraEnvRow(key, value));
+    });
+  }
+
+  function updateMcpFormVisibility() {
+    const type = mcpServerType?.value || 'local';
+    if (mcpServerCommandField) {
+      mcpServerCommandField.hidden = type === 'remote';
+    }
+    if (mcpServerUrlField) {
+      mcpServerUrlField.hidden = type !== 'remote';
+    }
+    if (mcpServerHeadersSection) {
+      mcpServerHeadersSection.hidden = type !== 'remote';
+    }
+  }
+
+  function collectMcpServerForm() {
+    const name = (mcpServerName?.value || '').trim();
+    const type = mcpServerType?.value === 'remote' ? 'remote' : 'local';
+    const enabled = mcpServerEnabled?.value !== 'false';
+    const server = { name, type, enabled };
+
+    if (type === 'remote') {
+      server.url = (mcpServerUrl?.value || '').trim();
+      server.headers = collectEnvList(mcpServerHeadersList);
+    } else {
+      const commandText = (mcpServerCommand?.value || '').trim();
+      server.command = parseCommandString(commandText);
+    }
+    server.environment = collectEnvList(mcpServerEnvList);
+    server.enabledByCli = collectMcpCliToggles();
+    return server;
+  }
+
+  function collectEnvList(container) {
+    if (!container) {
+      return {};
+    }
+    const result = {};
+    container.querySelectorAll('.api-extra-env-row').forEach((row) => {
+      const keyInput = row.querySelector('[data-env-key]');
+      const valueInput = row.querySelector('[data-env-value]');
+      const key = (keyInput?.value || '').trim();
+      const value = valueInput?.value || '';
+      if (!key) {
+        return;
+      }
+      result[key] = value;
+    });
+    return result;
+  }
+
+  function parseCommandString(text) {
+    if (!text) {
+      return [];
+    }
+    const tokens = [];
+    const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      tokens.push(match[1] ?? match[2] ?? match[3]);
+    }
+    return tokens.filter((token) => token && token.length > 0);
+  }
+
+  function clearMcpFormError() {
+    if (mcpServerError) {
+      mcpServerError.hidden = true;
+      mcpServerError.textContent = '';
+    }
+  }
+
+  function showMcpFormError(message) {
+    if (mcpServerError) {
+      mcpServerError.hidden = false;
+      mcpServerError.textContent = message;
+    }
+  }
+
+  function startNewMcpServer() {
+    editingMcpServerName = '';
+    renderMcpServerList();
+    renderMcpServerForm();
+    mcpServerName?.focus();
+  }
+
+  function saveMcpServer() {
+    const payload = collectMcpServerForm();
+    if (!payload.name) {
+      showMcpFormError(i18n.t('mcpSettings.errorNameRequired'));
+      return;
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(payload.name)) {
+      showMcpFormError(i18n.t('mcpSettings.errorNameInvalid'));
+      return;
+    }
+    if (payload.type === 'remote') {
+      if (!payload.url || !/^https?:\/\//i.test(payload.url)) {
+        showMcpFormError(i18n.t('mcpSettings.errorUrl'));
+        return;
+      }
+    } else if (!Array.isArray(payload.command) || payload.command.length === 0) {
+      showMcpFormError(i18n.t('mcpSettings.errorCommand'));
+      return;
+    }
+    clearMcpFormError();
+    setSettingsSaveStatus('mcp', 'saving');
+    vscode.postMessage({ command: 'saveMcpServer', cliId: currentMcpCliId(), server: payload });
+  }
+
+  function deleteMcpServer() {
+    const server = activeMcpServers().find((entry) => entry.name === editingMcpServerName);
+    if (!server) {
+      return;
+    }
+    setSettingsSaveStatus('mcp', 'saving');
+    vscode.postMessage({ command: 'deleteMcpServer', cliId: currentMcpCliId(), name: server.name });
+    editingMcpServerName = '';
+  }
+
+  function toggleMcpServerEnabled(name, enabled) {
+    vscode.postMessage({ command: 'toggleMcpServer', cliId: currentMcpCliId(), name, enabled });
   }
 
   function normalizeApiProviderSettings(value) {
@@ -2473,14 +2796,25 @@
     return i18n.t('history.time.weeks', { count: String(Math.max(1, Math.floor(elapsed / week))) });
   }
 
+  function setSessionHistoryHidden(hidden) {
+    if (typeof workbenchLayout?.setSessionHistoryHidden === 'function') {
+      workbenchLayout.setSessionHistoryHidden(document.body, sessionHistory, hidden);
+      return;
+    }
+    if (sessionHistory) {
+      sessionHistory.hidden = Boolean(hidden);
+    }
+    document.body.classList.toggle('is-session-history-hidden', Boolean(hidden));
+    document.body.classList.toggle('is-session-history-visible', !Boolean(hidden));
+  }
+
   function renderSessionHistory() {
     if (!sessionHistory) {
       return;
     }
 
     sessionHistory.innerHTML = '';
-    document.body.classList.remove('is-session-history-hidden');
-    sessionHistory.hidden = false;
+    setSessionHistoryHidden(true);
 
     const header = document.createElement('div');
     header.className = 'session-history-header';
@@ -2499,7 +2833,6 @@
     newSession.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>';
     newSession.disabled = !activeId;
     header.appendChild(newSession);
-    sessionHistory.appendChild(header);
 
     const body = document.createElement('div');
     body.className = 'session-history-body';
@@ -2575,19 +2908,21 @@
       body.appendChild(group);
     }
 
-    if (rendered === 0) {
-      if (profilesLoading) {
-        const empty = document.createElement('div');
-        empty.className = 'session-history-empty';
-        empty.textContent = i18n.t('provider.loading');
-        body.appendChild(empty);
-      } else {
-        sessionHistory.hidden = true;
-        document.body.classList.add('is-session-history-hidden');
-      }
+    if (rendered === 0 && !profilesLoading) {
+      setSessionHistoryHidden(true);
+      return;
     }
 
+    if (rendered === 0 && profilesLoading) {
+      const empty = document.createElement('div');
+      empty.className = 'session-history-empty';
+      empty.textContent = i18n.t('provider.loading');
+      body.appendChild(empty);
+    }
+
+    sessionHistory.appendChild(header);
     sessionHistory.appendChild(body);
+    setSessionHistoryHidden(false);
   }
 
   function activateHistoryThread(providerId, threadId) {
@@ -4877,29 +5212,19 @@
   }
 
   function taskStatusCounts(source) {
-    const counts = TASK_STATUSES.reduce((result, status) => ({ ...result, [status]: 0 }), {});
-    (source || []).forEach((task) => {
-      const status = TASK_STATUSES.includes(task.status) ? task.status : 'completed';
-      counts[status] += 1;
-    });
-    return counts;
+    return taskBoardState.statusCounts(source);
   }
 
   function isActiveTask(task) {
-    return TASK_ACTIVE_STATUSES.includes(task?.status);
+    return taskBoardState.isActiveTask(task);
   }
 
   function visibleTasksForBoard() {
-    if (!VISUAL_TASK_BOARD_ENABLED || taskBoardDismissed) {
-      return [];
-    }
-
-    const activeTasks = tasks.filter(isActiveTask);
-    if (activeTasks.length === 0) {
-      return [];
-    }
-
-    return activeTasks.slice(0, 12);
+    return taskBoardState.visibleTasks(tasks, {
+      enabled: VISUAL_TASK_BOARD_ENABLED,
+      dismissed: taskBoardDismissed,
+      limit: 12,
+    });
   }
 
   function renderTaskBoard() {
@@ -4918,7 +5243,7 @@
     const summary = document.createElement('div');
     summary.className = 'task-board-summary';
     summary.setAttribute('aria-label', i18n.t('taskBoard.summary'));
-    TASK_STATUSES.filter((status) => counts[status] > 0).forEach((status) => {
+    taskBoardState.TASK_STATUSES.filter((status) => counts[status] > 0).forEach((status) => {
       const pill = document.createElement('span');
       pill.className = `task-status-pill is-${status}`;
       pill.dataset.taskStatus = status;
@@ -6190,66 +6515,65 @@
 
   function renderComposer() {
     const profile = activeProfile();
-    const canSend = Boolean(profile && profile.installed);
-    const busy = Boolean(runningByProvider[activeId] || pendingByProvider[activeId]);
-    const hasPrompt = input.value.trim().length > 0;
-    const hasAttachments = promptAttachments.length > 0;
     const selectedAction = actionSelect.value || 'freeform';
-    const missingSelection = actionRequiresSelection(selectedAction) && !hasSelectionContext();
-    const missingCustomModel = activeModel()?.custom && !activeCustomModel(activeId);
-    const canRunAction = hasPrompt || hasAttachments || selectedAction !== 'freeform';
-    input.disabled = !canSend;
-    sendBtn.disabled = !canSend || busy || !canRunAction || missingSelection || missingCustomModel;
+    const state = composerState.deriveComposerState({
+      profile,
+      activeId,
+      running: runningByProvider[activeId],
+      pending: pendingByProvider[activeId],
+      promptText: input.value,
+      attachmentCount: promptAttachments.length,
+      selectedAction,
+      requiresSelection: actionRequiresSelection(selectedAction),
+      hasSelection: hasSelectionContext(),
+      missingCustomModel: activeModel()?.custom && !activeCustomModel(activeId),
+      installedProviderCount: visibleInstalledProfiles().length,
+      profilesLoading,
+      translate: (key, values) => i18n.t(key, values),
+      actionLabel,
+    });
+    input.disabled = state.inputDisabled;
+    sendBtn.disabled = state.sendDisabled;
     document.querySelectorAll('[data-action]').forEach((button) => {
       const action = button.dataset.action;
-      if (action === 'openSettings') {
-        button.disabled = false;
-        button.title = '';
-        return;
-      }
-
-      button.disabled = !canSend || busy || (actionRequiresSelection(action) && !hasSelectionContext());
-      button.title = button.disabled && actionRequiresSelection(action)
+      const actionState = composerState.actionButtonState(
+        action,
+        state,
+        actionRequiresSelection(action),
+        hasSelectionContext()
+      );
+      button.disabled = actionState.disabled;
+      button.title = actionState.missingSelection && actionState.disabled
         ? i18n.t('quick.missingSelection')
         : '';
     });
-    actionSelect.disabled = !canSend || busy;
-    providerSelect.disabled = visibleInstalledProfiles().length === 0 || busy;
-    threadSelect.disabled = !activeId || busy;
-    modelSelect.disabled = !canSend || busy;
-    runtimeSelect.disabled = !canSend || busy;
-    permissionSelect.disabled = !canSend || busy;
-    agentModeSelect.disabled = !canSend || busy;
+    actionSelect.disabled = state.actionSelectDisabled;
+    providerSelect.disabled = state.providerSelectDisabled;
+    threadSelect.disabled = state.threadSelectDisabled;
+    modelSelect.disabled = state.optionSelectDisabled;
+    runtimeSelect.disabled = state.optionSelectDisabled;
+    permissionSelect.disabled = state.optionSelectDisabled;
+    agentModeSelect.disabled = state.optionSelectDisabled;
     if (attachImageBtn) {
-      attachImageBtn.disabled = !canSend || busy;
+      attachImageBtn.disabled = state.attachmentDisabled;
     }
     if (imageFileInput) {
-      imageFileInput.disabled = !canSend || busy;
+      imageFileInput.disabled = state.attachmentDisabled;
     }
     modelOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
-      button.disabled = !canSend || busy;
+      button.disabled = state.optionSelectDisabled;
     });
     runtimeOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
-      button.disabled = button.classList.contains('is-disabled') || !canSend || busy;
+      button.disabled = button.classList.contains('is-disabled') || state.optionSelectDisabled;
     });
     permissionOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
-      button.disabled = !canSend || busy;
+      button.disabled = state.optionSelectDisabled;
     });
-    input.placeholder = profilesLoading ? i18n.t('input.placeholderLoading') : canSend
-      ? (profile?.id === 'claude' && !missingSelection
-          ? i18n.t('claude.placeholder')
-          : (missingSelection
-              ? i18n.t('quick.missingSelection')
-              : i18n.t(
-                  selectedAction === 'freeform' ? 'input.placeholderProvider' : 'input.placeholderAction',
-                  { provider: profile.name, action: actionLabel(selectedAction) }
-                )))
-      : i18n.t('input.placeholderDisabled');
-    const running = Boolean(runningByProvider[activeId]);
-    stopBtn.hidden = !running;
-    sendBtn.hidden = running;
-    stopBtn.classList.toggle('is-visible', running);
-    sendBtn.classList.toggle('is-hidden', running);
+    input.placeholder = state.placeholder;
+    stopBtn.hidden = !state.running;
+    sendBtn.hidden = state.running;
+    stopBtn.classList.toggle('is-visible', state.running);
+    sendBtn.classList.toggle('is-hidden', state.running);
     renderSlashPalette();
     scheduleComposerPopoverPosition();
   }
@@ -8936,6 +9260,83 @@
     saveApiProviderSettings();
   });
 
+  settingsNavMcp?.addEventListener('click', () => {
+    openSettingsPage('mcp');
+  });
+
+  mcpRefresh?.addEventListener('click', () => {
+    requestMcpServers(currentMcpCliId());
+  });
+
+  mcpServerAdd?.addEventListener('click', () => {
+    startNewMcpServer();
+  });
+
+  mcpServerList?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-mcp-server-name]');
+    if (!button) {
+      return;
+    }
+    const name = button.dataset.mcpServerName;
+    if (event.target.closest('.mcp-list-item-status')) {
+      const server = activeMcpServers().find((entry) => entry.name === name);
+      toggleMcpServerEnabled(name, server?.enabled === false);
+      return;
+    }
+    editingMcpServerName = name;
+    clearMcpFormError();
+    renderMcpServerList();
+    renderMcpServerForm();
+  });
+
+  mcpServerType?.addEventListener('change', updateMcpFormVisibility);
+
+  mcpServerAddEnv?.addEventListener('click', () => {
+    mcpServerEnvList?.appendChild(createExtraEnvRow('', ''));
+  });
+
+  mcpServerEnvList?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-env]');
+    if (!button) {
+      return;
+    }
+    button.closest('.api-extra-env-row')?.remove();
+    if (!mcpServerEnvList.children.length) {
+      mcpServerEnvList.appendChild(createExtraEnvRow('', ''));
+    }
+  });
+
+  mcpServerAddHeader?.addEventListener('click', () => {
+    mcpServerHeadersList?.appendChild(createExtraEnvRow('', ''));
+  });
+
+  mcpServerHeadersList?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-env]');
+    if (!button) {
+      return;
+    }
+    button.closest('.api-extra-env-row')?.remove();
+    if (!mcpServerHeadersList.children.length) {
+      mcpServerHeadersList.appendChild(createExtraEnvRow('', ''));
+    }
+  });
+
+  mcpServerCancel?.addEventListener('click', () => {
+    editingMcpServerName = '';
+    clearMcpFormError();
+    renderMcpServerList();
+    renderMcpServerForm();
+  });
+
+  mcpServerDelete?.addEventListener('click', () => {
+    deleteMcpServer();
+  });
+
+  mcpServerForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveMcpServer();
+  });
+
   taskBoard?.addEventListener('click', (event) => {
     if (event.target.closest('[data-task-board-dismiss]')) {
       taskBoardDismissed = true;
@@ -9433,6 +9834,42 @@
         commitMessageSettings = normalizeCommitMessageSettings(message.settings);
         renderSettingsPage();
         break;
+      case 'mcpServers': {
+        const cliId = String(message.cliId || activeProviderId());
+        mcpSupportedByCli[cliId] = message.supported !== false;
+        mcpConfigPathByCli[cliId] = typeof message.configPath === 'string' ? message.configPath : '';
+        mcpReasonByCli[cliId] = typeof message.reason === 'string' ? message.reason : '';
+        const servers = Array.isArray(message.servers) ? message.servers : [];
+        mcpServersByCli[cliId] = servers;
+        if (activeSettingsSection === 'mcp' && cliId === activeProviderId()) {
+          renderMcpSettings();
+        }
+        break;
+      }
+      case 'mcpServerSaved': {
+        const ok = message.ok === true;
+        const messageText = typeof message.message === 'string' ? message.message.trim() : '';
+        const section = activeProviderId();
+        if (ok) {
+          setSettingsSaveStatus('mcp', 'success');
+        } else {
+          setSettingsSaveStatus(
+            'mcp',
+            'error',
+            messageText || i18n.t('mcpSettings.saveFailed')
+          );
+          if (mcpServerError) {
+            mcpServerError.hidden = false;
+            mcpServerError.textContent = messageText;
+          }
+        }
+        if (typeof message.code === 'string') {
+          // no-op, code surfaced via message
+        }
+        // Trigger MCP server list refresh
+        requestMcpServers(section);
+        break;
+      }
       case 'openProviderSettings':
         openSettingsPage(message.section);
         break;

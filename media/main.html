@@ -86,6 +86,12 @@
               </span>
               <span class="settings-nav-label" data-i18n="settings.commitMessage"></span>
             </button>
+            <button class="settings-nav-item" id="settingsNavMcp" type="button" data-settings-section="mcp" data-i18n-aria="settings.mcp" aria-label="MCP Servers">
+              <span class="settings-nav-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="4" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M4 5.6v4.8M12 5.6v4.8M5.6 4h4.8M5.6 12h4.8"/></svg>
+              </span>
+              <span class="settings-nav-label" data-i18n="settings.mcp"></span>
+            </button>
           </nav>
 
           <div class="settings-content">
@@ -209,12 +215,96 @@
                 <button class="api-primary-button" id="commitMessageSave" type="button" data-i18n="apiSettings.save"></button>
               </footer>
             </section>
+
+            <section class="settings-section-panel mcp-settings-section" id="settingsSectionMcp" data-settings-panel="mcp" hidden>
+              <div class="settings-section-heading">
+                <h3 data-i18n="mcpSettings.title"></h3>
+                <p data-i18n="mcpSettings.subtitle"></p>
+                <div class="mcp-config-path" id="mcpConfigPath" hidden></div>
+              </div>
+
+              <div class="mcp-unsupported" id="mcpUnsupported" role="note" hidden>
+                <span id="mcpUnsupportedReason"></span>
+              </div>
+
+              <div class="mcp-settings-body" id="mcpSettingsBody" hidden>
+                <aside class="mcp-list-pane">
+                  <div class="api-settings-section-title" data-i18n="mcpSettings.servers"></div>
+                  <div class="api-provider-list" id="mcpServerList" role="list"></div>
+                  <button class="api-provider-add" id="mcpServerAdd" type="button" data-i18n="mcpSettings.add"></button>
+                  <button class="api-secondary-button mcp-refresh-button" id="mcpRefresh" type="button" data-i18n="mcpSettings.refresh"></button>
+                </aside>
+
+                <form class="api-provider-form mcp-server-form" id="mcpServerForm">
+                  <div class="api-provider-grid">
+                    <label class="api-field">
+                      <span data-i18n="mcpSettings.name"></span>
+                      <input id="mcpServerName" autocomplete="off" spellcheck="false">
+                    </label>
+                    <label class="api-field">
+                      <span data-i18n="mcpSettings.type"></span>
+                      <select id="mcpServerType">
+                        <option value="local" data-i18n="mcpSettings.typeLocal"></option>
+                        <option value="remote" data-i18n="mcpSettings.typeRemote"></option>
+                      </select>
+                    </label>
+                    <label class="api-field api-field-wide" id="mcpServerCommandField">
+                      <span data-i18n="mcpSettings.command"></span>
+                      <input id="mcpServerCommand" autocomplete="off" spellcheck="false" data-i18n-placeholder="mcpSettings.commandPlaceholder">
+                    </label>
+                    <label class="api-field api-field-wide" id="mcpServerUrlField">
+                      <span data-i18n="mcpSettings.url"></span>
+                      <input id="mcpServerUrl" autocomplete="off" spellcheck="false" placeholder="https://example.com/mcp">
+                    </label>
+                    <label class="api-field">
+                      <span data-i18n="mcpSettings.enabled"></span>
+                      <select id="mcpServerEnabled">
+                        <option value="true" data-i18n="mcpSettings.enabledOn"></option>
+                        <option value="false" data-i18n="mcpSettings.enabledOff"></option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div class="api-settings-section">
+                    <div class="api-settings-row-title">
+                      <span data-i18n="mcpSettings.enabledForCli"></span>
+                    </div>
+                    <div class="mcp-cli-toggles" id="mcpCliToggles"></div>
+                  </div>
+
+                  <div class="api-settings-section">
+                    <div class="api-settings-row-title">
+                      <span data-i18n="mcpSettings.envVars"></span>
+                      <button class="api-link-button" id="mcpServerAddEnv" type="button" data-i18n="mcpSettings.addEnv"></button>
+                    </div>
+                    <div class="api-extra-env-list" id="mcpServerEnvList"></div>
+                  </div>
+
+                  <div class="api-settings-section" id="mcpServerHeadersSection">
+                    <div class="api-settings-row-title">
+                      <span data-i18n="mcpSettings.headers"></span>
+                      <button class="api-link-button" id="mcpServerAddHeader" type="button" data-i18n="mcpSettings.addHeader"></button>
+                    </div>
+                    <div class="api-extra-env-list" id="mcpServerHeadersList"></div>
+                  </div>
+
+                  <div class="api-settings-error" id="mcpServerError" role="alert" hidden></div>
+
+                  <footer class="api-settings-footer">
+                    <button class="api-danger-button" id="mcpServerDelete" type="button" data-i18n="mcpSettings.delete"></button>
+                    <span id="mcpServerSaveStatus" class="settings-save-status" aria-live="polite"></span>
+                    <button class="api-secondary-button" id="mcpServerCancel" type="button" data-i18n="action.dismiss"></button>
+                    <button class="api-primary-button" type="submit" data-i18n="apiSettings.save"></button>
+                  </footer>
+                </form>
+              </div>
+            </section>
           </div>
         </div>
       </div>
     </section>
 
-    <aside class="session-history" id="sessionHistory" aria-label="Conversation history" data-i18n-aria="history.label"></aside>
+    <aside class="session-history" id="sessionHistory" hidden aria-label="Conversation history" data-i18n-aria="history.label"></aside>
 
     <div class="main-content">
       <main class="messages" id="messages" aria-live="polite"></main>
@@ -403,6 +493,10 @@
   <script nonce="__NONCE__" src="__OPEN_CODE_DIALOG_STATE_JS_URI__"></script>
   <script nonce="__NONCE__" src="__CLAUDE_ACTIONS_JS_URI__"></script>
   <script nonce="__NONCE__" src="__INLINE_MARKDOWN_JS_URI__"></script>
+  <script nonce="__NONCE__" src="__WORKBENCH_LAYOUT_JS_URI__"></script>
+  <script nonce="__NONCE__" src="__TASK_BOARD_STATE_JS_URI__"></script>
+  <script nonce="__NONCE__" src="__COMPOSER_STATE_JS_URI__"></script>
+  <script nonce="__NONCE__" src="__PROVIDER_OPTIONS_JS_URI__"></script>
   <script nonce="__NONCE__" src="__MAIN_JS_URI__"></script>
 </body>
 </html>

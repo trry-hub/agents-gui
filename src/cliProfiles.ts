@@ -58,6 +58,10 @@ export interface CliSlashCommand {
   nativeApi?: boolean;
 }
 
+export type CliInstallPlatform = NodeJS.Platform | 'default';
+
+export type CliInstallHints = Partial<Record<CliInstallPlatform, string>>;
+
 export type CliTaskIntent =
   | 'planning'
   | 'implementation'
@@ -133,6 +137,8 @@ export interface CliProfile {
   defaultAgentMode: string;
   /** Install hint shown when CLI is not found */
   installHint: string;
+  /** Platform-specific installation commands. Exact platform wins, then default, then installHint. */
+  installHints?: CliInstallHints;
   /** Provider-native authentication commands run in a visible VS Code terminal. */
   authCommands?: CliAuthCommands;
   env?: Record<string, string>;
@@ -390,7 +396,10 @@ export const CLI_PROFILES: CliProfile[] = [
         dangerous: true,
       },
     ],
-    installHint: 'curl -fsSL https://claude.ai/install.sh | bash',
+    installHint: 'npm install -g @anthropic-ai/claude-code',
+    installHints: {
+      default: 'npm install -g @anthropic-ai/claude-code',
+    },
     authCommands: {
       login: ['auth', 'login'],
       logout: ['auth', 'logout'],
@@ -444,6 +453,9 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'npm install -g @google/gemini-cli',
+    installHints: {
+      default: 'npm install -g @google/gemini-cli',
+    },
     installed: false,
   },
   {
@@ -603,6 +615,9 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'npm install -g @openai/codex',
+    installHints: {
+      default: 'npm install -g @openai/codex',
+    },
     authCommands: {
       login: ['login'],
       logout: ['logout'],
@@ -676,6 +691,12 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'brew install opencode-ai/tap/opencode',
+    installHints: {
+      darwin: 'brew install opencode-ai/tap/opencode',
+      linux: 'curl -fsSL https://opencode.ai/install | bash',
+      win32: 'npm install -g opencode-ai',
+      default: 'npm install -g opencode-ai',
+    },
     authCommands: {
       login: ['auth', 'login'],
       logout: ['auth', 'logout'],
@@ -719,6 +740,12 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
+    installHints: {
+      darwin: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
+      linux: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
+      win32:
+        'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/block/goose/releases/download/stable/download_cli.ps1 | iex"',
+    },
     installed: false,
   },
   {
@@ -757,12 +784,28 @@ export const CLI_PROFILES: CliProfile[] = [
       },
     ],
     installHint: 'pip install aider-install && aider-install',
+    installHints: {
+      win32:
+        'powershell -NoProfile -ExecutionPolicy Bypass -Command "python -m pip install aider-install; aider-install"',
+      default: 'pip install aider-install && aider-install',
+    },
     installed: false,
   },
 ];
 
 export function getCliProfile(id: string): CliProfile | undefined {
   return CLI_PROFILES.find((p) => p.id === id);
+}
+
+export function resolveCliInstallHint(
+  profile: Pick<CliProfile, 'installHint' | 'installHints'>,
+  platform: NodeJS.Platform = process.platform
+): string {
+  return (
+    profile.installHints?.[platform]?.trim() ||
+    profile.installHints?.default?.trim() ||
+    profile.installHint.trim()
+  );
 }
 
 export function getCliAgentMode(profile: CliProfile, modeId?: string): CliAgentMode {

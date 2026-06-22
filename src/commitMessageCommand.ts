@@ -13,6 +13,7 @@ import {
   getCliPermissionMode,
   getCliProfile,
   getCliRuntimeMode,
+  resolveCliInstallHint,
   type CliAgentMode,
   type CliPermissionMode,
   type CliProfile,
@@ -517,7 +518,7 @@ export class CommitMessageCommand {
       await this.openProviderSetup();
     }
     if (choice === copyInstallCommand) {
-      await vscode.env.clipboard.writeText(preferred.installHint);
+      await vscode.env.clipboard.writeText(resolveCliInstallHint(preferred));
       vscode.window.showInformationMessage(this.t(locale, 'installCommandCopied'));
     }
   }

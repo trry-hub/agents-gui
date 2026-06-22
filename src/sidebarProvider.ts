@@ -1,5 +1,3 @@
-import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ApiProviderClient } from './apiProviderClient';
@@ -15,16 +13,15 @@ import {
   AssistantActionId,
   AssistantContextOptions,
   AssistantContextSummary,
-  AssistantImageAttachment,
-  AssistantImageAttachmentInput,
   AssistantMode,
   AssistantOpenCodeNativeCommand,
   AssistantOpenCodeNativeCommandResult,
   AssistantOpenCodeStatus,
   AssistantWebviewRequest,
 } from './assistantTypes';
+import { ImageAttachmentStore } from './attachmentStore';
 import { actionRequiresActiveFile, actionRequiresSelection } from './actionGuards';
-import type { AgentProfileStatusOptions, AgentRuntime, AgentSession } from './agentRuntime';
+import type { AgentProfileStatusOptions, AgentRuntime } from './agentRuntime';
 import {
   buildCliOptionArgs,
   CLI_PROFILES,
@@ -34,19 +31,15 @@ import {
   getCliProfile,
   getCliRuntimeMode,
   inferContextWindowTokens,
-  type CliAuthAction,
   type CliModelOption,
   type CliProfile,
 } from './cliProfiles';
+import { CliSetupController, toCliSetupProfile } from './cliSetup';
 import { AssistantContextCollector } from './contextCollector';
+import { McpManager } from './mcpManager';
 import { buildAssistantPrompt } from './promptBuilder';
-import {
-  filterPromptEchoChunk,
-  flushCliOutputBuffer,
-  normalizeCliOutput,
-  normalizeCliOutputChunk,
-} from './outputFormatter';
 import { countContextTokens } from './tokenCounter';
+import { AgentSessionController } from './agentSessionController';
 import {
   resolveRuntimeLocale,
   runtimeActionLabel,
@@ -54,8 +47,10 @@ import {
   runtimeT,
 } from './localization';
 import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
+import { OpenCodeLocalState } from './openCodeLocalState';
 import { getProviderExtensionBridge } from './providerExtensions';
 import type { HostToWebviewMessage, SetupCliProfile, WebviewToHostMessage } from './webviewProtocol';
+import { renderWebviewHtml } from './webviewHtmlRenderer';
 import {
   AGENT_MODE_STATE_KEY,
   CLAUDE_TERMINAL_BANNER_STATE_KEY,
@@ -81,8 +76,10 @@ const PROVIDER_ICON_PATHS = {
 
 interface SidebarProviderOptions {
   apiProviderClient?: ApiProviderClient;
+  attachmentStore?: ImageAttachmentStore;
   contextCollector?: AssistantContextCollector;
   extensionMode?: vscode.ExtensionMode;
+  openCodeLocalState?: OpenCodeLocalState;
   openCodeCapability?: OpenCodeAgentCapability;
   state?: vscode.Memento;
   storageUri?: vscode.Uri;
@@ -104,30 +101,18 @@ interface ProviderClientTerminalState {
   started: boolean;
 }
 
-const MAX_IMAGE_ATTACHMENTS = 8;
-const MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
-const IMAGE_ATTACHMENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_STORED_IMAGE_ATTACHMENTS = 128;
 const DEFAULT_CLI_ID = 'opencode';
 const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
 const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
 const DEFAULT_COMMIT_MESSAGE_LANGUAGE: CommitMessageSettings['language'] = 'auto';
 const DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS = 60_000;
-const NO_OUTPUT_NOTICE_MS = 45_000;
 const OPENCODE_STATUS_REFRESH_DELAYS_MS = [1_500, 3_000, 6_000, 10_000, 15_000];
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'agents-gui.sidebar';
 
   private view?: vscode.WebviewView;
-  private activeSessions = new Map<string, AgentSession>();
-  private wiredSessionIds = new Set<string>();
   private pendingRequests: AssistantWebviewRequest[] = [];
   private disposables: vscode.Disposable[] = [];
-  private outputBuffers = new Map<string, string>();
-  private promptEchoBuffers = new Map<string, string>();
-  private noOutputNoticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private setupTerminals = new Map<string, vscode.Terminal>();
-  private authTerminals = new Map<string, vscode.Terminal>();
   private providerClientTerminals = new Map<string, ProviderClientTerminalState>();
   private openCodeStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private openCodeStatusRefreshAttempts = new Map<string, number>();
@@ -138,8 +123,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly contextCollector: AssistantContextCollector;
   private readonly extensionMode: vscode.ExtensionMode;
   private readonly openCodeCapability?: OpenCodeAgentCapability;
-  private readonly attachmentStorageUri: vscode.Uri;
+  private readonly openCodeLocalState: OpenCodeLocalState;
+  private readonly attachmentStore: ImageAttachmentStore;
   private readonly apiProviderClient: ApiProviderClient;
+  private readonly cliSetup: CliSetupController;
+  private readonly mcpManager: McpManager;
+  private readonly sessionController: AgentSessionController;
   private readonly state?: vscode.Memento;
 
   constructor(
@@ -148,11 +137,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     options: SidebarProviderOptions = {}
   ) {
     this.apiProviderClient = options.apiProviderClient ?? new ApiProviderClient();
+    this.cliSetup = new CliSetupController(this.locale, (cliId) => (
+      this.profilesById.get(cliId) ?? getCliProfile(cliId)
+    ));
+    this.mcpManager = new McpManager({
+      openCodeStatusProvider: async () => this.openCodeCapability?.getStatus(),
+    });
     this.contextCollector = options.contextCollector ?? new AssistantContextCollector();
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
     this.openCodeCapability = options.openCodeCapability;
+    this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
     this.state = options.state;
-    this.attachmentStorageUri = options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui');
+    this.attachmentStore = options.attachmentStore ?? new ImageAttachmentStore({
+      storageUri: options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui'),
+    });
+    this.sessionController = new AgentSessionController({
+      agentRuntime: this.agentRuntime,
+      locale: this.locale,
+      postToWebview: (message) => {
+        void this.postToWebview(message);
+      },
+    });
     this.disposables.push(
       vscode.window.onDidCloseTerminal((terminal) => {
         for (const [providerId, entry] of this.providerClientTerminals) {
@@ -201,6 +206,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'saveCommitMessageSettings':
           await this.saveSettingsWithResult('commitMessage', () => this.saveCommitMessageSettings(message.settings));
           break;
+        case 'loadMcpServers':
+          await this.handleLoadMcpServers(message);
+          break;
+        case 'saveMcpServer':
+          await this.handleSaveMcpServer(message);
+          break;
+        case 'deleteMcpServer':
+          await this.handleDeleteMcpServer(message);
+          break;
+        case 'toggleMcpServer':
+          await this.handleToggleMcpServer(message);
+          break;
         case 'refreshApiProviderSettings':
           await this.sendApiProviderSettings();
           break;
@@ -232,13 +249,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.openProviderExtension(this.resolveCliId(message));
           break;
         case 'runCliAuthAction':
-          await this.runCliAuthAction(this.resolveCliId(message), message.action);
+          await this.cliSetup.runCliAuthAction(this.resolveCliId(message), message.action);
           break;
         case 'copyInstallCommand':
-          await this.copyInstallCommand(message.installCommand);
+          await this.cliSetup.copyInstallCommand(message.installCommand);
           break;
         case 'installCli':
-          await this.installCli(message.cliId);
+          await this.cliSetup.installCli(message.cliId);
           break;
         case 'setOpenCodeModelVariant':
           await this.setOpenCodeModelVariant(message.modelId, message.variant);
@@ -376,6 +393,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
     await this.sendCommitMessageSettings();
+    await this.handleLoadMcpServers({ cliId: this.getDefaultCliId() });
     await this.postToWebview({ command: 'openProviderSettings', section });
   }
 
@@ -388,15 +406,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   stopAll(): void {
-    for (const [cliId, session] of this.activeSessions) {
-      this.agentRuntime.stop(session.id);
-      this.cleanupSessionState(session);
-      this.postToWebview({ command: 'stopped', cliId, sessionId: session.id });
-    }
-    this.agentRuntime.stopAll();
-    this.activeSessions.clear();
-    this.wiredSessionIds.clear();
-    this.clearNoOutputNoticeTimers();
+    this.sessionController.stopAll();
   }
 
   private async flushPendingRequests(): Promise<void> {
@@ -446,13 +456,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private toSetupProfile(profile: CliProfile): SetupCliProfile {
     return {
-      id: profile.id,
-      name: profile.name,
-      description: profile.description,
-      installHint: profile.installHint,
-      installed: profile.installed,
-      version: profile.version,
-      icon: profile.icon,
+      ...toCliSetupProfile(profile),
       webviewIcon: this.getProviderIconUris(profile.id),
     };
   }
@@ -592,6 +596,90 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     ]);
 
     await this.sendCommitMessageSettings();
+  }
+
+  private async handleLoadMcpServers(message: { cliId?: string }): Promise<void> {
+    const cliId = message.cliId || this.getDefaultCliId();
+    try {
+      const snapshot = await this.mcpManager.snapshot(cliId);
+      this.postToWebview({
+        command: 'mcpServers',
+        cliId,
+        supported: snapshot.supported,
+        configPath: snapshot.configPath,
+        reason: snapshot.reason,
+        servers: snapshot.servers,
+      });
+    } catch (error) {
+      this.postToWebview({
+        command: 'mcpServers',
+        cliId,
+        supported: false,
+        reason: error instanceof Error ? error.message : String(error),
+        servers: [],
+      });
+    }
+  }
+
+  private async handleSaveMcpServer(message: { cliId?: string; server?: unknown }): Promise<void> {
+    const cliId = message.cliId || this.getDefaultCliId();
+    const result = await this.mcpManager.upsert(cliId, (message.server ?? {}) as Record<string, unknown>);
+    await this.postToWebview({
+      command: 'mcpServerSaved',
+      cliId,
+      ok: result.ok,
+      message: result.message,
+      code: result.code,
+    });
+    if (result.ok) {
+      await this.handleLoadMcpServers({ cliId });
+      await this.sendContextSummary(undefined, cliId);
+    }
+  }
+
+  private async handleDeleteMcpServer(message: { cliId?: string; name?: string }): Promise<void> {
+    const cliId = message.cliId || this.getDefaultCliId();
+    const name = String(message.name || '').trim();
+    if (!name) {
+      return;
+    }
+    const confirmText = runtimeT(this.locale, 'mcpSettings.confirmDelete', { name });
+    const choice = await vscode.window.showWarningMessage(
+      confirmText,
+      { modal: true },
+      runtimeT(this.locale, 'mcpSettings.delete')
+    );
+    if (choice !== runtimeT(this.locale, 'mcpSettings.delete')) {
+      return;
+    }
+    const result = await this.mcpManager.remove(cliId, name);
+    await this.postToWebview({
+      command: 'mcpServerSaved',
+      cliId,
+      ok: result.ok,
+      message: result.message,
+      code: result.code,
+    });
+    if (result.ok) {
+      await this.handleLoadMcpServers({ cliId });
+      await this.sendContextSummary(undefined, cliId);
+    }
+  }
+
+  private async handleToggleMcpServer(message: { cliId?: string; name?: string; enabled?: boolean }): Promise<void> {
+    const cliId = message.cliId || this.getDefaultCliId();
+    const result = await this.mcpManager.setEnabled(cliId, String(message.name || ''), message.enabled !== false);
+    await this.postToWebview({
+      command: 'mcpServerSaved',
+      cliId,
+      ok: result.ok,
+      message: result.message,
+      code: result.code,
+    });
+    if (result.ok) {
+      await this.handleLoadMcpServers({ cliId });
+      await this.sendContextSummary(undefined, cliId);
+    }
   }
 
   private getApiProviderSettings(): ApiProviderSettings {
@@ -902,7 +990,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const attachments = await this.materializeImageAttachments(message.attachments);
+    const attachments = await this.attachmentStore.materialize(message.attachments);
 
     const prompt = buildAssistantPrompt({
       provider: { id: profile.id, name: profile.name },
@@ -929,19 +1017,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       locale: this.locale,
     });
 
-    let session = this.activeSessions.get(cliId);
-    const canReuseSession =
-      session &&
-      session.process.exitCode === null &&
-      !session.process.killed &&
-      session.profile.inputMode === 'stdin' &&
-      session.profile.keepStdinOpen === true &&
-      session.agentModeId === agentMode.id &&
-      session.optionKey === optionKey;
+    let session = this.sessionController.active(cliId);
+    const canReuseSession = this.sessionController.canReuse(session, agentMode.id, optionKey);
 
     if (!canReuseSession) {
       if (session) {
-        this.activeSessions.delete(cliId);
+        this.sessionController.replace(cliId);
       }
 
       const agentArgs = [
@@ -966,8 +1047,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
 
       session = newSession;
-      this.activeSessions.set(cliId, session);
-      this.wireSession(session);
+      this.sessionController.register(session);
     }
 
     if (!session) {
@@ -996,7 +1076,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       contextSummary,
       apiProviderWarning: this.formatApiProviderWarning(apiProviderRuntime),
     });
-    this.armNoOutputNotice(session);
+    this.sessionController.armNoOutputNotice(session);
 
     if (profile.inputMode === 'stdin') {
       const sent = this.agentRuntime.sendInput(session.id, prompt, !profile.keepStdinOpen);
@@ -1006,122 +1086,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private wireSession(session: AgentSession): void {
-    if (this.wiredSessionIds.has(session.id)) {
-      return;
-    }
-
-    this.wiredSessionIds.add(session.id);
-
-    const eventDisposable = session.onEvent.event((event) => {
-      this.clearNoOutputNoticeTimer(session.id);
-
-      if (event.type === 'output' && event.stream === 'stdout') {
-        const normalized = normalizeCliOutputChunk(
-          event.text,
-          session.cliId,
-          this.outputBuffers.get(session.id) ?? ''
-        );
-        this.outputBuffers.set(session.id, normalized.buffer);
-        const filtered = filterPromptEchoChunk(
-          normalized.text,
-          session.cliId,
-          this.promptEchoBuffers.get(session.id) ?? ''
-        );
-        if (filtered.buffer) {
-          this.promptEchoBuffers.set(session.id, filtered.buffer);
-        } else {
-          this.promptEchoBuffers.delete(session.id);
-        }
-        if (!filtered.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
-          return;
-        }
-
-        this.postToWebview({
-          command: 'output',
-          cliId: session.cliId,
-          text: filtered.text,
-          thinking: normalized.thinking,
-          activities: normalized.activities,
-          status: normalized.status,
-          sessionId: session.id,
-          openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
-          stream: event.stream,
-        });
-        return;
-      }
-
-      if (event.type === 'output' && event.stream === 'stderr') {
-        const text = normalizeCliOutput(event.text, session.cliId);
-        if (!text) {
-          return;
-        }
-
-        this.postToWebview({
-          command: 'output',
-          cliId: session.cliId,
-          text,
-          sessionId: session.id,
-          stream: event.stream,
-        });
-        return;
-      }
-
-      if (event.type === 'error') {
-        this.postToWebview({
-          command: 'error',
-          cliId: session.cliId,
-          text: normalizeCliOutput(event.message, session.cliId),
-          sessionId: session.id,
-        });
-        return;
-      }
-
-      if (event.type !== 'end') {
-        return;
-      }
-
-      const buffered = this.outputBuffers.get(session.id);
-      const flushed = flushCliOutputBuffer(buffered ?? '', session.cliId);
-      this.outputBuffers.delete(session.id);
-      const filtered = filterPromptEchoChunk(
-        flushed,
-        session.cliId,
-        this.promptEchoBuffers.get(session.id) ?? ''
-      );
-      this.promptEchoBuffers.delete(session.id);
-      if (filtered.text) {
-        this.postToWebview({
-          command: 'output',
-          cliId: session.cliId,
-          text: filtered.text,
-          sessionId: session.id,
-          openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
-          stream: 'stdout',
-        });
-      }
-
-      this.postToWebview({
-        command: 'sessionEnd',
-        cliId: session.cliId,
-        exitCode: event.exitCode,
-        sessionId: session.id,
-        openCodeSessionId: event.openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
-      });
-      this.activeSessions.delete(session.cliId);
-      this.wiredSessionIds.delete(session.id);
-    });
-
-    this.disposables.push(eventDisposable);
-  }
-
   private handleStop(cliId: string): void {
-    const session = this.activeSessions.get(cliId);
-    if (session) {
-      this.agentRuntime.stop(session.id);
-      this.cleanupSessionState(session);
-      this.postToWebview({ command: 'stopped', cliId, sessionId: session.id });
-    }
+    this.sessionController.stop(cliId);
   }
 
   private async handleSessionInput(message: {
@@ -1130,44 +1096,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }): Promise<void> {
     const cliId = this.resolveCliId(message);
     const text = String(message.text || '').trim();
-    const session = this.activeSessions.get(cliId);
-    const ok = Boolean(text && session && this.agentRuntime.sendInput(session.id, text));
+    const result = this.sessionController.sendInput(cliId, text);
 
     await this.postToWebview({
       command: 'sessionInputResult',
       cliId,
-      sessionId: session?.id,
-      ok,
+      sessionId: result.session?.id,
+      ok: result.ok,
     });
-  }
-
-  private cleanupSessionState(session: AgentSession): void {
-    this.clearNoOutputNoticeTimer(session.id);
-    this.outputBuffers.delete(session.id);
-    this.promptEchoBuffers.delete(session.id);
-    this.activeSessions.delete(session.cliId);
-    this.wiredSessionIds.delete(session.id);
-  }
-
-  private armNoOutputNotice(session: AgentSession): void {
-    this.clearNoOutputNoticeTimer(session.id);
-    const timer = setTimeout(() => {
-      this.noOutputNoticeTimers.delete(session.id);
-      if (session.process.exitCode !== null || session.process.killed) {
-        return;
-      }
-
-      this.postToWebview({
-        command: 'sessionNotice',
-        cliId: session.cliId,
-        sessionId: session.id,
-        text: runtimeT(this.locale, 'warning.noOutput', {
-          provider: session.profile.name,
-          seconds: String(Math.round(NO_OUTPUT_NOTICE_MS / 1000)),
-        }),
-      });
-    }, NO_OUTPUT_NOTICE_MS);
-    this.noOutputNoticeTimers.set(session.id, timer);
   }
 
   private formatApiProviderWarning(runtime: ApiProviderRuntimeConfig): string | undefined {
@@ -1180,23 +1116,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       provider: warning.providerName,
       envName: warning.envName,
     });
-  }
-
-  private clearNoOutputNoticeTimer(sessionId: string): void {
-    const timer = this.noOutputNoticeTimers.get(sessionId);
-    if (!timer) {
-      return;
-    }
-
-    clearTimeout(timer);
-    this.noOutputNoticeTimers.delete(sessionId);
-  }
-
-  private clearNoOutputNoticeTimers(): void {
-    for (const timer of this.noOutputNoticeTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.noOutputNoticeTimers.clear();
   }
 
   private clearOpenCodeStatusRefreshTimers(): void {
@@ -1263,64 +1182,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async copyInstallCommand(installCommand: unknown): Promise<void> {
-    const text = typeof installCommand === 'string' ? installCommand.trim() : '';
-    if (!text) {
-      return;
-    }
-    await vscode.env.clipboard.writeText(text);
-    vscode.window.showInformationMessage(runtimeT(this.locale, 'notification.installCommandCopied'));
-  }
-
-  private async installCli(cliId: unknown): Promise<void> {
-    const profileId = typeof cliId === 'string' ? cliId.trim() : '';
-    const profile = CLI_PROFILES.find((item) => item.id === profileId);
-    const command = profile?.installHint.trim();
-    if (!profile || !command) {
-      vscode.window.showWarningMessage(
-        runtimeT(this.locale, 'error.unknownProvider', { provider: profileId || 'unknown' })
-      );
-      return;
-    }
-
-    let terminal = this.setupTerminals.get(profile.id);
-    if (!terminal || terminal.exitStatus) {
-      terminal = vscode.window.createTerminal({ name: `Agents GUI Setup: ${profile.name}` });
-      this.setupTerminals.set(profile.id, terminal);
-    }
-
-    terminal.show(true);
-    terminal.sendText(command, true);
-    vscode.window.showInformationMessage(runtimeT(this.locale, 'notification.installCommandSent'));
-  }
-
-  private async runCliAuthAction(cliId: string, action: unknown): Promise<void> {
-    const authAction = normalizeCliAuthAction(action);
-    const profile = this.profilesById.get(cliId) ?? getCliProfile(cliId);
-    const args = authAction ? profile?.authCommands?.[authAction] : undefined;
-    if (!profile || !authAction || !args) {
-      vscode.window.showWarningMessage(
-        runtimeT(this.locale, 'providerAuth.unsupported', {
-          provider: profile?.name || cliId || 'unknown',
-        })
-      );
-      return;
-    }
-
-    let terminal = this.authTerminals.get(profile.id);
-    if (!terminal || terminal.exitStatus) {
-      terminal = vscode.window.createTerminal({ name: `Agents GUI Auth: ${profile.name}` });
-      this.authTerminals.set(profile.id, terminal);
-    }
-
-    const command = [profile.command, ...args].map(shellQuote).join(' ');
-    terminal.show(true);
-    terminal.sendText(command, true);
-    vscode.window.showInformationMessage(
-      runtimeT(this.locale, 'notification.authCommandSent', { provider: profile.name })
-    );
-  }
-
   private async setOpenCodeModelVariant(modelId: unknown, variant: unknown): Promise<void> {
     const cleanModelId = typeof modelId === 'string' ? modelId.trim() : '';
     const cleanVariant = typeof variant === 'string' ? variant.trim() : '';
@@ -1334,29 +1195,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const statePath = path.join(os.homedir(), '.local', 'state', 'opencode', 'model.json');
-    const state = await this.readOpenCodeModelStateFile(statePath);
-    const existingVariants = state.variant && typeof state.variant === 'object' && !Array.isArray(state.variant)
-      ? state.variant as Record<string, unknown>
-      : {};
-    state.variant = {
-      ...existingVariants,
-      [cleanModelId]: cleanVariant,
-    };
-
-    await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
-    await fs.promises.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  }
-
-  private async readOpenCodeModelStateFile(statePath: string): Promise<Record<string, unknown>> {
-    try {
-      const parsed = JSON.parse(await fs.promises.readFile(statePath, 'utf8'));
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
+    await this.openCodeLocalState.updateModelVariant(cleanModelId, cleanVariant);
   }
 
   private async copyMessageText(messageText: unknown): Promise<void> {
@@ -1499,78 +1338,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private async materializeImageAttachments(
-    inputs: AssistantImageAttachmentInput[] = []
-  ): Promise<AssistantImageAttachment[]> {
-    const imageInputs = inputs
-      .filter(isImageAttachmentInput)
-      .slice(0, MAX_IMAGE_ATTACHMENTS);
-
-    if (imageInputs.length === 0) {
-      return [];
-    }
-
-    const attachmentDir = vscode.Uri.joinPath(this.attachmentStorageUri, 'pasted-images');
-    await vscode.workspace.fs.createDirectory(attachmentDir);
-    await this.pruneImageAttachmentStorage(attachmentDir);
-
-    const attachments: AssistantImageAttachment[] = [];
-    for (const input of imageInputs) {
-      const decoded = decodeImageDataUrl(input.dataUrl, input.mimeType);
-      if (!decoded) {
-        continue;
-      }
-
-      const name = safeAttachmentName(input.name, decoded.mimeType, attachments.length);
-      const fileName = `${Date.now()}-${attachments.length + 1}-${name}`;
-      const uri = vscode.Uri.joinPath(attachmentDir, fileName);
-      await vscode.workspace.fs.writeFile(uri, decoded.bytes);
-      attachments.push({
-        kind: 'image',
-        name,
-        mimeType: decoded.mimeType,
-        size: decoded.bytes.byteLength,
-        path: uri.fsPath,
-      });
-    }
-
-    return attachments;
-  }
-
-  private async pruneImageAttachmentStorage(attachmentDir: vscode.Uri): Promise<void> {
-    try {
-      const entries = await vscode.workspace.fs.readDirectory(attachmentDir);
-      const cutoff = Date.now() - IMAGE_ATTACHMENT_RETENTION_MS;
-      const files: Array<{ uri: vscode.Uri; mtime: number }> = [];
-
-      for (const [name, type] of entries) {
-        if (type !== vscode.FileType.File) {
-          continue;
-        }
-
-        const uri = vscode.Uri.joinPath(attachmentDir, name);
-        try {
-          const stat = await vscode.workspace.fs.stat(uri);
-          if (stat.mtime < cutoff) {
-            await vscode.workspace.fs.delete(uri, { useTrash: false });
-            continue;
-          }
-
-          files.push({ uri, mtime: stat.mtime });
-        } catch {
-          // Best-effort cleanup must not block prompt submission.
-        }
-      }
-
-      files.sort((a, b) => b.mtime - a.mtime);
-      for (const stale of files.slice(MAX_STORED_IMAGE_ATTACHMENTS)) {
-        await vscode.workspace.fs.delete(stale.uri, { useTrash: false });
-      }
-    } catch {
-      // Best-effort cleanup must not block prompt submission.
-    }
-  }
-
   private registerDevelopmentWebviewWatcher(): void {
     if (this.extensionMode !== vscode.ExtensionMode.Development) {
       return;
@@ -1578,7 +1345,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const pattern = new vscode.RelativePattern(
       this.extensionUri,
-      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,providerCapabilities.js,conversationStore.js,sessionHistory.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js}'
+      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,providerCapabilities.js,conversationStore.js,sessionHistory.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js,workbenchLayout.js,taskBoardState.js,composerState.js,providerOptions.js}'
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
@@ -1632,76 +1399,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getHtml(webview: vscode.Webview): string {
-    const htmlPath = path.join(this.extensionUri.fsPath, 'media', 'main.html');
-    let html = fs.readFileSync(htmlPath, 'utf8');
-
-    const nonce = getNonce();
-    const csp = [
-      `default-src 'none';`,
-      `img-src ${webview.cspSource} data: https:;`,
-      `style-src ${webview.cspSource};`,
-      `script-src ${webview.cspSource} 'nonce-${nonce}';`,
-      `font-src ${webview.cspSource};`,
-      `base-uri 'none';`,
-      `form-action 'none';`,
-    ].join(' ');
-
-    html = html.replace('__CSP__', csp);
-    html = html.replace(/__NONCE__/g, nonce);
-    html = html.replace(/__LOCALE__/g, this.locale);
-    html = html.replace(
-      /__MAIN_CSS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'main.css')
-    );
-    html = html.replace(
-      /__I18N_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'i18n.js')
-    );
-    html = html.replace(
-      /__MESSAGE_TEXT_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'messageText.js')
-    );
-    html = html.replace(
-      /__MESSAGE_CHOICES_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'messageChoices.js')
-    );
-    html = html.replace(
-      /__PROVIDER_RUN_STATE_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'providerRunState.js')
-    );
-    html = html.replace(
-      /__PROVIDER_CAPABILITIES_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'providerCapabilities.js')
-    );
-    html = html.replace(
-      /__CONVERSATION_STORE_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'conversationStore.js')
-    );
-    html = html.replace(
-      /__SESSION_HISTORY_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'sessionHistory.js')
-    );
-    html = html.replace(
-      /__SLASH_COMMANDS_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'slashCommands.js')
-    );
-    html = html.replace(
-      /__OPEN_CODE_DIALOG_STATE_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'openCodeDialogState.js')
-    );
-    html = html.replace(
-      /__CLAUDE_ACTIONS_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'claudeActions.js')
-    );
-    html = html.replace(
-      /__INLINE_MARKDOWN_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'inlineMarkdown.js')
-    );
-    html = html.replace(
-      /__MAIN_JS_URI__/g,
-      this.getWebviewUri(webview, 'media', 'main.js')
-    );
-    return html;
+    return renderWebviewHtml({ extensionUri: this.extensionUri, webview, locale: this.locale });
   }
 
   dispose(options: { disposeContextCollector?: boolean } = {}): void {
@@ -1709,20 +1407,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       clearTimeout(this.webviewReloadTimer);
       this.webviewReloadTimer = undefined;
     }
-    this.clearNoOutputNoticeTimers();
+    this.sessionController.dispose();
     this.clearOpenCodeStatusRefreshTimers();
     this.openCodeStatusRefreshAttempts.clear();
-    this.outputBuffers.clear();
-    this.promptEchoBuffers.clear();
     this.providerClientTerminals.clear();
-    for (const [, session] of this.activeSessions) {
-      this.agentRuntime.stop(session.id);
-    }
     if (options.disposeContextCollector) {
       this.contextCollector.dispose();
     }
-    this.activeSessions.clear();
-    this.wiredSessionIds.clear();
     this.disposables.forEach((disposable) => disposable.dispose());
     this.disposables = [];
     this.view = undefined;
@@ -1788,24 +1479,6 @@ function sanitizeModelVariant(value: string | undefined): string | undefined {
   return /^[A-Za-z0-9_.-]+$/.test(variant) ? variant : undefined;
 }
 
-function isImageAttachmentInput(value: unknown): value is AssistantImageAttachmentInput {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const input = value as Partial<AssistantImageAttachmentInput>;
-  return (
-    input.kind === 'image' &&
-    typeof input.name === 'string' &&
-    typeof input.mimeType === 'string' &&
-    input.mimeType.startsWith('image/') &&
-    typeof input.dataUrl === 'string' &&
-    input.dataUrl.startsWith('data:image/') &&
-    Number(input.size) > 0 &&
-    Number(input.size) <= MAX_IMAGE_ATTACHMENT_BYTES
-  );
-}
-
 function normalizeStringRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {};
@@ -1851,71 +1524,4 @@ function normalizeContextOptions(value: unknown): Partial<AssistantContextOption
 
 function usesProviderNativeAgentConfig(providerId: string): boolean {
   return providerId === 'opencode';
-}
-
-function normalizeCliAuthAction(action: unknown): CliAuthAction | undefined {
-  return action === 'login' || action === 'logout' || action === 'status' ? action : undefined;
-}
-
-function shellQuote(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
-    return value;
-  }
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-function decodeImageDataUrl(
-  dataUrl: string,
-  expectedMimeType: string
-): { mimeType: string; bytes: Uint8Array } | undefined {
-  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
-  if (!match) {
-    return undefined;
-  }
-
-  const mimeType = match[1] || expectedMimeType;
-  const bytes = Buffer.from(match[2], 'base64');
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_ATTACHMENT_BYTES) {
-    return undefined;
-  }
-
-  return { mimeType, bytes };
-}
-
-function safeAttachmentName(name: string, mimeType: string, index: number): string {
-  const fallback = `pasted-image-${index + 1}${extensionForMime(mimeType)}`;
-  const baseName = path.basename(String(name || fallback)).replace(/[^a-zA-Z0-9._-]/g, '-');
-  const normalized = baseName.replace(/-+/g, '-').replace(/^\.+/, '').slice(0, 80);
-  if (!normalized) {
-    return fallback;
-  }
-
-  return /\.[a-zA-Z0-9]{2,5}$/.test(normalized)
-    ? normalized
-    : `${normalized}${extensionForMime(mimeType)}`;
-}
-
-function extensionForMime(mimeType: string): string {
-  switch (mimeType.toLowerCase()) {
-    case 'image/jpeg':
-      return '.jpg';
-    case 'image/webp':
-      return '.webp';
-    case 'image/gif':
-      return '.gif';
-    case 'image/svg+xml':
-      return '.svg';
-    case 'image/png':
-    default:
-      return '.png';
-  }
-}
-
-function getNonce(): string {
-  let text = '';
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
 }

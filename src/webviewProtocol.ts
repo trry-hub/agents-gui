@@ -8,7 +8,7 @@ import type {
 import type { ApiProviderSettings } from './apiProviders';
 import type { CliAuthAction, CliProfile } from './cliProfiles';
 
-export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | string;
+export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | 'mcp' | string;
 
 export interface SetupCliProfile {
   id: string;
@@ -41,6 +41,10 @@ export type WebviewToHostMessage =
         apiKeyEnv?: unknown;
       };
     }
+  | { command: 'loadMcpServers'; cliId?: string }
+  | { command: 'saveMcpServer'; cliId?: string; server?: unknown }
+  | { command: 'deleteMcpServer'; cliId?: string; name?: string }
+  | { command: 'toggleMcpServer'; cliId?: string; name?: string; enabled?: boolean }
   | { command: 'stop'; cliId?: string; providerId?: string }
   | { command: 'sendSessionInput'; cliId?: string; providerId?: string; text?: string }
   | { command: 'checkProfiles'; force?: boolean }
@@ -95,6 +99,8 @@ export type HostToWebviewMessage =
   | { command: 'settingsSaveResult'; section: SettingsSection; ok: boolean; message?: string }
   | { command: 'homeAgentSettings'; settings: unknown }
   | { command: 'commitMessageSettings'; settings: unknown }
+  | { command: 'mcpServers'; cliId: string; supported: boolean; configPath?: string; reason?: string; servers?: unknown[] }
+  | { command: 'mcpServerSaved'; cliId: string; ok: boolean; message?: string; code?: string }
   | { command: 'openProviderSettings'; section?: SettingsSection }
   | { command: 'switchProvider'; providerId: string }
   | ({

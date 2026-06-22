@@ -18,6 +18,7 @@ const {
   getCliModelOption,
   getCliPermissionMode,
   getCliRuntimeMode,
+  resolveCliInstallHint,
 } = require('../.test-dist/cliProfiles.js');
 const {
   filterPromptEchoChunk,
@@ -61,6 +62,10 @@ const sessionHistory = require('../media/sessionHistory.js');
 const slashCommands = require('../media/slashCommands.js');
 const openCodeDialogState = require('../media/openCodeDialogState.js');
 const claudeActions = require('../media/claudeActions.js');
+const workbenchLayout = require('../media/workbenchLayout.js');
+const taskBoardState = require('../media/taskBoardState.js');
+const composerState = require('../media/composerState.js');
+const providerOptions = require('../media/providerOptions.js');
 
 test('buildAssistantPrompt includes provider agent mode, action, user request, and selected code context', () => {
   const prompt = buildAssistantPrompt({
@@ -682,6 +687,8 @@ test('cli manager warms and attaches background CLI servers when available', () 
   const processRunnerSource = readFileSync(new URL('../src/cliProcessRunner.ts', import.meta.url), 'utf8');
   const openCodeClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
+  const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
 
   assert.match(source, /private readonly cliDiscovery = new CliDiscovery/);
   assert.match(discoverySource, /getOpenCodeAgentModes/);
@@ -709,8 +716,16 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(discoverySource, /opencode-models/);
   assert.match(discoverySource, /getOpenCodeModelState/);
   assert.match(discoverySource, /getOpenCodeModelMetadata/);
-  assert.match(discoverySource, /\.local', 'state', 'opencode', 'model\.json'/);
-  assert.match(discoverySource, /\.cache', 'opencode', 'models\.json'/);
+  assert.match(discoverySource, /private readonly openCodeLocalState: OpenCodeLocalState/);
+  assert.match(discoverySource, /this\.openCodeLocalState\.readModelState\(\)/);
+  assert.match(discoverySource, /this\.openCodeLocalState\.readModelMetadata\(\)/);
+  assert.doesNotMatch(discoverySource, /\.local', 'state', 'opencode', 'model\.json'/);
+  assert.doesNotMatch(discoverySource, /\.cache', 'opencode', 'models\.json'/);
+  assert.match(openCodeLocalStateSource, /modelStatePath: path\.join\(stateHome, 'opencode', 'model\.json'\)/);
+  assert.match(openCodeLocalStateSource, /modelMetadataPath: path\.join\(cacheHome, 'opencode', 'models\.json'\)/);
+  assert.match(openCodeLocalStateSource, /XDG_STATE_HOME/);
+  assert.match(openCodeLocalStateSource, /XDG_CACHE_HOME/);
+  assert.match(openCodeLocalStateSource, /LOCALAPPDATA/);
   assert.match(discoverySource, /discovery\.defaultModelId \?\? modelState\.currentModelId/);
   assert.match(discoverySource, /modelState\.variants/);
   assert.match(discoverySource, /modelMetadata/);
@@ -813,8 +828,9 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(processRunnerSource, /process\.kill\(-proc\.pid,\s*signal\)/);
   assert.match(processRunnerSource, /spawn\('taskkill', args, \{ stdio: 'ignore', windowsHide: true \}\)/);
   assert.match(sidebarSource, /const newSession = await this\.agentRuntime\.startPrompt/);
-  assert.match(sidebarSource, /session\.onEvent\.event\(\(event\) =>/);
-  assert.match(sidebarSource, /openCodeSessionId: event\.openCodeSessionId \?\? session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
+  assert.match(sidebarSource, /this\.sessionController\.register\(session\)/);
+  assert.match(sessionControllerSource, /session\.onEvent\.event\(\(event\) =>/);
+  assert.match(sessionControllerSource, /openCodeSessionId: openCodeSessionId \?\? session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
   assert.doesNotMatch(sidebarSource, /session\.onOutput\.event/);
   assert.doesNotMatch(sidebarSource, /session\.onStderr\.event/);
   assert.doesNotMatch(sidebarSource, /session\.onError\.event/);
@@ -822,20 +838,23 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(sidebarSource, /case 'openCodeNativeCommand':/);
   assert.match(sidebarSource, /this\.openCodeCapability\.executeNativeCommand/);
   assert.match(sidebarSource, /command: 'openCodeNativeCommandResult'/);
-  assert.match(sidebarSource, /this\.agentRuntime\.stopAll\(\);/);
+  assert.match(sidebarSource, /this\.sessionController\.stopAll\(\);/);
+  assert.match(sessionControllerSource, /this\.options\.agentRuntime\.stopAll\(\);/);
 });
 
 test('headless stdin prompts close stdin unless a profile opts into a persistent session', () => {
   const managerSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
 
   assert.match(
     managerSource,
     /sendInput\(sessionId:\s*string,\s*text:\s*string,\s*closeAfterWrite = false\)/
   );
   assert.match(managerSource, /session\.process\.stdin\.end\(\);/);
-  assert.match(sidebarSource, /session\.profile\.keepStdinOpen === true/);
-  assert.match(sidebarSource, /sendInput\(session\.id,\s*prompt,\s*!profile\.keepStdinOpen\)/);
+  assert.match(sessionControllerSource, /session\.profile\.keepStdinOpen === true/);
+  assert.match(sidebarSource, /this\.agentRuntime\.startPrompt\([\s\S]*prompt,/);
+  assert.match(sessionControllerSource, /this\.options\.agentRuntime\.sendInput\(session\.id, text\)/);
 });
 
 test('codex profile passes prompt as argument and disables color output', () => {
@@ -965,6 +984,22 @@ test('CLI profiles expose task routing scores for agent recommendations', () => 
   assert.ok(getCliProfile('claude').taskRouting.refactor >= 6);
   assert.ok(getCliProfile('aider').taskRouting.tests >= 5);
   assert.equal(getCliProfile('gemini').taskRouting.explain, 5);
+});
+
+test('CLI install hints resolve platform-specific setup commands', () => {
+  const openCode = getCliProfile('opencode');
+  const goose = getCliProfile('goose');
+  const claude = getCliProfile('claude');
+  const aider = getCliProfile('aider');
+
+  assert.equal(resolveCliInstallHint(openCode, 'darwin'), 'brew install opencode-ai/tap/opencode');
+  assert.equal(resolveCliInstallHint(openCode, 'linux'), 'curl -fsSL https://opencode.ai/install | bash');
+  assert.equal(resolveCliInstallHint(openCode, 'win32'), 'npm install -g opencode-ai');
+  assert.match(resolveCliInstallHint(goose, 'darwin'), /github\.com\/block\/goose/);
+  assert.match(resolveCliInstallHint(goose, 'win32'), /github\.com\/block\/goose/);
+  assert.match(resolveCliInstallHint(aider, 'win32'), /^powershell -NoProfile -ExecutionPolicy Bypass -Command/);
+  assert.doesNotMatch(resolveCliInstallHint(aider, 'win32'), /&&/);
+  assert.equal(resolveCliInstallHint(claude, 'win32'), 'npm install -g @anthropic-ai/claude-code');
 });
 
 test('CLI lookup can use interactive login zsh so nvm-installed tools are visible', () => {
@@ -1107,6 +1142,7 @@ test('extension defaults to OpenCode as the active provider', () => {
   assert.match(sidebarSource, /profiles: installedProfiles\.map\(\(profile\) => \(\{/);
   assert.match(sidebarSource, /setupProfiles: profiles\.map\(\(profile\) => this\.toSetupProfile\(profile\)\)/);
   assert.match(sidebarSource, /private toSetupProfile\(profile: CliProfile\): SetupCliProfile/);
+  assert.match(sidebarSource, /\.\.\.toCliSetupProfile\(profile\)/);
   assert.match(sidebarSource, /activeProviderId: storedProviderId/);
   assert.match(sidebarSource, /activeAgentModeByProvider: this\.getStoredAgentModeState\(\)/);
 });
@@ -1148,17 +1184,17 @@ test('development mode watches webview assets for live reload', () => {
   assert.match(extensionSource, /extensionMode:\s*context\.extensionMode/);
   assert.match(sidebarSource, /vscode\.ExtensionMode\.Development/);
   assert.match(sidebarSource, /createFileSystemWatcher/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js,workbenchLayout\.js,taskBoardState\.js,composerState\.js,providerOptions\.js\}/);
   assert.match(sidebarSource, /webviewAssetVersion/);
   assert.match(sidebarSource, /reloadWebviewForDevelopment/);
 });
 
 test('webview CSP is strict enough for VS Code webview diagnostics', () => {
-  const source = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../src/webviewHtmlRenderer.ts', import.meta.url), 'utf8');
 
   assert.match(source, /default-src 'none'/);
-  assert.match(source, /style-src \$\{webview\.cspSource\};/);
-  assert.match(source, /script-src \$\{webview\.cspSource\} 'nonce-\$\{nonce\}'/);
+  assert.match(source, /style-src \$\{options\.webview\.cspSource\};/);
+  assert.match(source, /script-src \$\{options\.webview\.cspSource\} 'nonce-\$\{nonce\}'/);
   assert.doesNotMatch(source, /'unsafe-inline'/);
 });
 
@@ -1203,13 +1239,54 @@ test('webview keeps local remote runtime outside the prompt input shell', () => 
   assert.match(css, /\.composer-runtime \.runtime-menu\.is-visible\s*\{\s*[^}]*display:\s*block;/s);
 });
 
+test('webview allocates the OpenCode history column at medium widths only when history is visible', () => {
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
+
+  assert.match(
+    css,
+    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\] \.app-shell\s*\{\s*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";\s*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";\s*grid-template-columns:\s*minmax\(176px, 210px\) minmax\(0, 1fr\);/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";\s*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\] \.app-shell:has\(> \.session-history\[hidden\]\)\s*\{\s*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";\s*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+  );
+  assert.match(css, /\.session-history:empty\s*\{\s*display:\s*none;/s);
+  assert.match(
+    css,
+    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\] \.app-shell:has\(> \.session-history:empty\)\s*\{\s*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";\s*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 760px\)\s*\{[\s\S]*body\.is-session-history-visible \.app-shell,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";\s*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 760px\)\s*\{[\s\S]*body\.is-session-history-visible \.session-history:not\(\[hidden\]\):not\(:empty\)\s*\{\s*display:\s*none;/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 760px\)\s*\{[\s\S]*body\.is-session-history-visible \.toolbar,\s*body\.is-session-history-visible \.main-content,\s*body\.is-session-history-visible \.composer,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.toolbar,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.main-content,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.composer\s*\{\s*grid-column:\s*1;/s,
+  );
+});
+
 test('webview omits the composer advanced toggle but keeps provider setup actions', () => {
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const attachmentStoreSource = readFileSync(new URL('../src/attachmentStore.ts', import.meta.url), 'utf8');
+  const cliSetupSource = readFileSync(new URL('../src/cliSetup.ts', import.meta.url), 'utf8');
   const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
+  const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
 
   assert.doesNotMatch(html, /id="composerAdvancedToggle"/);
   assert.doesNotMatch(html, /class="advanced-toggle"/);
@@ -1240,19 +1317,28 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles', force: true \}\)/);
   assert.match(sidebarSource, /case 'openSettings':/);
   assert.match(sidebarSource, /case 'runCliAuthAction':/);
-  assert.match(sidebarSource, /private async runCliAuthAction\(cliId: string, action: unknown\): Promise<void>/);
-  assert.match(sidebarSource, /profile\?\.authCommands\?\.\[authAction\]/);
-  assert.match(sidebarSource, /const command = \[profile\.command, \.\.\.args\]\.map\(shellQuote\)\.join\(' '\)/);
+  assert.match(sidebarSource, /this\.cliSetup\.runCliAuthAction\(this\.resolveCliId\(message\), message\.action\)/);
   assert.match(sidebarSource, /case 'copyInstallCommand':/);
+  assert.match(sidebarSource, /this\.cliSetup\.copyInstallCommand\(message\.installCommand\)/);
   assert.match(sidebarSource, /case 'installCli':/);
-  assert.match(sidebarSource, /private async installCli\(cliId: unknown\): Promise<void>/);
+  assert.match(sidebarSource, /this\.cliSetup\.installCli\(message\.cliId\)/);
+  assert.doesNotMatch(sidebarSource, /private async installCli\(cliId: unknown\): Promise<void>/);
+  assert.doesNotMatch(sidebarSource, /private async runCliAuthAction\(cliId: string, action: unknown\): Promise<void>/);
+  assert.match(cliSetupSource, /export class CliSetupController/);
+  assert.match(cliSetupSource, /installHint: resolveCliInstallHint\(profile\)/);
+  assert.match(cliSetupSource, /const command = profile \? resolveCliInstallHint\(profile\) : '';/);
+  assert.match(cliSetupSource, /CLI_PROFILES\.find\(\(item\) => item\.id === profileId\)/);
+  assert.match(cliSetupSource, /profile\?\.authCommands\?\.\[authAction\]/);
+  assert.match(cliSetupSource, /const command = \[profile\.command, \.\.\.args\]\.map\(shellQuote\)\.join\(' '\)/);
+  assert.match(cliSetupSource, /vscode\.window\.createTerminal\(\{ name: `Agents GUI Setup: \$\{profile\.name\}` \}\)/);
+  assert.match(cliSetupSource, /terminal\.sendText\(command, true\)/);
   assert.match(sidebarSource, /case 'setOpenCodeModelVariant':/);
   assert.match(sidebarSource, /private async setOpenCodeModelVariant\(modelId: unknown, variant: unknown\): Promise<void>/);
-  assert.match(sidebarSource, /\.local', 'state', 'opencode', 'model\.json'/);
-  assert.match(sidebarSource, /state\.variant = \{/);
-  assert.match(sidebarSource, /CLI_PROFILES\.find\(\(item\) => item\.id === profileId\)/);
-  assert.match(sidebarSource, /vscode\.window\.createTerminal\(\{ name: `Agents GUI Setup: \$\{profile\.name\}` \}\)/);
-  assert.match(sidebarSource, /terminal\.sendText\(command, true\)/);
+  assert.match(sidebarSource, /this\.openCodeLocalState\.updateModelVariant\(cleanModelId, cleanVariant\)/);
+  assert.doesNotMatch(sidebarSource, /\.local', 'state', 'opencode', 'model\.json'/);
+  assert.doesNotMatch(sidebarSource, /state\.variant = \{/);
+  assert.match(openCodeLocalStateSource, /async updateModelVariant\(modelId: string, variant: string\): Promise<void>/);
+  assert.match(openCodeLocalStateSource, /state\.variant = \{/);
   assert.match(extensionSource, /agents-gui\.openSettings/);
   assert.match(css, /\.cli-setup-state\s*\{/);
   assert.match(css, /\.cli-setup-card\.is-recommended\s*\{/);
@@ -1378,23 +1464,37 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(script, /profile\?\.id === 'opencode'\s*\?\s*splitAgentModeLabel\(displayMode\?\.label \|\| i18n\.t\('agentMode\.short'\)\)\.title/s);
   assert.match(script, /meta\.textContent = profile\?\.id === 'opencode'/);
   assert.match(script, /modelSummaryText\(model, displayModel\)/);
-  assert.match(script, /selectedAction === 'freeform' \? 'input\.placeholderProvider' : 'input\.placeholderAction'/);
+  assert.match(script, /composerState\.deriveComposerState\(\{/);
+  assert.match(script, /translate: \(key, values\) => i18n\.t\(key, values\)/);
   assert.match(script, /const readonlyModel = providerCapabilities\.supportsModelVariants\(profile\);/);
   assert.match(script, /modelMenu\?\.classList\.toggle\('is-readonly', Boolean\(readonlyModel\)\);/);
   assert.match(script, /modelSummary\?\.addEventListener\('click'/);
   assert.match(i18nScript, /'input\.placeholderProvider': 'Ask \{provider\}…'/);
   assert.match(i18nScript, /'input\.placeholderProvider': '问 \{provider\}\.\.\.'/);
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.session-history\s*\{\s*[^}]*grid-area:\s*session-history;/s);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-column:\s*1;/s);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-row:\s*1 \/ 4;/s);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\.is-session-history-visible \.session-history:not\(\[hidden\]\):not\(:empty\)\s*\{\s*[^}]*display:\s*flex;/s);
   assert.match(css, /\.session-history\[hidden\]\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\);/s);
+  assert.match(css, /body\.is-session-history-visible \.toolbar,\s*body\.is-session-history-visible \.main-content,\s*body\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*2;/s);
+  assert.match(css, /body\.is-session-history-visible \.session-history\s*\{\s*[^}]*grid-column:\s*1;/s);
   assert.match(css, /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
   assert.match(css, /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.sidebar\s*\{\s*[^}]*grid-area:\s*sidebar;/s);
   assert.match(css, /\.sidebar\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.session-history\s*\{\s*[^}]*grid-column:\s*1;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.toolbar,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.main-content,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*2;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.sidebar\s*\{\s*[^}]*grid-column:\s*3;/s);
   assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
   assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
@@ -1450,9 +1550,11 @@ test('webview composer follows the selected provider identity', () => {
 test('opencode sidebar collapses by default at compact widths', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";[\s\S]*?grid-template-columns:\s*minmax\(176px,\s*210px\) minmax\(0,\s*1fr\);/s);
-  assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.main-content\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?border-right:\s*0;/s);
-  assert.match(css, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.sidebar\s*\{[\s\S]*?display:\s*none;/s);
+  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";[\s\S]*?grid-template-columns:\s*minmax\(176px,\s*210px\) minmax\(0,\s*1fr\);/s);
+  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.main-content\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?border-right:\s*0;/s);
+  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.sidebar\s*\{[\s\S]*?display:\s*none;/s);
 });
 
 test('opencode MCP sidebar retries while server status is warming up', () => {
@@ -1483,14 +1585,16 @@ test('opencode MCP sidebar retries while server status is warming up', () => {
 test('webview renders OpenCode thinking as a separate assistant detail block', () => {
   const formatterSource = readFileSync(new URL('../src/outputFormatter.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
 
   assert.match(formatterSource, /thinking\?: string;/);
-  assert.match(sidebarSource, /thinking: normalized\.thinking/);
-  assert.match(sidebarSource, /status: normalized\.status/);
-  assert.match(sidebarSource, /activities: normalized\.activities/);
+  assert.match(sidebarSource, /this\.sessionController\.register\(session\)/);
+  assert.match(sessionControllerSource, /thinking: normalized\.thinking/);
+  assert.match(sessionControllerSource, /status: normalized\.status/);
+  assert.match(sessionControllerSource, /activities: normalized\.activities/);
   assert.match(script, /function mergeStreamText\(current, chunk\)/);
   assert.match(script, /incoming\.startsWith\(existing\)/);
   assert.match(script, /existing\.endsWith\(incoming\) && incoming\.length > 32/);
@@ -1710,7 +1814,8 @@ test('webview renders a Claude Code style composer when Claude is selected', () 
   assert.match(html, /class="claude-slash-glyph"/);
   assert.match(html, /class="claude-permission-icon"/);
   assert.match(script, /let claudeTerminalBannerDismissed = Boolean\(saved\.claudeTerminalBannerDismissed\);/);
-  assert.match(script, /i18n\.t\('claude\.placeholder'\)/);
+  assert.match(script, /composerState\.deriveComposerState\(\{/);
+  assert.match(readFileSync(new URL('../media/composerState.js', import.meta.url), 'utf8'), /translate\('claude\.placeholder'\)/);
   assert.match(script, /const label = i18n\.t\('claude\.permission\.default\.title'\);/);
   assert.match(script, /function claudePermissionPanelOption\(option\)/);
   assert.match(script, /function claudeEffortValueLabel\(runtime\)/);
@@ -1794,26 +1899,29 @@ test('webview supports pasted image attachments in the composer', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const attachmentStoreSource = readFileSync(new URL('../src/attachmentStore.ts', import.meta.url), 'utf8');
 
   assert.match(html, /id="attachmentStrip"/);
   assert.match(html, /id="attachImageBtn"/);
   assert.match(html, /id="imageFileInput"[^>]*accept="image\/\*"/);
   assert.match(script, /let promptAttachments = \[\];/);
-  assert.match(script, /attachImageBtn\.disabled = !canSend \|\| busy;/);
-  assert.match(script, /imageFileInput\.disabled = !canSend \|\| busy;/);
+  assert.match(script, /attachImageBtn\.disabled = state\.attachmentDisabled;/);
+  assert.match(script, /imageFileInput\.disabled = state\.attachmentDisabled;/);
   assert.match(script, /if \(attachImageBtn\.disabled \|\| imageFileInput\?\.disabled\) \{/);
   assert.match(script, /input\.addEventListener\('paste'/);
   assert.match(script, /event\.clipboardData\?\.items/);
   assert.match(script, /function addImageFiles/);
   assert.match(script, /new FileReader\(\)/);
   assert.match(script, /const finalAttachments = promptAttachments\.map\(attachmentPayload\);/);
-  assert.match(script, /const hasAttachments = promptAttachments\.length > 0;/);
+  assert.match(script, /attachmentCount: promptAttachments\.length,/);
   assert.match(script, /promptAttachments = \[\];/);
-  assert.match(sidebarSource, /IMAGE_ATTACHMENT_RETENTION_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
-  assert.match(sidebarSource, /MAX_STORED_IMAGE_ATTACHMENTS = 128/);
-  assert.match(sidebarSource, /await this\.pruneImageAttachmentStorage\(attachmentDir\)/);
-  assert.match(sidebarSource, /vscode\.workspace\.fs\.delete\(uri, \{ useTrash: false \}\)/);
-  assert.match(sidebarSource, /files\.slice\(MAX_STORED_IMAGE_ATTACHMENTS\)/);
+  assert.match(sidebarSource, /this\.attachmentStore\.materialize\(message\.attachments\)/);
+  assert.match(attachmentStoreSource, /DEFAULT_IMAGE_ATTACHMENT_RETENTION_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(attachmentStoreSource, /DEFAULT_MAX_STORED_IMAGE_ATTACHMENTS = 128/);
+  assert.match(attachmentStoreSource, /await this\.prune\(attachmentDir\)/);
+  assert.match(attachmentStoreSource, /vscode\.workspace\.fs\.delete\(uri, \{ useTrash: false \}\)/);
+  assert.match(attachmentStoreSource, /files\.slice\(this\.maxStoredAttachments\)/);
+  assert.doesNotMatch(sidebarSource, /pruneImageAttachmentStorage/);
   assert.match(css, /\.attachment-strip\s*\{/);
   assert.match(css, /\.attachment-chip img\s*\{/);
   assert.match(css, /\.attach-button\s*\{/);
@@ -2304,13 +2412,15 @@ test('webview composer popovers avoid viewport clipping', () => {
 test('webview pins composer to the bottom when task board is hidden', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
+  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-rows:\s*max-content minmax\(0,\s*1fr\) max-content;/s);
   assert.match(css, /\.toolbar\s*\{\s*[^}]*grid-area:\s*toolbar;/s);
   assert.match(css, /\.session-history\s*\{\s*[^}]*grid-area:\s*session-history;/s);
   assert.match(css, /\.sidebar\s*\{\s*[^}]*grid-area:\s*sidebar;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
+  assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
   assert.doesNotMatch(css, /\.task-board\s*\{\s*[^}]*grid-area:/s);
   assert.match(css, /\.main-content\s*\{\s*[^}]*grid-area:\s*main-content;/s);
   assert.match(css, /\.messages\s*\{\s*[^}]*grid-area:\s*auto;/s);
@@ -2351,11 +2461,11 @@ test('webview uses one primary composer action slot for send and stop', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
-  assert.match(script, /const running = Boolean\(runningByProvider\[activeId\]\);/);
-  assert.match(script, /stopBtn\.hidden = !running;/);
-  assert.match(script, /sendBtn\.hidden = running;/);
-  assert.match(script, /stopBtn\.classList\.toggle\('is-visible', running\);/);
-  assert.match(script, /sendBtn\.classList\.toggle\('is-hidden', running\);/);
+  assert.match(script, /running: runningByProvider\[activeId\],/);
+  assert.match(script, /stopBtn\.hidden = !state\.running;/);
+  assert.match(script, /sendBtn\.hidden = state\.running;/);
+  assert.match(script, /stopBtn\.classList\.toggle\('is-visible', state\.running\);/);
+  assert.match(script, /sendBtn\.classList\.toggle\('is-hidden', state\.running\);/);
   assert.match(script, /function requestStopActiveProvider\(\) \{/);
   assert.match(script, /if \(!runningByProvider\[activeId\]\) \{/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'stop', cliId: activeId \}\);/);
@@ -2401,7 +2511,8 @@ test('webview shows provider detection as a loading state before empty provider 
   assert.match(script, /appendProviderLoadingState\(\)/);
   assert.match(script, /profilesLoading = false;\s*profiles = message\.profiles \|\| \[\];\s*setupProfiles = normalizeSetupProfiles\(message\.setupProfiles\);/);
   assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
-  assert.match(script, /input\.placeholder = profilesLoading\s*\?\s*i18n\.t\('input\.placeholderLoading'\)/);
+  assert.match(script, /profilesLoading,/);
+  assert.match(script, /input\.placeholder = state\.placeholder;/);
   assert.match(css, /\.empty-state\.is-loading/);
   assert.match(css, /\.loading-spinner/);
   assert.match(i18nScript, /'provider\.loading': 'Detecting providers'/);
@@ -2459,14 +2570,22 @@ test('webview renders a provider-wide session history list with derived states',
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
 
-  assert.match(html, /<aside class="session-history" id="sessionHistory"[^>]*data-i18n-aria="history\.label"/);
+  assert.match(html, /<aside class="session-history" id="sessionHistory"[^>]*hidden[^>]*data-i18n-aria="history\.label"/);
   assert.match(html, /<\/section>\s*<aside class="session-history" id="sessionHistory"[\s\S]*?<div class="main-content">/);
   assert.match(html, /__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__/);
+  assert.match(html, /__WORKBENCH_LAYOUT_JS_URI__[\s\S]*__COMPOSER_STATE_JS_URI__[\s\S]*__PROVIDER_OPTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/);
   assert.match(script, /const sessionHistoryState = window\.AgentsGuiSessionHistory/);
+  assert.match(script, /const workbenchLayout = window\.AgentsGuiWorkbenchLayout/);
+  assert.match(script, /const composerState = window\.AgentsGuiComposerState/);
+  assert.match(script, /const providerOptions = window\.AgentsGuiProviderOptions/);
   assert.match(script, /const sessionHistory = document\.getElementById\('sessionHistory'\);/);
+  assert.match(script, /function setSessionHistoryHidden\(hidden\)/);
+  assert.match(script, /workbenchLayout\.setSessionHistoryHidden\(document\.body, sessionHistory, hidden\)/);
+  assert.match(script, /document\.body\.classList\.toggle\('is-session-history-visible', !Boolean\(hidden\)\);/);
   assert.match(script, /function renderSessionHistory\(\)/);
-  assert.match(script, /document\.body\.classList\.remove\('is-session-history-hidden'\)/);
-  assert.match(script, /sessionHistory\.hidden = false/);
+  assert.match(script, /sessionHistory\.innerHTML = '';\s*setSessionHistoryHidden\(true\);/);
+  assert.match(script, /if \(rendered === 0 && !profilesLoading\) \{\s*setSessionHistoryHidden\(true\);\s*return;\s*\}/s);
+  assert.match(script, /sessionHistory\.appendChild\(header\);\s*sessionHistory\.appendChild\(body\);\s*setSessionHistoryHidden\(false\);/s);
   assert.match(script, /function historyStatusForThread\(providerId, thread\)/);
   assert.match(script, /sessionHistoryState\.threadStatus\(thread, \{/);
   assert.match(script, /pendingByProvider,\s*runningByProvider,\s*pendingThreadByProvider,/);
@@ -2475,8 +2594,11 @@ test('webview renders a provider-wide session history list with derived states',
   assert.match(script, /sessionHistory\?\.addEventListener\('click'/);
   assert.match(script, /activateHistoryThread\(row\.dataset\.providerId, row\.dataset\.threadId\)/);
   assert.match(script, /renderSessionHistory\(\);/);
-  assert.match(script, /sessionHistory\.hidden = true;\s*document\.body\.classList\.add\('is-session-history-hidden'\);/);
+  assert.match(script, /setSessionHistoryHidden\(true\)/);
   assert.match(css, /\.session-history\s*\{\s*[^}]*border-right:\s*1px solid var\(--assistant-border\);/s);
+  assert.match(css, /\.session-history\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\.is-session-history-visible \.session-history:not\(\[hidden\]\):not\(:empty\)\s*\{\s*[^}]*display:\s*flex;/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
   assert.match(css, /\.session-history-row\s*\{/);
   assert.match(css, /\.session-history-row\.is-running \.session-history-status-dot\s*\{/);
   assert.match(css, /\.session-history-row\.is-answered \.session-history-status-dot\s*\{/);
@@ -2485,6 +2607,32 @@ test('webview renders a provider-wide session history list with derived states',
   assert.match(i18nScript, /'history\.status\.running': '会话中'/);
   assert.match(i18nScript, /'history\.status\.answered': '有问答'/);
   assert.match(i18nScript, /'history\.status\.completed': '已完成'/);
+});
+
+test('workbench layout toggles hidden session history and shell class together', () => {
+  const classes = new Set();
+  const body = {
+    classList: {
+      toggle(name, enabled) {
+        if (enabled) {
+          classes.add(name);
+        } else {
+          classes.delete(name);
+        }
+      },
+    },
+  };
+  const sessionHistoryNode = { hidden: false };
+
+  workbenchLayout.setSessionHistoryHidden(body, sessionHistoryNode, true);
+  assert.equal(sessionHistoryNode.hidden, true);
+  assert.equal(classes.has('is-session-history-hidden'), true);
+  assert.equal(classes.has('is-session-history-visible'), false);
+
+  workbenchLayout.setSessionHistoryHidden(body, sessionHistoryNode, false);
+  assert.equal(sessionHistoryNode.hidden, false);
+  assert.equal(classes.has('is-session-history-hidden'), false);
+  assert.equal(classes.has('is-session-history-visible'), true);
 });
 
 test('webview closes composer menus when clicking outside or pressing escape', () => {
@@ -2523,6 +2671,7 @@ test('webview keeps the visual task board disabled while single-agent flows stab
   assert.match(html, /id="taskBoard"[^>]*class="task-board"/);
   assert.match(html, /id="taskBoard"[^>]*hidden/);
   assert.match(script, /const VISUAL_TASK_BOARD_ENABLED = false;/);
+  assert.match(script, /const taskBoardState = window\.AgentsGuiTaskBoardState;/);
   assert.match(script, /let tasks = normalizeSavedTasks\(saved\.tasks\);/);
   assert.match(script, /let taskBoardDismissed = Boolean\(saved\.taskBoardDismissed\);/);
   assert.match(script, /taskBoardDismissed,/);
@@ -2531,16 +2680,105 @@ test('webview keeps the visual task board disabled while single-agent flows stab
   assert.doesNotMatch(script, /taskBoardDismissed = false;/);
   assert.doesNotMatch(script, /makeTaskGroupId/);
   assert.doesNotMatch(script, /groupId/);
+  assert.match(script, /taskBoardState\.normalizeSavedTasks\(savedTasks, \{/);
+  assert.match(script, /taskBoardState\.createTask\(\{/);
+  assert.match(script, /taskBoardState\.upsertRecentTask\(tasks, task, \{ limit: 20 \}\)/);
+  assert.match(script, /function makeTaskId\(providerId\) \{\s*return taskBoardState\.makeTaskId\(providerId\);\s*\}/);
   assert.match(script, /function updateTaskStatus/);
   assert.match(script, /function visibleTasksForBoard\(\)/);
-  assert.match(script, /if \(!VISUAL_TASK_BOARD_ENABLED \|\| taskBoardDismissed\) \{\s*return \[\];\s*\}/);
-  assert.match(script, /const activeTasks = tasks\.filter\(isActiveTask\);/);
+  assert.match(script, /taskBoardState\.visibleTasks\(tasks, \{/);
+  assert.match(script, /enabled: VISUAL_TASK_BOARD_ENABLED,/);
+  assert.match(script, /dismissed: taskBoardDismissed,/);
   assert.match(script, /function renderTaskBoard\(\)/);
   assert.match(script, /const visibleTasks = visibleTasksForBoard\(\);/);
   assert.match(script, /taskBySessionId\[message\.sessionId\]/);
   assert.match(script, /renderTaskBoard\(\);\s*renderThreadSelect\(\);/);
   assert.match(script, /status: 'preparing'/);
   assert.match(script, /status: wasStopped \? 'stopped' : \(Number\(message\.exitCode\) === 0 \? 'completed' : 'failed'\)/);
+});
+
+test('task board state keeps multi-task visibility rules outside DOM rendering', () => {
+  const tasks = [
+    { id: 'a', status: 'running' },
+    { id: 'b', status: 'preparing' },
+    { id: 'c', status: 'completed' },
+    { id: 'd', status: 'unknown' },
+  ];
+
+  assert.deepEqual(taskBoardState.TASK_STATUSES, ['preparing', 'running', 'completed', 'failed', 'stopped']);
+  assert.equal(taskBoardState.isActiveTask(tasks[0]), true);
+  assert.equal(taskBoardState.isActiveTask(tasks[2]), false);
+  assert.deepEqual(taskBoardState.statusCounts(tasks), {
+    preparing: 1,
+    running: 1,
+    completed: 2,
+    failed: 0,
+    stopped: 0,
+  });
+  assert.deepEqual(taskBoardState.visibleTasks(tasks, { enabled: false }), []);
+  assert.deepEqual(taskBoardState.visibleTasks(tasks, { enabled: true, dismissed: true }), []);
+  assert.deepEqual(
+    taskBoardState.visibleTasks(tasks, { enabled: true, dismissed: false, limit: 1 }).map((task) => task.id),
+    ['a']
+  );
+  assert.equal(
+    taskBoardState.makeTaskId('codex', { now: () => 123, random: () => 0.456789 }),
+    'codex-123-gfzy42'
+  );
+  assert.deepEqual(
+    taskBoardState.normalizeSavedTasks([
+      { providerId: 'opencode', status: 'running' },
+      { providerId: 'codex', status: 'preparing', title: 'Build' },
+      { providerId: 'claude', status: 'failed', createdAt: 1, updatedAt: 2 },
+      { providerId: '', status: 'running' },
+    ], {
+      fallbackTitle: 'Untitled',
+      makeTaskId: (providerId) => `${providerId}-id`,
+      now: () => 99,
+    }),
+    [
+      {
+        id: 'opencode-id',
+        providerId: 'opencode',
+        providerName: 'opencode',
+        title: 'Untitled',
+        action: 'freeform',
+        agentMode: '',
+        status: 'stopped',
+        threadId: '',
+        createdAt: 99,
+        updatedAt: 99,
+      },
+      {
+        id: 'codex-id',
+        providerId: 'codex',
+        providerName: 'codex',
+        title: 'Build',
+        action: 'freeform',
+        agentMode: '',
+        status: 'stopped',
+        threadId: '',
+        createdAt: 99,
+        updatedAt: 99,
+      },
+      {
+        id: 'claude-id',
+        providerId: 'claude',
+        providerName: 'claude',
+        title: 'Untitled',
+        action: 'freeform',
+        agentMode: '',
+        status: 'failed',
+        threadId: '',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ]
+  );
+  assert.deepEqual(
+    taskBoardState.upsertRecentTask([{ id: 'old' }, { id: 'same' }], { id: 'same' }, { limit: 2 }),
+    [{ id: 'same' }, { id: 'old' }]
+  );
 });
 
 test('webview provider status keeps transient running text out of the composer', () => {
@@ -2806,18 +3044,23 @@ test('webview does not persist transient running message state', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const conversationSource = readFileSync(new URL('../media/conversationStore.js', import.meta.url), 'utf8');
   const providerSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
 
   assert.match(providerSource, /private profilesById = new Map<string, CliProfile>/);
   assert.match(providerSource, /this\.profilesById\.set\(profile\.id, profile\)/);
   assert.match(providerSource, /this\.profilesById\.get\(cliId\) \?\? getCliProfile\(cliId\)/);
-  assert.match(providerSource, /const NO_OUTPUT_NOTICE_MS = 45_000;/);
-  assert.match(providerSource, /private noOutputNoticeTimers = new Map/);
-  assert.match(providerSource, /command:\s*'sessionNotice'/);
+  assert.doesNotMatch(providerSource, /NO_OUTPUT_NOTICE_MS/);
+  assert.doesNotMatch(providerSource, /private noOutputNoticeTimers = new Map/);
+  assert.match(providerSource, /this\.sessionController\.armNoOutputNotice\(session\)/);
+  assert.match(sessionControllerSource, /const DEFAULT_NO_OUTPUT_NOTICE_MS = 45_000;/);
+  assert.match(sessionControllerSource, /private readonly noOutputNoticeTimers = new Map/);
+  assert.match(sessionControllerSource, /command:\s*'sessionNotice'/);
   assert.match(providerSource, /case 'sendSessionInput':\s*await this\.handleSessionInput\(message\);/);
   assert.match(providerSource, /private async handleSessionInput/);
-  assert.match(providerSource, /this\.agentRuntime\.sendInput\(session\.id, text\)/);
+  assert.match(providerSource, /this\.sessionController\.sendInput\(cliId, text\)/);
+  assert.match(sessionControllerSource, /this\.options\.agentRuntime\.sendInput\(session\.id, text\)/);
   assert.match(providerSource, /command:\s*'sessionInputResult'/);
-  assert.match(providerSource, /runtimeT\(this\.locale,\s*'warning\.noOutput'/);
+  assert.match(sessionControllerSource, /runtimeT\(this\.options\.locale,\s*'warning\.noOutput'/);
   assert.match(script, /threadsByProvider: conversationStore\.serializeThreadsForState\(threadsByProvider\)/);
   assert.match(conversationSource, /const \{ startedAt, durationMs, \.\.\.rest \} = message;/);
   assert.match(conversationSource, /const serializedMessage = \{ \.\.\.rest, running: false \};/);
@@ -2829,7 +3072,7 @@ test('webview does not persist transient running message state', () => {
   assert.match(script, /i18n\.t\('claude\.approval\.unavailable'\)/);
   assert.match(script, /item\.runningNotice = normalizeMessageText\(message\.text\);/);
   assert.match(script, /delete item\.runningNotice;/);
-  assert.match(providerSource, /normalized\.status !== 'thinking'/);
+  assert.match(sessionControllerSource, /normalized\.status !== 'thinking'/);
   assert.match(script, /persist\(\);\s*renderAll\(\);/);
 });
 
@@ -3233,9 +3476,13 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
   const runStateSource = readFileSync(new URL('../media/providerRunState.js', import.meta.url), 'utf8');
   const capabilitySource = readFileSync(new URL('../media/providerCapabilities.js', import.meta.url), 'utf8');
   const sessionHistorySource = readFileSync(new URL('../media/sessionHistory.js', import.meta.url), 'utf8');
+  const workbenchLayoutSource = readFileSync(new URL('../media/workbenchLayout.js', import.meta.url), 'utf8');
+  const taskBoardStateSource = readFileSync(new URL('../media/taskBoardState.js', import.meta.url), 'utf8');
+  const composerStateSource = readFileSync(new URL('../media/composerState.js', import.meta.url), 'utf8');
+  const providerOptionsSource = readFileSync(new URL('../media/providerOptions.js', import.meta.url), 'utf8');
 
-  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__MAIN_JS_URI__/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js\}/);
+  assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__WORKBENCH_LAYOUT_JS_URI__[\s\S]*__TASK_BOARD_STATE_JS_URI__[\s\S]*__COMPOSER_STATE_JS_URI__[\s\S]*__PROVIDER_OPTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js,workbenchLayout\.js,taskBoardState\.js,composerState\.js,providerOptions\.js\}/);
 
   assert.doesNotMatch(script, /function serializeThreadsForState\(source\)/);
   assert.match(conversationSource, /function serializeThreadsForState\(source\)/);
@@ -3261,9 +3508,27 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
   assert.doesNotMatch(script, /function threadStatus\(thread, options = \{\}\)/);
   assert.match(sessionHistorySource, /function threadStatus\(thread, options = \{\}\)/);
 
+  assert.doesNotMatch(script, /function setSessionHistoryHidden\(body, sessionHistory, hidden\)/);
+  assert.match(workbenchLayoutSource, /function setSessionHistoryHidden\(body, sessionHistory, hidden\)/);
+  assert.match(workbenchLayoutSource, /is-session-history-visible/);
+
+  assert.doesNotMatch(script, /function deriveComposerState\(options\)/);
+  assert.match(composerStateSource, /function deriveComposerState\(options\)/);
+
+  assert.doesNotMatch(script, /const ACTIVE_TASK_STATUSES = Object\.freeze/);
+  assert.doesNotMatch(script, /function visibleTasks\(source, options = \{\}\)/);
+  assert.match(taskBoardStateSource, /const ACTIVE_TASK_STATUSES = Object\.freeze/);
+  assert.match(taskBoardStateSource, /function visibleTasks\(source, options = \{\}\)/);
+  assert.match(taskBoardStateSource, /function normalizeSavedTasks\(savedTasks, options = \{\}\)/);
+  assert.match(taskBoardStateSource, /function upsertRecentTask\(source, task, options = \{\}\)/);
+
+  assert.doesNotMatch(script, /const selectableModes = modes\.filter\(\(mode\) => !mode\.disabled\)/);
+  assert.match(providerOptionsSource, /function agentModesFor\(profile\)/);
+  assert.match(providerOptionsSource, /function normalizeOptionId\(/);
+
   assert.doesNotMatch(script, /const CONTROL_CONFIG = Object\.freeze/);
   assert.match(capabilitySource, /const CONTROL_CONFIG = Object\.freeze/);
-  assert.match(script, /providerCapabilities\.optionList/);
+  assert.match(providerOptionsSource, /capabilities\.optionList/);
   assert.match(script, /providerCapabilities\.controlVisibility/);
 
   assert.doesNotMatch(script, /SAFE_LINK_PROTOCOLS/);
@@ -3682,6 +3947,122 @@ test('provider capability helper owns provider-native composer controls', () => 
   assert.equal(providerCapabilities.controlVisibility(minimalProfile, 'runtime'), false);
 });
 
+test('composer state helper owns send readiness and placeholders', () => {
+  const translate = (key, values = {}) => {
+    if (key === 'input.placeholderProvider') {
+      return `ask ${values.provider}`;
+    }
+    if (key === 'input.placeholderAction') {
+      return `${values.action} with ${values.provider}`;
+    }
+    return key;
+  };
+  const profile = { id: 'opencode', name: 'OpenCode', installed: true };
+
+  const ready = composerState.deriveComposerState({
+    profile,
+    activeId: 'opencode',
+    promptText: 'hello',
+    attachmentCount: 0,
+    selectedAction: 'freeform',
+    installedProviderCount: 1,
+    translate,
+    actionLabel: (action) => `label:${action}`,
+  });
+  assert.equal(ready.canSend, true);
+  assert.equal(ready.sendDisabled, false);
+  assert.equal(ready.placeholder, 'ask OpenCode');
+  assert.equal(ready.providerSelectDisabled, false);
+
+  const missingSelection = composerState.deriveComposerState({
+    profile,
+    activeId: 'opencode',
+    promptText: '',
+    selectedAction: 'reviewFile',
+    requiresSelection: true,
+    hasSelection: false,
+    installedProviderCount: 1,
+    translate,
+  });
+  assert.equal(missingSelection.sendDisabled, true);
+  assert.equal(missingSelection.missingSelection, true);
+  assert.equal(missingSelection.placeholder, 'quick.missingSelection');
+
+  const running = composerState.deriveComposerState({
+    profile,
+    activeId: 'opencode',
+    running: true,
+    promptText: 'hello',
+    installedProviderCount: 1,
+    translate,
+  });
+  assert.equal(running.running, true);
+  assert.equal(running.busy, true);
+  assert.equal(running.sendDisabled, true);
+  assert.equal(running.optionSelectDisabled, true);
+
+  const actionState = composerState.actionButtonState('reviewFile', ready, true, false);
+  assert.equal(actionState.disabled, true);
+  assert.equal(actionState.missingSelection, true);
+  assert.deepEqual(composerState.actionButtonState('openSettings', ready, true, false), {
+    disabled: false,
+    missingSelection: false,
+  });
+});
+
+test('provider options helper owns normalization and fallback option rules', () => {
+  const profile = {
+    id: 'opencode',
+    defaultAgentMode: 'plan',
+    agentModes: [
+      { id: 'build', label: 'Build' },
+      { id: 'plan', label: 'Plan' },
+      { id: 'disabled', label: 'Disabled', disabled: true },
+    ],
+    modelOptions: [
+      { id: 'configured', label: 'Configured' },
+      { id: 'gpt-5', label: 'GPT-5' },
+    ],
+    defaultModel: 'gpt-5',
+  };
+  const capabilities = {
+    optionList(source, control, translate) {
+      if (control === 'model') {
+        return source.modelOptions;
+      }
+      return [{ id: 'default', label: translate(`${control}.short`) }];
+    },
+    normalizeOptionId(source, value, control, translate) {
+      const options = this.optionList(source, control, translate);
+      return options.find((item) => item.id === value)?.id || options[0].id;
+    },
+  };
+
+  assert.deepEqual(providerOptions.agentModesFor(profile).map((mode) => mode.id), ['build', 'plan']);
+  assert.equal(providerOptions.normalizeAgentModeId(profile, 'missing'), 'plan');
+  assert.equal(providerOptions.mapLegacyWorkflowMode(profile, 'execute'), 'plan');
+  assert.deepEqual(providerOptions.splitAgentModeLabel('Build - Primary mode'), {
+    title: 'Build',
+    detail: 'Primary mode',
+  });
+  assert.equal(
+    providerOptions.normalizeOptionId(
+      profile,
+      'missing',
+      'modelOptions',
+      'defaultModel',
+      'model.short',
+      capabilities,
+      (key) => key
+    ),
+    'configured'
+  );
+  assert.deepEqual(
+    providerOptions.optionListFor(undefined, 'unknown', 'fallback.label', undefined, (key) => `t:${key}`),
+    [{ id: 'default', label: 't:fallback.label', description: '' }]
+  );
+});
+
 test('webview uses a ring spinner for running message status', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const runningSpinnerRule = css.match(/\.message-status\.is-running \.message-spinner\s*\{(?<body>[^}]+)\}/s)?.groups?.body ?? '';
@@ -3734,12 +4115,16 @@ test('preview webview streams markdown with real line breaks', () => {
 
 test('webview disables freeform send until the prompt has text', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const composerSource = readFileSync(new URL('../media/composerState.js', import.meta.url), 'utf8');
 
-  assert.match(script, /const hasPrompt = input\.value\.trim\(\)\.length > 0;/);
-  assert.match(script, /const hasAttachments = promptAttachments\.length > 0;/);
-  assert.match(script, /const missingCustomModel = activeModel\(\)\?\.custom && !activeCustomModel\(activeId\);/);
-  assert.match(script, /const canRunAction = hasPrompt \|\| hasAttachments \|\| selectedAction !== 'freeform';/);
-  assert.match(script, /sendBtn\.disabled = !canSend \|\| busy \|\| !canRunAction \|\| missingSelection \|\| missingCustomModel;/);
+  assert.match(script, /const state = composerState\.deriveComposerState\(\{/);
+  assert.match(script, /promptText: input\.value,/);
+  assert.match(script, /attachmentCount: promptAttachments\.length,/);
+  assert.match(script, /missingCustomModel: activeModel\(\)\?\.custom && !activeCustomModel\(activeId\),/);
+  assert.match(script, /sendBtn\.disabled = state\.sendDisabled;/);
+  assert.match(composerSource, /const hasPrompt = String\(options\.promptText \|\| ''\)\.trim\(\)\.length > 0;/);
+  assert.match(composerSource, /const canRunAction = hasPrompt \|\| hasAttachments \|\| selectedAction !== 'freeform';/);
+  assert.match(composerSource, /sendDisabled: !canSend \|\| busy \|\| !canRunAction \|\| missingSelection \|\| missingCustomModel,/);
 });
 
 test('webview and host surface the authoritative selected model for each run', () => {
@@ -3856,15 +4241,16 @@ test('webview localizes provider option labels in composer controls', () => {
 
 test('webview front-end explains and blocks selection-only actions without selection', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const composerSource = readFileSync(new URL('../media/composerState.js', import.meta.url), 'utf8');
 
   assert.match(script, /function actionRequiresSelection\(action\)/);
   assert.match(script, /function hasSelectionContext\(\)/);
-  assert.match(script, /actionRequiresSelection\(selectedAction\) && !hasSelectionContext\(\)/);
+  assert.match(script, /requiresSelection: actionRequiresSelection\(selectedAction\),/);
+  assert.match(script, /hasSelection: hasSelectionContext\(\),/);
   assert.match(script, /quick\.missingSelection/);
-  assert.match(
-    script,
-    /if \(action === 'openSettings'\) \{\s*button\.disabled = false;\s*button\.title = '';\s*return;/
-  );
+  assert.match(script, /composerState\.actionButtonState\(/);
+  assert.match(composerSource, /if \(action === 'openSettings'\) \{/);
+  assert.match(composerSource, /const missingSelection = Boolean\(requiresSelection && !hasSelection\);/);
 });
 
 test('webview confirms deleting conversation history inside the webview', () => {

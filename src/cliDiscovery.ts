@@ -14,15 +14,15 @@ import {
   OpenCodeModelMetadataMap,
   OpenCodeModelState,
   parseOpenCodeDebugConfigOutput,
-  parseOpenCodeModelMetadata,
-  parseOpenCodeModelState,
   parseOpenCodeModelsOutput,
 } from './opencodeAgents';
 import type { OpenCodeServerClient } from './openCodeServerClient';
+import { OpenCodeLocalState } from './openCodeLocalState';
 
 interface CliDiscoveryOptions {
   workspaceRoot(): string;
   openCodeClient: OpenCodeServerClient;
+  openCodeLocalState?: OpenCodeLocalState;
 }
 
 export interface CliProfileStatusOptions {
@@ -43,7 +43,11 @@ export class CliDiscovery {
     promise: Promise<CliProfile[]>;
   };
 
-  constructor(private readonly options: CliDiscoveryOptions) {}
+  private readonly openCodeLocalState: OpenCodeLocalState;
+
+  constructor(private readonly options: CliDiscoveryOptions) {
+    this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
+  }
 
   async checkInstalled(profile: CliProfile | undefined): Promise<boolean> {
     if (!profile) {
@@ -427,21 +431,11 @@ export class CliDiscovery {
   }
 
   private getOpenCodeModelState(): OpenCodeModelState {
-    const statePath = path.join(os.homedir(), '.local', 'state', 'opencode', 'model.json');
-    try {
-      return parseOpenCodeModelState(JSON.parse(fs.readFileSync(statePath, 'utf8')));
-    } catch {
-      return { recentModelIds: [], variants: {} };
-    }
+    return this.openCodeLocalState.readModelState();
   }
 
   private getOpenCodeModelMetadata(): OpenCodeModelMetadataMap {
-    const statePath = path.join(os.homedir(), '.cache', 'opencode', 'models.json');
-    try {
-      return parseOpenCodeModelMetadata(JSON.parse(fs.readFileSync(statePath, 'utf8')));
-    } catch {
-      return {};
-    }
+    return this.openCodeLocalState.readModelMetadata();
   }
 
   private getCommandVersion(profile: CliProfile): Promise<string | undefined> {

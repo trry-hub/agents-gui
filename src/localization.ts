@@ -23,7 +23,9 @@ type RuntimeMessageKey =
   | 'providerExtension.notConfigured'
   | 'providerExtension.notInstalled'
   | 'providerExtension.openFailed'
-  | 'providerAuth.unsupported';
+  | 'providerAuth.unsupported'
+  | 'mcpSettings.delete'
+  | 'mcpSettings.confirmDelete';
 
 const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>> = {
   en: {
@@ -50,6 +52,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'providerExtension.notInstalled': '{extension} is not installed. Opening the Extensions search.',
     'providerExtension.openFailed': 'Failed to open {extension}.',
     'providerAuth.unsupported': '{provider} does not expose a supported authentication command.',
+    'mcpSettings.delete': 'Delete',
+    'mcpSettings.confirmDelete': 'Delete MCP server "{name}"? This cannot be undone.',
   },
   'zh-CN': {
     'statusBar.text': '$(sparkle) Agents GUI',
@@ -75,6 +79,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'providerExtension.notInstalled': '尚未安装 {extension}，已打开扩展搜索。',
     'providerExtension.openFailed': '无法打开 {extension}。',
     'providerAuth.unsupported': '{provider} 没有可安全调用的认证命令。',
+    'mcpSettings.delete': '删除',
+    'mcpSettings.confirmDelete': '确认删除 MCP 服务器 "{name}"？此操作不可撤销。',
   },
 };
 
