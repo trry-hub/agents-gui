@@ -25,6 +25,8 @@ export class AgentSessionController {
   private readonly promptEchoBuffers = new Map<string, string>();
   private readonly noOutputNoticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly eventDisposables = new Map<string, vscode.Disposable>();
+  private readonly lastOpenCodeSessionIdByCli = new Map<string, string>();
+  private readonly lastOpenCodeOptionKeyByCli = new Map<string, string>();
   private readonly noOutputNoticeMs: number;
 
   constructor(private readonly options: AgentSessionControllerOptions) {
@@ -35,9 +37,46 @@ export class AgentSessionController {
     return this.activeSessions.get(cliId);
   }
 
+  /**
+   * Register a new session and wire its event handlers.
+   * This method ONLY registers - stopping old sessions is the caller's
+   * responsibility via replace(). This separation ensures:
+   * - Single responsibility: register() only registers, replace() only stops
+   * - No duplicate 'stopped' messages to the webview
+   * - Clear control flow for the caller
+   */
   register(session: AgentSession): void {
     this.activeSessions.set(session.cliId, session);
     this.wire(session);
+  }
+
+  /**
+   * Get the last OpenCode session ID for continuation, but only if the
+   * current optionKey matches the one used when that session was created.
+   *
+   * This prevents stale model/provider config from leaking across config
+   * changes: if the user switched model or API provider, the old session's
+   * server-side config (e.g. GLM4.6) would override the new selection, so we
+   * refuse to continue and let the caller start a fresh session instead.
+   */
+  getContinueSessionId(cliId: string, optionKey?: string): string | undefined {
+    if (!optionKey) {
+      return this.lastOpenCodeSessionIdByCli.get(cliId);
+    }
+    if (this.lastOpenCodeOptionKeyByCli.get(cliId) !== optionKey) {
+      return undefined;
+    }
+    return this.lastOpenCodeSessionIdByCli.get(cliId);
+  }
+
+  /**
+   * Clear the continuation session ID for a CLI provider.
+   * Called when the user explicitly starts a new conversation
+   * or when the continuation session becomes invalid.
+   */
+  clearContinuation(cliId: string): void {
+    this.lastOpenCodeSessionIdByCli.delete(cliId);
+    this.lastOpenCodeOptionKeyByCli.delete(cliId);
   }
 
   replace(cliId: string): void {
@@ -229,6 +268,14 @@ export class AgentSessionController {
     exitCode: number,
     openCodeSessionId: string | undefined
   ): void {
+    const resolvedSessionId = openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId();
+    if (resolvedSessionId && resolvedSessionId.startsWith('ses')) {
+      this.lastOpenCodeSessionIdByCli.set(session.cliId, resolvedSessionId);
+      if (session.optionKey) {
+        this.lastOpenCodeOptionKeyByCli.set(session.cliId, session.optionKey);
+      }
+    }
+
     const buffered = this.outputBuffers.get(session.id);
     const flushed = flushCliOutputBuffer(buffered ?? '', session.cliId);
     this.outputBuffers.delete(session.id);

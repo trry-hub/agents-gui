@@ -20,6 +20,7 @@ const WEBVIEW_ASSETS = [
   ['__TASK_BOARD_STATE_JS_URI__', ['media', 'taskBoardState.js']],
   ['__COMPOSER_STATE_JS_URI__', ['media', 'composerState.js']],
   ['__PROVIDER_OPTIONS_JS_URI__', ['media', 'providerOptions.js']],
+  ['__STATE_MANAGER_JS_URI__', ['media', 'stateManager.js']],
   ['__MAIN_JS_URI__', ['media', 'main.js']],
 ] as const;
 

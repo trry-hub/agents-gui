@@ -113,7 +113,7 @@ export function filterPromptEchoChunk(
   const combined = `${buffer}${text}`;
   const stripped = stripInternalPromptEchoWithState(combined, providerId);
   if (stripped.pending) {
-    return { text: '', buffer: combined.slice(-16_000) };
+    return { text: '', buffer: combined.slice(-65_536) };
   }
 
   if (stripped.matched) {

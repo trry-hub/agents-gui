@@ -48,6 +48,7 @@ import {
 } from './localization';
 import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
 import { OpenCodeLocalState } from './openCodeLocalState';
+import { OpenCodeConfigSync } from './openCodeConfigSync';
 import { getProviderExtensionBridge } from './providerExtensions';
 import type { HostToWebviewMessage, SetupCliProfile, WebviewToHostMessage } from './webviewProtocol';
 import { renderWebviewHtml } from './webviewHtmlRenderer';
@@ -80,6 +81,7 @@ interface SidebarProviderOptions {
   contextCollector?: AssistantContextCollector;
   extensionMode?: vscode.ExtensionMode;
   openCodeLocalState?: OpenCodeLocalState;
+  openCodeConfigSync?: OpenCodeConfigSync;
   openCodeCapability?: OpenCodeAgentCapability;
   state?: vscode.Memento;
   storageUri?: vscode.Uri;
@@ -113,6 +115,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private pendingRequests: AssistantWebviewRequest[] = [];
   private disposables: vscode.Disposable[] = [];
+  private readonly requestChainByCli = new Map<string, Promise<void>>();
   private providerClientTerminals = new Map<string, ProviderClientTerminalState>();
   private openCodeStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private openCodeStatusRefreshAttempts = new Map<string, number>();
@@ -124,6 +127,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly extensionMode: vscode.ExtensionMode;
   private readonly openCodeCapability?: OpenCodeAgentCapability;
   private readonly openCodeLocalState: OpenCodeLocalState;
+  private readonly openCodeConfigSync: OpenCodeConfigSync;
   private readonly attachmentStore: ImageAttachmentStore;
   private readonly apiProviderClient: ApiProviderClient;
   private readonly cliSetup: CliSetupController;
@@ -147,6 +151,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
     this.openCodeCapability = options.openCodeCapability;
     this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
+    this.openCodeConfigSync = options.openCodeConfigSync ?? new OpenCodeConfigSync();
     this.state = options.state;
     this.attachmentStore = options.attachmentStore ?? new ImageAttachmentStore({
       storageUri: options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui'),
@@ -186,7 +191,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     void this.sendHomeAgentSettings();
     void this.sendApiProviderSettings();
     void this.sendCommitMessageSettings();
-    void this.flushPendingRequests();
+    // Sync API provider config into opencode.json on webview init so OpenCode
+    // reads the right provider even if the user edited settings.json directly.
+    // This runs before checkProfiles so the background server picks up the
+    // new config when it starts.
+    void this.syncOpenCodeConfig().then(() => this.flushPendingRequests());
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewToHostMessage) => {
       switch (message.command) {
@@ -419,6 +428,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendProfiles(options: AgentProfileStatusOptions = {}): Promise<void> {
+    // Wait for any pending OpenCode config sync so the background server reads
+    // the up-to-date opencode.json when it starts.
+    await this.openCodeConfigSyncPromise;
     const profiles = await this.agentRuntime.getProfilesWithStatus(options);
     const installedProfiles = profiles.filter((profile) => profile.installed);
     this.profilesById.clear();
@@ -459,6 +471,35 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ...toCliSetupProfile(profile),
       webviewIcon: this.getProviderIconUris(profile.id),
     };
+  }
+
+  /**
+   * Sync the current API provider settings into opencode.json.
+   * Called on webview init and after settings save so OpenCode reads the
+   * right provider natively. Best-effort: errors are logged, not thrown.
+   *
+   * The returned promise is also stored so that profile detection can wait
+   * for it before starting the background server.
+   */
+  private syncPromise: Promise<void> = Promise.resolve();
+
+  private get openCodeConfigSyncPromise(): Promise<void> {
+    return this.syncPromise;
+  }
+
+  private syncOpenCodeConfig(): Promise<void> {
+    const run = async () => {
+      try {
+        const settings = this.filterApiProviderSettingsForInstalledAgents(
+          this.getApiProviderSettings()
+        );
+        await this.openCodeConfigSync.sync(settings);
+      } catch (error) {
+        console.warn('[agents-gui] Failed to sync OpenCode config on init:', error);
+      }
+    };
+    this.syncPromise = run();
+    return this.syncPromise;
   }
 
   private async sendApiProviderSettings(): Promise<void> {
@@ -539,6 +580,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         vscode.ConfigurationTarget.Global
       ),
     ]);
+
+    // Sync the active API provider into opencode.json so the OpenCode CLI reads
+    // it natively (like cc-switch). Best-effort: failures are logged but do not
+    // block the VS Code settings from being saved.
+    await this.syncOpenCodeConfig();
 
     await this.sendApiProviderSettings();
   }
@@ -937,7 +983,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Chain requests by CLI provider to ensure serial execution.
+   * - Same CLI provider requests execute sequentially
+   * - Different CLI providers can execute in parallel
+   * - Errors from previous requests are reported but don't block subsequent requests
+   */
   private async handleAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
+    const cliId = this.resolveCliId(message);
+    const previous = this.requestChainByCli.get(cliId) ?? Promise.resolve();
+    const chained = previous.then(
+      () => this.executeAssistantRequest(message),
+      (err) => {
+        // Report previous request error to webview, but still execute current request
+        if (err instanceof Error) {
+          this.postError(cliId, err.message);
+        }
+        return this.executeAssistantRequest(message);
+      }
+    );
+    this.requestChainByCli.set(cliId, chained);
+    try {
+      await chained;
+    } finally {
+      if (this.requestChainByCli.get(cliId) === chained) {
+        this.requestChainByCli.delete(cliId);
+      }
+    }
+  }
+
+  private async executeAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
     const cliId = this.resolveCliId(message);
     const profile = this.profilesById.get(cliId) ?? getCliProfile(cliId);
     if (!profile) {
@@ -1029,13 +1104,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         ...(agentMode.args ?? []),
         ...optionArgs,
       ];
+
+      const continueSessionId = cliId === 'opencode'
+        ? this.sessionController.getContinueSessionId(cliId, optionKey)
+        : undefined;
       const newSession = await this.agentRuntime.startPrompt(
         cliId,
         profile.inputMode === 'argument' ? prompt : undefined,
         agentArgs,
         agentMode.id,
         optionKey,
-        apiProviderRuntime.env
+        apiProviderRuntime.env,
+        continueSessionId ? { continueSessionId } : {}
       );
 
       if (!newSession) {

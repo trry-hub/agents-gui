@@ -15,6 +15,7 @@
   const taskBoardState = window.AgentsGuiTaskBoardState;
   const composerState = window.AgentsGuiComposerState;
   const providerOptions = window.AgentsGuiProviderOptions;
+  const stateManager = window.AgentsGuiStateManager;
   const normalizeMessageText = messageText.normalizeMessageText;
   const stripInlineMarkdown = messageText.stripInlineMarkdown;
   const appendInlineMarkdown = inlineMarkdown.appendInlineMarkdown;
@@ -102,6 +103,23 @@
   });
   const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState.optionDialogKinds();
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
+  const SESSION_HISTORY_MIN_WIDTH = 180;
+  const SESSION_HISTORY_MAX_WIDTH = 480;
+  const SESSION_HISTORY_DEFAULT_WIDTH = 220;
+
+  function clampSessionHistoryWidth(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) {
+      return SESSION_HISTORY_DEFAULT_WIDTH;
+    }
+    return Math.min(SESSION_HISTORY_MAX_WIDTH, Math.max(SESSION_HISTORY_MIN_WIDTH, Math.round(num)));
+  }
+
+  function applySessionHistoryWidth(width) {
+    const clamped = clampSessionHistoryWidth(width);
+    sessionHistoryWidth = clamped;
+    document.documentElement.style.setProperty('--session-history-width', `${clamped}px`);
+  }
   const DEFAULT_CONTEXT_OPTIONS = Object.freeze({
     includeWorkspace: true,
     includeCurrentFile: true,
@@ -147,6 +165,8 @@
   let activeThreadByProvider = saved.activeThreadByProvider || {};
   let contextOptions = { ...DEFAULT_CONTEXT_OPTIONS };
   let contextSummary = null;
+  // Session history panel width (px), persisted across sessions via webview state.
+  let sessionHistoryWidth = clampSessionHistoryWidth(saved.sessionHistoryWidth);
   let streamTargets = {};
   let taskBySessionId = {};
   const stoppedSessionIds = new Set();
@@ -172,6 +192,7 @@
 
   const taskBoard = document.getElementById('taskBoard');
   const sessionHistory = document.getElementById('sessionHistory');
+  const sessionHistoryResizer = document.getElementById('sessionHistoryResizer');
   const sidebar = document.getElementById('sidebar');
   const providerSelect = document.getElementById('providerSelect');
   const providerTabs = document.getElementById('providerTabs');
@@ -298,6 +319,21 @@
   let claudeActionQuery = '';
   let forceContextMenuVisible = false;
 
+  /**
+   * Filter internal prompt echo from output text
+   *
+   * This is a SECONDARY defense layer. The primary filtering happens in the
+   * backend (agentSessionController.ts -> outputFormatter.ts). This frontend
+   * filter exists as a safety net for cases where:
+   * - Backend filtering is incomplete due to chunk boundaries
+   * - Cross-chunk state is lost during buffering
+   * - Edge cases in prompt echo detection
+   *
+   * Architecture note (inspired by OpenCode):
+   * Ideally, output normalization should happen ONLY in the backend (single
+   * source of truth). This frontend filter is kept for backward compatibility
+   * and should be removed once backend filtering is proven robust.
+   */
   function filterInternalPromptEcho(text) {
     const normalized = normalizeMessageText(text);
     const firstContentIndex = normalized.search(/\S/);
@@ -350,6 +386,7 @@
       tasks: serializeTasksForState(tasks),
       activeThreadByProvider,
       contextOptions: defaultContextOptions(),
+      sessionHistoryWidth,
     });
     schedulePersistUserSelection();
   }
@@ -2799,13 +2836,97 @@
   function setSessionHistoryHidden(hidden) {
     if (typeof workbenchLayout?.setSessionHistoryHidden === 'function') {
       workbenchLayout.setSessionHistoryHidden(document.body, sessionHistory, hidden);
+    } else {
+      if (sessionHistory) {
+        sessionHistory.hidden = Boolean(hidden);
+      }
+      document.body.classList.toggle('is-session-history-hidden', Boolean(hidden));
+      document.body.classList.toggle('is-session-history-visible', !Boolean(hidden));
+    }
+    if (sessionHistoryResizer) {
+      sessionHistoryResizer.hidden = Boolean(hidden);
+    }
+  }
+
+  let sessionHistoryResizePersistTimer = undefined;
+
+  function initSessionHistoryResizer() {
+    if (!sessionHistoryResizer) {
       return;
     }
-    if (sessionHistory) {
-      sessionHistory.hidden = Boolean(hidden);
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const beginDrag = (clientX) => {
+      dragging = true;
+      startX = clientX;
+      startWidth = sessionHistoryWidth;
+      sessionHistoryResizer.classList.add('is-dragging');
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'col-resize';
+    };
+
+    const moveDrag = (clientX) => {
+      if (!dragging) {
+        return;
+      }
+      // The panel is on the left, so dragging right increases width.
+      const delta = clientX - startX;
+      applySessionHistoryWidth(startWidth + delta);
+    };
+
+    const endDrag = () => {
+      if (!dragging) {
+        return;
+      }
+      dragging = false;
+      sessionHistoryResizer.classList.remove('is-dragging');
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      persistSessionHistoryWidth();
+    };
+
+    sessionHistoryResizer.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      beginDrag(event.clientX);
+    });
+
+    document.addEventListener('mousemove', (event) => {
+      moveDrag(event.clientX);
+    });
+
+    document.addEventListener('mouseup', () => {
+      endDrag();
+    });
+
+    // Keyboard support: arrow keys to adjust width.
+    sessionHistoryResizer.addEventListener('keydown', (event) => {
+      const step = event.shiftKey ? 32 : 8;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        applySessionHistoryWidth(sessionHistoryWidth - step);
+        persistSessionHistoryWidth();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        applySessionHistoryWidth(sessionHistoryWidth + step);
+        persistSessionHistoryWidth();
+      }
+    });
+  }
+
+  function persistSessionHistoryWidth() {
+    if (sessionHistoryResizePersistTimer) {
+      clearTimeout(sessionHistoryResizePersistTimer);
     }
-    document.body.classList.toggle('is-session-history-hidden', Boolean(hidden));
-    document.body.classList.toggle('is-session-history-visible', !Boolean(hidden));
+    sessionHistoryResizePersistTimer = setTimeout(() => {
+      sessionHistoryResizePersistTimer = undefined;
+      persist();
+    }, 300);
   }
 
   function renderSessionHistory() {
@@ -2837,76 +2958,78 @@
     const body = document.createElement('div');
     body.className = 'session-history-body';
 
-    let rendered = 0;
+    // Flatten all threads across providers into a single list sorted by recency.
+    // Provider is distinguished by an inline logo on each item instead of a
+    // separate group section.
+    const allThreads = [];
     for (const providerId of historyProviderIds()) {
       const threads = sessionHistoryState.sortedThreads(threadsByProvider[providerId] || []);
-      if (threads.length === 0) {
-        continue;
-      }
-
-      const group = document.createElement('section');
-      group.className = 'session-history-group';
-      group.dataset.providerId = providerId;
-
-      const groupTitle = document.createElement('div');
-      groupTitle.className = 'session-history-group-title';
-      groupTitle.textContent = historyProviderName(providerId);
-      group.appendChild(groupTitle);
-
       threads.forEach((thread) => {
-        const status = historyStatusForThread(providerId, thread);
-        const selected = providerId === activeId && thread.id === activeThreadId(activeId);
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = [
-          'session-history-row',
-          `is-${status}`,
-          selected ? 'is-active' : '',
-        ].filter(Boolean).join(' ');
-        row.dataset.providerId = providerId;
-        row.dataset.threadId = thread.id;
-        row.setAttribute('aria-current', selected ? 'true' : 'false');
-        row.title = [
-          historyProviderName(providerId),
-          historyStatusLabel(status),
-          thread.title || i18n.t('history.untitled'),
-        ].filter(Boolean).join(' · ');
-
-        const statusDot = document.createElement('span');
-        statusDot.className = 'session-history-status-dot';
-        statusDot.setAttribute('aria-hidden', 'true');
-        row.appendChild(statusDot);
-
-        const content = document.createElement('span');
-        content.className = 'session-history-content';
-
-        const rowTitle = document.createElement('span');
-        rowTitle.className = 'session-history-row-title';
-        rowTitle.textContent = thread.title || i18n.t('history.untitled');
-        content.appendChild(rowTitle);
-
-        const meta = document.createElement('span');
-        meta.className = 'session-history-meta';
-
-        const statusLabel = document.createElement('span');
-        statusLabel.textContent = historyStatusLabel(status);
-        meta.appendChild(statusLabel);
-
-        const time = formatHistoryRelativeTime(sessionHistoryState.threadTimestamp(thread));
-        if (time) {
-          const timeLabel = document.createElement('span');
-          timeLabel.textContent = time;
-          meta.appendChild(timeLabel);
-        }
-        content.appendChild(meta);
-        row.appendChild(content);
-
-        group.appendChild(row);
-        rendered += 1;
+        allThreads.push({ providerId, thread });
       });
-
-      body.appendChild(group);
     }
+    allThreads.sort((a, b) => (
+      sessionHistoryState.threadTimestamp(b.thread) - sessionHistoryState.threadTimestamp(a.thread)
+    ));
+
+    let rendered = 0;
+    allThreads.forEach(({ providerId, thread }) => {
+      const status = historyStatusForThread(providerId, thread);
+      const selected = providerId === activeId && thread.id === activeThreadId(activeId);
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = [
+        'session-history-row',
+        `is-${status}`,
+        selected ? 'is-active' : '',
+      ].filter(Boolean).join(' ');
+      row.dataset.providerId = providerId;
+      row.dataset.threadId = thread.id;
+      row.setAttribute('aria-current', selected ? 'true' : 'false');
+      row.title = [
+        historyProviderName(providerId),
+        historyStatusLabel(status),
+        thread.title || i18n.t('history.untitled'),
+      ].filter(Boolean).join(' · ');
+
+      const providerIcon = createSessionHistoryProviderIcon(providerId);
+      row.appendChild(providerIcon);
+
+      const content = document.createElement('span');
+      content.className = 'session-history-content';
+
+      const rowTitle = document.createElement('span');
+      rowTitle.className = 'session-history-row-title';
+      rowTitle.textContent = thread.title || i18n.t('history.untitled');
+      content.appendChild(rowTitle);
+
+      const meta = document.createElement('span');
+      meta.className = 'session-history-meta';
+
+      const statusLabel = document.createElement('span');
+      statusLabel.classList.add('session-history-status-label');
+      const statusDot = document.createElement('span');
+      statusDot.classList.add('session-history-status-dot');
+      statusDot.setAttribute('aria-hidden', 'true');
+      statusLabel.appendChild(statusDot);
+      const statusText = document.createElement('span');
+      statusText.classList.add('session-history-status-text');
+      statusText.textContent = historyStatusLabel(status);
+      statusLabel.appendChild(statusText);
+      meta.appendChild(statusLabel);
+
+      const time = formatHistoryRelativeTime(sessionHistoryState.threadTimestamp(thread));
+      if (time) {
+        const timeLabel = document.createElement('span');
+        timeLabel.textContent = time;
+        meta.appendChild(timeLabel);
+      }
+      content.appendChild(meta);
+      row.appendChild(content);
+
+      body.appendChild(row);
+      rendered += 1;
+    });
 
     if (rendered === 0 && !profilesLoading) {
       setSessionHistoryHidden(true);
@@ -2923,6 +3046,26 @@
     sessionHistory.appendChild(header);
     sessionHistory.appendChild(body);
     setSessionHistoryHidden(false);
+  }
+
+  function createSessionHistoryProviderIcon(providerId) {
+    const wrapper = document.createElement('span');
+    wrapper.className = 'session-history-provider-icon';
+    wrapper.setAttribute('aria-hidden', 'true');
+
+    const profile = profiles.find((item) => item.id === providerId);
+    const iconUri = providerIconUri(profile);
+    if (iconUri) {
+      const img = document.createElement('img');
+      img.src = iconUri;
+      img.alt = '';
+      img.draggable = false;
+      wrapper.appendChild(img);
+    } else {
+      wrapper.textContent = profile?.icon || historyProviderName(providerId).slice(0, 1);
+    }
+
+    return wrapper;
   }
 
   function activateHistoryThread(providerId, threadId) {
@@ -5163,9 +5306,11 @@
     }
 
     const profile = activeProfile();
-    sidebar.hidden = profile?.id !== 'opencode';
+    const sidebarVisible = profile?.id === 'opencode';
+    sidebar.hidden = !sidebarVisible;
+    document.body.classList.toggle('is-sidebar-visible', sidebarVisible);
     sidebar.innerHTML = '';
-    if (profile?.id !== 'opencode') {
+    if (!sidebarVisible) {
       return;
     }
 
@@ -6596,6 +6741,10 @@
     codexTerminalBanner.hidden = activeId !== 'codex' || !codexRunning || taskBoardVisible;
   }
 
+  /**
+   * Main render function - called by stateManager on state changes
+   * Also called directly for backward compatibility during migration
+   */
   function renderAll() {
     const profile = activeProfile();
     document.body.dataset.provider = activeId || 'none';
@@ -6620,6 +6769,11 @@
     if (apiSettingsPage && !apiSettingsPage.hidden) {
       renderSettingsPage();
     }
+  }
+
+  // Set up stateManager render callback (progressive migration)
+  if (stateManager) {
+    stateManager.setRenderCallback(renderAll);
   }
 
   function send(action, text, preferredWorkflowMode) {
@@ -9991,5 +10145,7 @@
 
   vscode.postMessage({ command: 'checkProfiles' });
   vscode.postMessage({ command: 'refreshApiProviderSettings' });
+  applySessionHistoryWidth(sessionHistoryWidth);
+  initSessionHistoryResizer();
   renderAll();
 })();

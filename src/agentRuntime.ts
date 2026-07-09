@@ -6,6 +6,7 @@ export type AgentSession = Session;
 export interface AgentStartPromptOptions {
   attachBackgroundServer?: boolean;
   promptArgs?: string[];
+  continueSessionId?: string;
 }
 
 export interface AgentProfileStatusOptions {

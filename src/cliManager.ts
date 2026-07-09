@@ -74,6 +74,7 @@ interface ResolvedBackgroundServer {
 interface StartPromptOptions {
   attachBackgroundServer?: boolean;
   promptArgs?: string[];
+  continueSessionId?: string;
 }
 
 export class CliManager {
@@ -142,10 +143,14 @@ export class CliManager {
       ? []
       : await this.getBackgroundAttachArgs(profile, command, cwd, env);
     const promptArgs = options.promptArgs ?? profile.promptArgs;
+    const continueArgs =
+      options.continueSessionId && cliId === 'opencode' && options.continueSessionId.startsWith('ses')
+        ? ['--session', options.continueSessionId]
+        : [];
     const args =
       profile.inputMode === 'argument' && initialInput
-        ? [...promptArgs, ...backgroundAttachArgs, ...agentArgs, initialInput]
-        : [...promptArgs, ...backgroundAttachArgs, ...agentArgs];
+        ? [...promptArgs, ...backgroundAttachArgs, ...continueArgs, ...agentArgs, initialInput]
+        : [...promptArgs, ...backgroundAttachArgs, ...continueArgs, ...agentArgs];
     const onOutput = new vscode.EventEmitter<string>();
     const onStderr = new vscode.EventEmitter<string>();
     const onError = new vscode.EventEmitter<string>();
@@ -225,10 +230,19 @@ export class CliManager {
       emitOutput(data.toString(), 'stderr', 'process', session.openCodeSessionId ?? eventStream?.sessionId());
     });
 
+    let endEmitted = false;
+    const safeEmitEnd = (exitCode: number, openCodeSessionId?: string) => {
+      if (endEmitted) {
+        return;
+      }
+      endEmitted = true;
+      emitEnd(exitCode, openCodeSessionId);
+    };
+
     proc.on('close', (code) => {
       session.eventStream?.close();
       this.processRunner.killTree(proc, 'SIGTERM');
-      emitEnd(code ?? -1, session.openCodeSessionId ?? eventStream?.sessionId());
+      safeEmitEnd(code ?? -1, session.openCodeSessionId ?? eventStream?.sessionId());
       this.sessions.delete(sessionId);
     });
 
@@ -238,7 +252,7 @@ export class CliManager {
       }
       session.eventStream?.close();
       emitError(`Failed to start ${profile.name}: ${err.message}`);
-      emitEnd(-1, session.openCodeSessionId ?? eventStream?.sessionId());
+      safeEmitEnd(-1, session.openCodeSessionId ?? eventStream?.sessionId());
       this.sessions.delete(sessionId);
     });
 
@@ -254,7 +268,8 @@ export class CliManager {
   sendInput(sessionId: string, text: string, closeAfterWrite = false): boolean {
     const session = this.sessions.get(sessionId);
     if (!session || !session.process.stdin || session.process.stdin.destroyed) { return false; }
-    session.process.stdin.write(text + '\n');
+    const normalized = `${String(text || '').replace(/\n+$/, '')}\n`;
+    session.process.stdin.write(normalized);
     if (closeAfterWrite) {
       session.process.stdin.end();
     }
@@ -506,6 +521,7 @@ export class CliManager {
     }
 
     let proc: ChildProcess | undefined;
+    let procExitedEarly = false;
     try {
       proc = this.processRunner.spawnBackgroundProcess(command, args, cwd, env);
       const backgroundProc = proc;
@@ -515,6 +531,7 @@ export class CliManager {
       this.backgroundServers.set(key, state);
 
       const clearState = () => {
+        procExitedEarly = true;
         this.processRunner.killTree(backgroundProc, 'SIGTERM');
         const latest = this.backgroundServers.get(key);
         if (latest?.process === backgroundProc) {
@@ -526,6 +543,10 @@ export class CliManager {
       proc.on('error', clearState);
     } catch {
       this.backgroundServers.delete(key);
+      return false;
+    }
+
+    if (procExitedEarly) {
       return false;
     }
 

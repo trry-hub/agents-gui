@@ -159,15 +159,54 @@ body.is-session-history-hidden .app-shell {
 
 body.is-session-history-visible .app-shell {
   grid-template-areas:
-    "session-history toolbar"
-    "session-history main-content"
-    "session-history composer";
-  grid-template-columns: minmax(184px, 220px) minmax(0, 1fr);
+    "session-history session-history-resizer toolbar"
+    "session-history session-history-resizer main-content"
+    "session-history session-history-resizer composer";
+  grid-template-columns: var(--session-history-width, 220px) 6px minmax(0, 1fr);
 }
 
 body.is-session-history-visible .toolbar,
 body.is-session-history-visible .main-content,
 body.is-session-history-visible .composer {
+  grid-column: 3;
+}
+
+.session-history-resizer {
+  grid-area: session-history-resizer;
+  grid-column: 2;
+  grid-row: 1 / 4;
+  width: 6px;
+  min-width: 6px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 2;
+  display: none;
+}
+
+body.is-session-history-visible .session-history-resizer:not([hidden]) {
+  display: block;
+}
+
+.session-history-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.session-history-resizer:hover::after,
+.session-history-resizer.is-dragging::after,
+.session-history-resizer:focus-visible::after {
+  background: color-mix(in srgb, var(--assistant-accent) 60%, transparent);
+}
+
+body.is-session-history-visible .session-history-resizer {
   grid-column: 2;
 }
 
@@ -252,9 +291,9 @@ body.is-session-history-visible .session-history {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 4px 4px 8px;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--vscode-scrollbarSlider-background) 72%, transparent) transparent;
 }
@@ -291,18 +330,38 @@ body.is-session-history-visible .session-history {
 
 .session-history-row {
   min-width: 0;
-  min-height: 32px;
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  padding: 4px 6px;
+  gap: 8px;
+  padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--assistant-foreground);
   background: transparent;
   cursor: pointer;
   text-align: left;
+}
+
+.session-history-provider-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--assistant-panel) 70%, transparent);
+  overflow: hidden;
+}
+
+.session-history-provider-icon img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
 }
 
 .session-history-row:hover,
@@ -357,41 +416,48 @@ body.is-session-history-visible .session-history {
 
 .session-history-content {
   min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.session-history-row-title,
-.session-history-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .session-history-row-title {
-  font-size: 12px;
-  font-weight: 560;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 .session-history-meta {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   color: var(--assistant-muted);
   font-size: 10.5px;
+  white-space: nowrap;
 }
 
-.session-history-meta span {
+.session-history-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.session-history-meta span:last-child {
-  flex: 0 0 auto;
+.session-history-status-text {
+  display: none;
+}
+
+.session-history-row:hover .session-history-status-text,
+.session-history-row:focus-visible .session-history-status-text {
+  display: inline;
 }
 
 .session-history-empty {
@@ -543,6 +609,12 @@ body.is-session-history-visible .session-history {
   min-width: 0;
   flex: 1 1 auto;
   position: relative;
+}
+
+/* Hide the thread dropdown when the OpenCode sidebar is visible — the sidebar
+   already shows session info, so the toolbar dropdown is redundant. */
+body.is-sidebar-visible .thread-select {
+  display: none;
 }
 
 .thread-select select {
@@ -1100,12 +1172,24 @@ body.is-session-history-visible .session-history {
   background: var(--assistant-surface);
 }
 
+/* Settings page overlay - highest priority, hides all other content */
+/* Use compound selectors to ensure higher specificity than session-history-visible rules */
+body.is-api-settings-open.is-session-history-visible .toolbar,
+body.is-api-settings-open.is-session-history-visible .main-content,
+body.is-api-settings-open.is-session-history-visible .session-history,
+body.is-api-settings-open.is-session-history-visible .sidebar,
+body.is-api-settings-open.is-session-history-visible .composer,
+body.is-api-settings-open[data-provider="opencode"] .toolbar,
+body.is-api-settings-open[data-provider="opencode"] .main-content,
+body.is-api-settings-open[data-provider="opencode"] .session-history,
+body.is-api-settings-open[data-provider="opencode"] .sidebar,
+body.is-api-settings-open[data-provider="opencode"] .composer,
 body.is-api-settings-open .toolbar,
 body.is-api-settings-open .main-content,
 body.is-api-settings-open .session-history,
 body.is-api-settings-open .sidebar,
 body.is-api-settings-open .composer {
-  display: none;
+  display: none !important;
 }
 
 .api-settings-header {
@@ -4383,10 +4467,10 @@ body[data-provider="opencode"] .app-shell {
 
 body[data-provider="opencode"].is-session-history-visible .app-shell {
   grid-template-areas:
-    "session-history toolbar sidebar"
-    "session-history main-content sidebar"
-    "session-history composer sidebar";
-  grid-template-columns: minmax(184px, 220px) minmax(0, 1fr) 340px;
+    "session-history session-history-resizer toolbar sidebar"
+    "session-history session-history-resizer main-content sidebar"
+    "session-history session-history-resizer composer sidebar";
+  grid-template-columns: var(--session-history-width, 220px) 6px minmax(0, 1fr) 340px;
 }
 
 body[data-provider="opencode"] .toolbar,
@@ -4403,14 +4487,18 @@ body[data-provider="opencode"].is-session-history-visible .session-history {
   grid-column: 1;
 }
 
-body[data-provider="opencode"].is-session-history-visible .toolbar,
-body[data-provider="opencode"].is-session-history-visible .main-content,
-body[data-provider="opencode"].is-session-history-visible .composer {
+body[data-provider="opencode"].is-session-history-visible .session-history-resizer {
   grid-column: 2;
 }
 
-body[data-provider="opencode"].is-session-history-visible .sidebar {
+body[data-provider="opencode"].is-session-history-visible .toolbar,
+body[data-provider="opencode"].is-session-history-visible .main-content,
+body[data-provider="opencode"].is-session-history-visible .composer {
   grid-column: 3;
+}
+
+body[data-provider="opencode"].is-session-history-visible .sidebar {
+  grid-column: 4;
 }
 
 body[data-provider="opencode"].is-session-history-hidden .app-shell {
@@ -6412,10 +6500,10 @@ textarea:disabled {
 
   body[data-provider="opencode"].is-session-history-visible .app-shell {
     grid-template-areas:
-      "session-history toolbar"
-      "session-history main-content"
-      "session-history composer";
-    grid-template-columns: minmax(176px, 210px) minmax(0, 1fr);
+      "session-history session-history-resizer toolbar"
+      "session-history session-history-resizer main-content"
+      "session-history session-history-resizer composer";
+    grid-template-columns: var(--session-history-width, 210px) 6px minmax(0, 1fr);
   }
 
   body[data-provider="opencode"] .toolbar,
@@ -6428,10 +6516,14 @@ textarea:disabled {
     grid-column: 1;
   }
 
+  body[data-provider="opencode"].is-session-history-visible .session-history-resizer {
+    grid-column: 2;
+  }
+
   body[data-provider="opencode"].is-session-history-visible .toolbar,
   body[data-provider="opencode"].is-session-history-visible .main-content,
   body[data-provider="opencode"].is-session-history-visible .composer {
-    grid-column: 2;
+    grid-column: 3;
   }
 
   body[data-provider="opencode"].is-session-history-hidden .app-shell {

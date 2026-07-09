@@ -758,7 +758,7 @@ test('cli manager warms and attaches background CLI servers when available', () 
   );
   assert.match(
     source,
-    /\[\.\.\.promptArgs,\s*\.\.\.backgroundAttachArgs,\s*\.\.\.agentArgs,\s*initialInput\]/s
+    /\[\.\.\.promptArgs,\s*\.\.\.backgroundAttachArgs,\s*\.\.\.continueArgs,\s*\.\.\.agentArgs,\s*initialInput\]/s
   );
   assert.match(source, /resolveBackgroundServerCandidates/);
   assert.match(source, /expandBackgroundServerArg/);
@@ -1248,7 +1248,7 @@ test('webview allocates the OpenCode history column at medium widths only when h
   );
   assert.match(
     css,
-    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";\s*grid-template-columns:\s*minmax\(176px, 210px\) minmax\(0, 1fr\);/s,
+    /@media \(max-width: 1100px\)\s*\{[\s\S]*body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*grid-template-areas:\s*"session-history session-history-resizer toolbar"\s*"session-history session-history-resizer main-content"\s*"session-history session-history-resizer composer";\s*grid-template-columns:\s*var\(--session-history-width[^)]*\)\s*6px\s*minmax\(0, 1fr\);/s,
   );
   assert.match(
     css,
@@ -1450,7 +1450,7 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(script, /document\.body\.dataset\.provider = activeId \|\| 'none';/);
   assert.match(script, /const sidebar = document\.getElementById\('sidebar'\);/);
   assert.match(script, /function renderOpenCodeSidebar\(\)/);
-  assert.match(script, /sidebar\.hidden = profile\?\.id !== 'opencode';/);
+  assert.match(script, /sidebar\.hidden = !sidebarVisible;/);
   assert.match(script, /appendOpenCodeBlock\(shell, 'Context', openCodeContextMetrics\(profile\), \{ key: 'context' \}\)/);
   assert.match(script, /appendOpenCodeBlock\(shell, 'MCP', openCodeMcpLines\(\), \{/);
   assert.match(script, /action: \(\) => showOpenCodeStatusDialog\('mcp'\)/);
@@ -1480,9 +1480,9 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /\.session-history\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\.is-session-history-visible \.session-history:not\(\[hidden\]\):not\(:empty\)\s*\{\s*[^}]*display:\s*flex;/s);
   assert.match(css, /\.session-history\[hidden\]\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
-  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\);/s);
-  assert.match(css, /body\.is-session-history-visible \.toolbar,\s*body\.is-session-history-visible \.main-content,\s*body\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*2;/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar"\s*"session-history session-history-resizer main-content"\s*"session-history session-history-resizer composer";/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*var\(--session-history-width,[^)]*\)\s*6px\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /body\.is-session-history-visible \.toolbar,\s*body\.is-session-history-visible \.main-content,\s*body\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*3;/s);
   assert.match(css, /body\.is-session-history-visible \.session-history\s*\{\s*[^}]*grid-column:\s*1;/s);
   assert.match(css, /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s);
   assert.match(css, /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
@@ -1490,11 +1490,11 @@ test('webview composer follows the selected provider identity', () => {
   assert.match(css, /\.sidebar\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
   assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
-  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
-  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(184px,\s*220px\) minmax\(0,\s*1fr\) 340px;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar sidebar"\s*"session-history session-history-resizer main-content sidebar"\s*"session-history session-history-resizer composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*var\(--session-history-width,[^)]*\)\s*6px\s*minmax\(0,\s*1fr\) 340px;/s);
   assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.session-history\s*\{\s*[^}]*grid-column:\s*1;/s);
-  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.toolbar,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.main-content,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*2;/s);
-  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.sidebar\s*\{\s*[^}]*grid-column:\s*3;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.toolbar,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.main-content,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*3;/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.sidebar\s*\{\s*[^}]*grid-column:\s*4;/s);
   assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
   assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s);
   assert.match(css, /body\[data-provider="opencode"\] \.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
@@ -1551,7 +1551,7 @@ test('opencode sidebar collapses by default at compact widths', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
 
   assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
-  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";[\s\S]*?grid-template-columns:\s*minmax\(176px,\s*210px\) minmax\(0,\s*1fr\);/s);
+  assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"session-history session-history-resizer toolbar"\s*"session-history session-history-resizer main-content"\s*"session-history session-history-resizer composer";[\s\S]*?grid-template-columns:\s*var\(--session-history-width[^)]*\)\s*6px\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{[\s\S]*?grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.main-content\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?border-right:\s*0;/s);
   assert.match(css, /@media \(max-width:\s*1100px\)\s*\{[\s\S]*?body\[data-provider="opencode"\] \.sidebar\s*\{[\s\S]*?display:\s*none;/s);
@@ -2180,7 +2180,7 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(sidebarSource, /section,\s*ok:\s*true/);
   assert.match(sidebarSource, /section,\s*ok:\s*false/);
   assert.match(css, /\.api-settings-page\s*\{\s*[^}]*grid-area:\s*1 \/ 1 \/ -1 \/ -1;/s);
-  assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.session-history,\s*body\.is-api-settings-open \.sidebar,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none;/s);
+  assert.match(css, /body\.is-api-settings-open \.toolbar,\s*body\.is-api-settings-open \.main-content,\s*body\.is-api-settings-open \.session-history,\s*body\.is-api-settings-open \.sidebar,\s*body\.is-api-settings-open \.composer\s*\{\s*[^}]*display:\s*none\s*!important;/s);
   assert.match(css, /\.settings-save-status\s*\{/);
   assert.match(css, /\.settings-save-status\.is-success\s*\{[^}]*font-weight:\s*600;/s);
   assert.match(css, /\.settings-save-status\.is-info\s*\{/);
@@ -2418,9 +2418,9 @@ test('webview pins composer to the bottom when task board is hidden', () => {
   assert.match(css, /\.toolbar\s*\{\s*[^}]*grid-area:\s*toolbar;/s);
   assert.match(css, /\.session-history\s*\{\s*[^}]*grid-area:\s*session-history;/s);
   assert.match(css, /\.sidebar\s*\{\s*[^}]*grid-area:\s*sidebar;/s);
-  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar"\s*"session-history session-history-resizer main-content"\s*"session-history session-history-resizer composer";/s);
   assert.match(css, /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s);
-  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar sidebar"\s*"session-history main-content sidebar"\s*"session-history composer sidebar";/s);
+  assert.match(css, /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar sidebar"\s*"session-history session-history-resizer main-content sidebar"\s*"session-history session-history-resizer composer sidebar";/s);
   assert.doesNotMatch(css, /\.task-board\s*\{\s*[^}]*grid-area:/s);
   assert.match(css, /\.main-content\s*\{\s*[^}]*grid-area:\s*main-content;/s);
   assert.match(css, /\.messages\s*\{\s*[^}]*grid-area:\s*auto;/s);
@@ -2489,7 +2489,7 @@ test('webview refreshes context after a concrete provider is active', () => {
   assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
   assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
-  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*renderAll\(\);/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*renderAll\(\);/);
 });
 
 test('webview empty state is visible in large blank panels', () => {
@@ -2598,7 +2598,7 @@ test('webview renders a provider-wide session history list with derived states',
   assert.match(css, /\.session-history\s*\{\s*[^}]*border-right:\s*1px solid var\(--assistant-border\);/s);
   assert.match(css, /\.session-history\s*\{\s*[^}]*display:\s*none;/s);
   assert.match(css, /body\.is-session-history-visible \.session-history:not\(\[hidden\]\):not\(:empty\)\s*\{\s*[^}]*display:\s*flex;/s);
-  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history toolbar"\s*"session-history main-content"\s*"session-history composer";/s);
+  assert.match(css, /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar"\s*"session-history session-history-resizer main-content"\s*"session-history session-history-resizer composer";/s);
   assert.match(css, /\.session-history-row\s*\{/);
   assert.match(css, /\.session-history-row\.is-running \.session-history-status-dot\s*\{/);
   assert.match(css, /\.session-history-row\.is-answered \.session-history-status-dot\s*\{/);
@@ -5298,6 +5298,98 @@ test('context collector preserves multi-root workspace folders instead of only a
     ]
   );
   assert.equal(snapshot.activeFile?.relativePath, '第四期prd.md');
+});
+
+test('compactHistoryText does not produce lone surrogates when truncating emoji text', () => {
+  const {
+    buildAssistantPrompt,
+  } = require('../.test-dist/promptBuilder.js');
+
+  const emoji = '🎯';
+  const prefix = 'a'.repeat(1196);
+  const longText = prefix + emoji + 'b'.repeat(200);
+  const history = [{ role: 'user', text: longText }];
+
+  const prompt = buildAssistantPrompt({
+    provider: { id: 'claude', name: 'Claude' },
+    mode: 'agent',
+    agentMode: { id: 'build', label: 'build', instruction: '' },
+    runtime: {
+      modelId: 'm', modelLabel: 'M', modelVariant: '',
+      runtimeId: 'r', runtimeLabel: 'R',
+      permissionModeId: 'p', permissionModeLabel: 'P',
+    },
+    action: 'freeform',
+    message: 'test',
+    attachments: [],
+    conversationHistory: history,
+    context: { diagnostics: [] },
+    locale: 'en',
+  });
+
+  const historyLine = prompt.split('\n').find((l) => l.includes('User: a'));
+  assert.ok(historyLine, 'history line should exist');
+  assert.ok(!historyLine.endsWith('\uD83C'), 'should not end with a lone high surrogate');
+  assert.ok(historyLine.endsWith('...'), 'should end with truncation marker');
+});
+
+test('fencedBlock preserves inner triple backticks without lossy escaping', () => {
+  const {
+    buildAssistantPrompt,
+  } = require('../.test-dist/promptBuilder.js');
+
+  const codeWithFence = 'outer\n```\ninner code\n```\nrest';
+  const prompt = buildAssistantPrompt({
+    provider: { id: 'claude', name: 'Claude' },
+    mode: 'agent',
+    agentMode: { id: 'build', label: 'build', instruction: '' },
+    runtime: {
+      modelId: 'm', modelLabel: 'M', modelVariant: '',
+      runtimeId: 'r', runtimeLabel: 'R',
+      permissionModeId: 'p', permissionModeLabel: 'P',
+    },
+    action: 'freeform',
+    message: 'test',
+    attachments: [],
+    conversationHistory: [],
+    context: {
+      diagnostics: [],
+      activeFile: {
+        relativePath: 'test.ts',
+        languageId: 'typescript',
+        lineCount: 5,
+        text: codeWithFence,
+        truncated: false,
+      },
+    },
+    locale: 'en',
+  });
+
+  assert.ok(prompt.includes('inner code'), 'inner code content must be preserved');
+  assert.ok(prompt.includes('```'), 'original triple backticks must be intact');
+  assert.ok(!prompt.includes('``\\`'), 'lossy escape artifact must not appear');
+  assert.ok(/~{3,}typescript/.test(prompt), 'should use tilde fence for outer block');
+});
+
+test('filterPromptEchoChunk buffer accommodates prompts larger than 16K', () => {
+  const {
+    filterPromptEchoChunk,
+  } = require('../.test-dist/outputFormatter.js');
+
+  const promptStart = 'You are an AI coding assistant embedded in VS Code.';
+  const midMarker = 'Response requirements:';
+  const promptEnd = '- Risks and caveats: call out assumptions, follow-up work, and edge cases.';
+  const fullPromptEcho = promptStart + '\n' + midMarker + '\n' + 'x'.repeat(30000) + '\n' + promptEnd;
+
+  const chunk1 = fullPromptEcho.slice(0, 20000);
+  const chunk2 = fullPromptEcho.slice(20000) + '\nAI reply here';
+
+  const first = filterPromptEchoChunk(chunk1, 'opencode', '');
+  assert.equal(first.text, '', 'should buffer while end marker has not arrived');
+  assert.ok(first.buffer.length > 16000, 'buffer should retain more than 16K of partial echo');
+
+  const second = filterPromptEchoChunk(chunk2, 'opencode', first.buffer);
+  assert.ok(second.text.includes('AI reply here'), 'should emit real output once end marker arrives');
 });
 
 function createFakeVscode(workspaceFolder, activeTextEditor, options = {}) {

@@ -267,7 +267,19 @@ function renderConversationHistory(history: AssistantConversationHistoryMessage[
 
 function compactHistoryText(value: string): string {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
-  return text.length > 1200 ? `${text.slice(0, 1197)}...` : text;
+  return text.length > 1200 ? `${safeSlice(text, 1197)}...` : text;
+}
+
+function safeSlice(text: string, max: number): string {
+  if (text.length <= max) {
+    return text;
+  }
+  let end = max;
+  const preceding = text.charCodeAt(end - 1);
+  if (preceding >= 0xD800 && preceding <= 0xDBFF) {
+    end -= 1;
+  }
+  return text.slice(0, end);
 }
 
 export function renderAssistantAttachments(attachments: AssistantImageAttachment[] = []): string {
@@ -290,11 +302,25 @@ export function renderAssistantAttachments(attachments: AssistantImageAttachment
 
 function fencedBlock(languageId: string, text: string): string {
   const fenceLanguage = languageId && /^[a-zA-Z0-9_-]+$/.test(languageId) ? languageId : '';
-  return `\`\`\`${fenceLanguage}\n${escapeFence(text)}\n\`\`\``;
+  const fence = chooseFenceMarker(text);
+  return `${fence}${fenceLanguage}\n${text}\n${fence}`;
 }
 
-function escapeFence(text: string): string {
-  return text.replace(/```/g, '``\\`');
+function chooseFenceMarker(text: string): string {
+  let maxRun = 2;
+  const backtickRuns = text.match(/`{3,}/g);
+  if (backtickRuns) {
+    for (const run of backtickRuns) {
+      maxRun = Math.max(maxRun, run.length);
+    }
+  }
+  const tildeRuns = text.match(/~{3,}/g);
+  if (tildeRuns) {
+    for (const run of tildeRuns) {
+      maxRun = Math.max(maxRun, run.length);
+    }
+  }
+  return '~'.repeat(maxRun + 1);
 }
 
 function formatBytes(size: number): string {
