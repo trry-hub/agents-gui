@@ -45,6 +45,7 @@ export interface ThreadItem {
   label?: string;
   meta?: string;
   attachments?: unknown[];
+  choices?: Array<{ label: string; prompt: string }>;
   activity?: ThreadActivity;
   startedAt: number;
   completedAt?: number;
@@ -89,4 +90,3 @@ export interface ThreadEventEnvelope {
   sequence: number;
   event: ThreadEvent;
 }
-

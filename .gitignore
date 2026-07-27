@@ -8,3 +8,5 @@ dist/
 *.vsix
 WCDB_Contact*.sqlite*
 .aider*
+media/codex-renderer.js
+media/codex-renderer.js.map
