@@ -34,11 +34,15 @@ export const ThreadItemRenderer = memo(function ThreadItemRenderer({
       return <ActivityItem item={item} kind="tool" />;
     case 'approval-request':
       return <ApprovalItem item={item} />;
+    case 'system-message':
+      return <SystemMessageItem item={item} />;
     case 'system-error':
       return <ErrorItem item={item} />;
     case 'proposed-plan':
     case 'todo-list':
       return <StructuredTextItem item={item} renderMarkdown={renderMarkdown} />;
+    default:
+      return assertNever(item.type);
   }
 });
 
@@ -77,6 +81,7 @@ function MessageItem({
       <div className="message-bubble">
         {item.meta ? <div className="message-meta">{item.meta}</div> : null}
         <MarkdownContent item={item} renderMarkdown={renderMarkdown} />
+        <MessageAttachments attachments={item.attachments} />
         {item.status === 'running' ? (
           <div className="message-status is-running" aria-live="polite">
             <span className="message-spinner" aria-hidden="true" />
@@ -86,6 +91,57 @@ function MessageItem({
       </div>
     </article>
   );
+}
+
+function MessageAttachments({ attachments }: { attachments?: unknown[] }) {
+  const normalized = (attachments ?? []).flatMap((attachment) => {
+    if (!attachment || typeof attachment !== 'object') {
+      return [];
+    }
+    const value = attachment as Record<string, unknown>;
+    if (value.kind !== 'image') {
+      return [];
+    }
+    const name =
+      typeof value.name === 'string' && value.name.trim()
+        ? value.name.trim()
+        : 'Image';
+    const size = Number(value.size);
+    return [
+      {
+        name,
+        size: Number.isFinite(size) && size > 0 ? size : 0,
+        path: typeof value.path === 'string' ? value.path : '',
+      },
+    ];
+  });
+  if (normalized.length === 0) {
+    return null;
+  }
+  return (
+    <div className="message-attachments">
+      {normalized.map((attachment, index) => (
+        <div
+          className="message-attachment"
+          key={`${attachment.path}:${attachment.name}:${index}`}
+          title={attachment.path || attachment.name}
+        >
+          {attachment.name} · {formatBytes(attachment.size)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    const megabytes = bytes / (1024 * 1024);
+    return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+  return `${Math.max(0, Math.round(bytes))} B`;
 }
 
 function MarkdownContent({
@@ -194,6 +250,20 @@ function ErrorItem({ item }: { item: ThreadItem }) {
   );
 }
 
+function SystemMessageItem({ item }: { item: ThreadItem }) {
+  return (
+    <article
+      className="message system"
+      data-item-id={item.id}
+      data-item-type={item.type}
+    >
+      <div className="message-bubble">
+        <div className="message-content">{item.content ?? item.label}</div>
+      </div>
+    </article>
+  );
+}
+
 function StructuredTextItem({
   item,
   renderMarkdown,
@@ -213,3 +283,6 @@ function StructuredTextItem({
   );
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unsupported thread item type: ${String(value)}`);
+}

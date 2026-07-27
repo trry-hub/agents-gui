@@ -72,15 +72,21 @@ export function createDeltaScheduler(options: DeltaSchedulerOptions): DeltaSched
       const key = deltaKey(envelope);
       const existing = pending.get(key);
       if (existing && isDelta(existing)) {
+        const deltaSegments = [
+          ...(existing.deltaSegments ?? [
+            { sequence: existing.sequence, delta: existing.event.delta },
+          ]),
+          ...(envelope.deltaSegments ?? [
+            { sequence: envelope.sequence, delta: envelope.event.delta },
+          ]),
+        ];
         pending.set(key, {
           ...envelope,
-          coalescedSequences: [
-            ...(existing.coalescedSequences ?? [existing.sequence]),
-            ...(envelope.coalescedSequences ?? [envelope.sequence]),
-          ],
+          coalescedSequences: deltaSegments.map(({ sequence }) => sequence),
+          deltaSegments,
           event: {
             ...envelope.event,
-            delta: `${existing.event.delta}${envelope.event.delta}`,
+            delta: deltaSegments.map(({ delta }) => delta).join(''),
           },
         });
       } else {

@@ -16,6 +16,7 @@ import type {
   LegacyThread,
   TurnState,
 } from './conversationReducer';
+import { projectLegacyThreads } from './conversationReducer';
 import {
   createConversationStore,
   type ConversationStore,
@@ -123,8 +124,14 @@ export function createCodexRendererController(
     setActiveThread: store.setActiveThread,
     deleteThread: store.deleteThread,
     serialize: store.getSnapshot,
-    onThreadSwitch: persistence.onThreadSwitch,
-    onHidden: persistence.onHidden,
+    onThreadSwitch() {
+      scheduler.flush();
+      persistence.onThreadSwitch();
+    },
+    onHidden() {
+      scheduler.flush();
+      persistence.onHidden();
+    },
     dispose() {
       scheduler.dispose();
       persistence.dispose();
@@ -291,13 +298,13 @@ export function VirtualTurnList({
       }
       scrollRoot.scrollTop = compensateScrollOffset({
         scrollTop: scrollRoot.scrollTop,
-        anchorIndex: range.start,
+        anchorIndex: range.firstVisible,
         changedIndex: turnIndex,
         previousHeight,
         nextHeight,
       });
     },
-    [range.start, scrollRoot]
+    [range.firstVisible, scrollRoot]
   );
 
   const visibleTurnIds =
@@ -497,11 +504,25 @@ export interface CodexRendererGlobalApi {
   setActiveThread(providerId: string, threadId: string): boolean;
   deleteThread(providerId: string, threadId: string): boolean;
   serialize(): ConversationSnapshot | undefined;
+  projectLegacySnapshot(
+    snapshot: ConversationSnapshot | undefined
+  ): Record<string, LegacyThread[]> | undefined;
+  appendFeedback(
+    providerId: string,
+    threadId: string,
+    content: string,
+    failed?: boolean
+  ): void;
   onHidden(): void;
   dispose(): void;
 }
 
 let mountedRenderer: MountedRenderer | undefined;
+const localFeedbackStreamId = `webview:${Date.now().toString(36)}:${Math.random()
+  .toString(36)
+  .slice(2)}`;
+const localFeedbackSequenceByThread = new Map<string, number>();
+let localFeedbackCounter = 0;
 
 export const codexRendererApi: CodexRendererGlobalApi = {
   mount(options) {
@@ -566,6 +587,72 @@ export const codexRendererApi: CodexRendererGlobalApi = {
   },
   serialize() {
     return mountedRenderer?.controller.serialize();
+  },
+  projectLegacySnapshot(snapshot) {
+    return snapshot?.version === 2 ? projectLegacyThreads(snapshot) : undefined;
+  },
+  appendFeedback(providerId, threadId, content, failed = false) {
+    if (!mountedRenderer || !providerId || !threadId || !content.trim()) {
+      return;
+    }
+    const { controller } = mountedRenderer;
+    controller.ensureThread(providerId, threadId);
+    const snapshot = controller.store.getSnapshot();
+    const thread = snapshot.threadsById[threadId];
+    const lastTurnId = thread?.turnOrder.at(-1);
+    const lastTurn = lastTurnId ? thread.turnsById[lastTurnId] : undefined;
+    const turnId =
+      lastTurn?.status === 'running'
+        ? lastTurn.id
+        : `feedback:${Date.now().toString(36)}:${++localFeedbackCounter}`;
+    const nextEnvelope = (
+      event: ThreadEventEnvelope['event']
+    ): ThreadEventEnvelope => {
+      const sequence =
+        (localFeedbackSequenceByThread.get(threadId) ?? 0) + 1;
+      localFeedbackSequenceByThread.set(threadId, sequence);
+      return {
+        command: 'threadEvent',
+        providerId,
+        threadId,
+        streamId: localFeedbackStreamId,
+        sequence,
+        event,
+      };
+    };
+    if (!lastTurn || lastTurn.status !== 'running') {
+      controller.dispatch(
+        nextEnvelope({
+          type: 'turn/started',
+          turn: { id: turnId, status: 'running', startedAt: Date.now() },
+        })
+      );
+    }
+    const now = Date.now();
+    controller.dispatch(
+      nextEnvelope({
+        type: 'item/started',
+        item: {
+          id: `${turnId}:feedback:${++localFeedbackCounter}`,
+          turnId,
+          type: failed ? 'system-error' : 'system-message',
+          status: failed ? 'failed' : 'completed',
+          content,
+          startedAt: now,
+          completedAt: now,
+        },
+      })
+    );
+    if (!lastTurn || lastTurn.status !== 'running') {
+      controller.dispatch(
+        nextEnvelope({
+          type: 'turn/completed',
+          turnId,
+          status: 'completed',
+          completedAt: now,
+        })
+      );
+    }
   },
   onHidden() {
     mountedRenderer?.controller.onHidden();

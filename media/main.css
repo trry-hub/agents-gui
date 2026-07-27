@@ -6859,12 +6859,20 @@ textarea:disabled {
   width: 100%;
   min-width: 0;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 }
 
-.conversation-turn,
-.conversation-turn-measure {
+.conversation-turn {
   display: contents;
+}
+
+.conversation-turn-measure {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  padding-bottom: 6px;
 }
 
 .conversation-virtual-spacer {

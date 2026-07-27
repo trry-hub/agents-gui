@@ -12,6 +12,7 @@ export type ThreadItemType =
   | 'todo-list'
   | 'mcp-tool-call'
   | 'approval-request'
+  | 'system-message'
   | 'system-error';
 
 export interface ThreadDescriptor {
@@ -87,7 +88,9 @@ export interface ThreadEventEnvelope {
   command: 'threadEvent';
   providerId: string;
   threadId: string;
+  streamId?: string;
   sequence: number;
   coalescedSequences?: number[];
+  deltaSegments?: Array<{ sequence: number; delta: string }>;
   event: ThreadEvent;
 }

@@ -91,4 +91,3 @@ function isRunningLifecycle(envelope: ThreadEventEnvelope): boolean {
       return false;
   }
 }
-

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   ThreadActivity,
   ThreadEvent,
@@ -19,6 +20,8 @@ interface LegacyLifecycleMessage {
   actionLabel?: string;
   agentModeLabel?: string;
   agentMode?: string;
+  apiProviderWarning?: string;
+  ok?: boolean;
 }
 
 interface ActiveTurnBinding {
@@ -31,36 +34,70 @@ interface ActiveTurnBinding {
 
 export interface ThreadEventAdapterOptions {
   now?: () => number;
+  streamId?: string;
 }
+
+const MAX_REPLAY_ENVELOPES = 4096;
 
 export class ThreadEventAdapter {
   private readonly now: () => number;
+  private readonly streamId: string;
   private readonly sequenceByThread = new Map<string, number>();
   private readonly activeTurnBySession = new Map<string, ActiveTurnBinding>();
+  private readonly replayBuffer: ThreadEventEnvelope[] = [];
   private turnCounter = 0;
+  private feedbackCounter = 0;
 
   constructor(options: ThreadEventAdapterOptions = {}) {
     this.now = options.now ?? Date.now;
+    this.streamId = clean(options.streamId) || randomUUID();
   }
 
   accept(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {
+    let envelopes: ThreadEventEnvelope[];
     switch (message.command) {
       case 'requestStarted':
-        return this.startTurn(message);
+        envelopes = this.startTurn(message);
+        break;
       case 'output':
-        return this.forwardOutput(message);
+        envelopes = this.forwardOutput(message);
+        break;
       case 'sessionEnd':
-        return this.completeTurn(
+        envelopes = this.completeTurn(
           message,
           Number(message.exitCode) === 0 ? 'completed' : 'failed'
         );
+        break;
       case 'stopped':
-        return this.completeTurn(message, 'stopped');
+        envelopes = this.completeTurn(message, 'stopped');
+        break;
       case 'error':
-        return this.failTurn(message);
+        envelopes = this.failTurn(message);
+        break;
+      case 'sessionNotice':
+        envelopes = this.forwardFeedback(message, false);
+        break;
+      case 'sessionInputResult':
+        envelopes = message.ok ? [] : this.forwardFeedback(message, true);
+        break;
       default:
-        return [];
+        envelopes = [];
+        break;
     }
+    if (envelopes.length > 0) {
+      this.replayBuffer.push(...envelopes);
+      if (this.replayBuffer.length > MAX_REPLAY_ENVELOPES) {
+        this.replayBuffer.splice(
+          0,
+          this.replayBuffer.length - MAX_REPLAY_ENVELOPES
+        );
+      }
+    }
+    return envelopes;
+  }
+
+  replayBuffered(): ThreadEventEnvelope[] {
+    return [...this.replayBuffer];
   }
 
   private startTurn(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {
@@ -72,6 +109,10 @@ export class ThreadEventAdapter {
     }
 
     const startedAt = this.now();
+    const previousBinding = this.activeTurnBySession.get(sessionId);
+    const previousCompletion = previousBinding
+      ? this.completeBinding(previousBinding, 'completed', startedAt)
+      : [];
     const turnId = `${sessionId}:${startedAt.toString(36)}:${++this.turnCounter}`;
     const binding: ActiveTurnBinding = {
       providerId,
@@ -104,8 +145,21 @@ export class ThreadEventAdapter {
       content: '',
       startedAt,
     };
+    const warning = clean(message.apiProviderWarning);
+    const warningItem: ThreadItem | undefined = warning
+      ? {
+          id: `${turnId}:warning`,
+          turnId,
+          type: 'system-message',
+          status: 'completed',
+          content: warning,
+          startedAt,
+          completedAt: startedAt,
+        }
+      : undefined;
 
     return [
+      ...previousCompletion,
       this.envelope(binding, {
         type: 'thread/started',
         thread: {
@@ -122,6 +176,9 @@ export class ThreadEventAdapter {
       }),
       this.envelope(binding, { type: 'item/started', item: userItem }),
       this.envelope(binding, { type: 'item/started', item: assistantItem }),
+      ...(warningItem
+        ? [this.envelope(binding, { type: 'item/started' as const, item: warningItem })]
+        : []),
     ];
   }
 
@@ -190,7 +247,17 @@ export class ThreadEventAdapter {
     }
 
     const completedAt = this.now();
-    const result = [
+    const result = this.completeBinding(binding, status, completedAt);
+    this.activeTurnBySession.delete(sessionId);
+    return result;
+  }
+
+  private completeBinding(
+    binding: ActiveTurnBinding,
+    status: 'completed' | 'failed' | 'stopped',
+    completedAt: number
+  ): ThreadEventEnvelope[] {
+    return [
       this.envelope(binding, {
         type: 'turn/completed',
         turnId: binding.turnId,
@@ -202,14 +269,12 @@ export class ThreadEventAdapter {
         status,
       }),
     ];
-    this.activeTurnBySession.delete(sessionId);
-    return result;
   }
 
   private failTurn(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {
     const binding = this.bindingFor(message);
     if (!binding) {
-      return [];
+      return this.failUnboundTurn(message);
     }
     const now = this.now();
     const item: ThreadItem = {
@@ -225,6 +290,62 @@ export class ThreadEventAdapter {
     return [errorEnvelope, ...this.completeTurn(message, 'failed')];
   }
 
+  private failUnboundTurn(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {
+    const providerId = clean(message.cliId);
+    const threadId = clean(message.threadId);
+    if (!providerId || !threadId) {
+      return [];
+    }
+    const now = this.now();
+    const turnId = `error:${now.toString(36)}:${++this.turnCounter}`;
+    const binding: ActiveTurnBinding = {
+      providerId,
+      threadId,
+      turnId,
+      assistantItemId: `${turnId}:assistant`,
+      reasoningItemId: `${turnId}:reasoning`,
+    };
+    const item: ThreadItem = {
+      id: `${turnId}:error`,
+      turnId,
+      type: 'system-error',
+      status: 'failed',
+      content: String(message.text ?? ''),
+      startedAt: now,
+      completedAt: now,
+    };
+    return [
+      this.envelope(binding, {
+        type: 'turn/started',
+        turn: { id: turnId, status: 'running', startedAt: now },
+      }),
+      this.envelope(binding, { type: 'item/started', item }),
+      ...this.completeBinding(binding, 'failed', now),
+    ];
+  }
+
+  private forwardFeedback(
+    message: LegacyLifecycleMessage,
+    failed: boolean
+  ): ThreadEventEnvelope[] {
+    const binding = this.bindingFor(message);
+    const content = clean(message.text);
+    if (!binding || !content) {
+      return [];
+    }
+    const now = this.now();
+    const item: ThreadItem = {
+      id: `${binding.turnId}:feedback:${++this.feedbackCounter}`,
+      turnId: binding.turnId,
+      type: failed ? 'system-error' : 'system-message',
+      status: failed ? 'failed' : 'completed',
+      content,
+      startedAt: now,
+      completedAt: now,
+    };
+    return [this.envelope(binding, { type: 'item/started', item })];
+  }
+
   private bindingFor(message: LegacyLifecycleMessage): ActiveTurnBinding | undefined {
     const sessionId = clean(message.sessionId);
     return sessionId ? this.activeTurnBySession.get(sessionId) : undefined;
@@ -238,6 +359,7 @@ export class ThreadEventAdapter {
       command: 'threadEvent',
       providerId: binding.providerId,
       threadId: binding.threadId,
+      streamId: this.streamId,
       sequence,
       event,
     };

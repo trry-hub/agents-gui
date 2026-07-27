@@ -288,6 +288,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'saveSelectionState':
           await this.saveSelectionState(message);
           break;
+        case 'codexRendererReady':
+          await this.replayBufferedThreadEvents();
+          break;
         case 'disableCodexRenderer':
           await this.disableCodexRenderer();
           break;
@@ -427,16 +430,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postToWebview(message: HostToWebviewMessage): Thenable<boolean> | undefined {
+    const envelopes = this.threadEventAdapter.accept(message);
     const webview = this.view?.webview;
     if (!webview) {
       return undefined;
     }
 
-    const envelopes = this.threadEventAdapter.accept(message);
     for (const envelope of envelopes) {
       void webview.postMessage(envelope);
     }
     return webview.postMessage(message);
+  }
+
+  private async replayBufferedThreadEvents(): Promise<void> {
+    const webview = this.view?.webview;
+    if (!webview) {
+      return;
+    }
+    for (const envelope of this.threadEventAdapter.replayBuffered()) {
+      await webview.postMessage(envelope);
+    }
   }
 
   stopAll(): void {
@@ -952,7 +965,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       (err) => {
         // Report previous request error to webview, but still execute current request
         if (err instanceof Error) {
-          this.postError(cliId, err.message);
+          this.postError(cliId, err.message, message.threadId);
         }
         return this.executeAssistantRequest(message);
       }
@@ -971,7 +984,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const cliId = this.settingsManager.resolveCliId(message);
     const profile = this.profilesById.get(cliId) ?? getCliProfile(cliId);
     if (!profile) {
-      this.postError(cliId, runtimeT(this.locale, 'error.unknownProvider', { provider: cliId }));
+      this.postError(
+        cliId,
+        runtimeT(this.locale, 'error.unknownProvider', { provider: cliId }),
+        message.threadId
+      );
       return;
     }
 
@@ -1032,7 +1049,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         cliId,
         error instanceof AgentCapabilityResolutionError
           ? error.message
-          : runtimeT(this.locale, 'error.startFailed', { provider: profile.name })
+          : runtimeT(this.locale, 'error.startFailed', { provider: profile.name }),
+        message.threadId
       );
       return;
     }
@@ -1050,11 +1068,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       tokenUsage: countContextTokens(snapshot, profile, effectiveModel.id),
     };
     if (actionRequiresActiveFile(action) && !snapshot.activeFile) {
-      this.postError(cliId, runtimeT(this.locale, 'error.missingActiveFile'));
+      this.postError(
+        cliId,
+        runtimeT(this.locale, 'error.missingActiveFile'),
+        message.threadId
+      );
       return;
     }
     if (actionRequiresSelection(action) && !snapshot.selection) {
-      this.postError(cliId, runtimeT(this.locale, 'error.missingSelection'));
+      this.postError(
+        cliId,
+        runtimeT(this.locale, 'error.missingSelection'),
+        message.threadId
+      );
       return;
     }
 
@@ -1105,7 +1131,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (!newSession) {
         this.postError(
           cliId,
-          runtimeT(this.locale, 'error.startFailed', { provider: profile.name })
+          runtimeT(this.locale, 'error.startFailed', { provider: profile.name }),
+          message.threadId
         );
         return;
       }
@@ -1115,7 +1142,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     if (!session) {
-      this.postError(cliId, runtimeT(this.locale, 'error.startFailed', { provider: profile.name }));
+      this.postError(
+        cliId,
+        runtimeT(this.locale, 'error.startFailed', { provider: profile.name }),
+        message.threadId
+      );
       return;
     }
 
@@ -1146,7 +1177,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (profile.inputMode === 'stdin') {
       const sent = this.agentRuntime.sendInput(session.id, prompt, !profile.keepStdinOpen);
       if (!sent) {
-        this.postError(cliId, runtimeT(this.locale, 'error.sendFailed'));
+        this.postError(
+          cliId,
+          runtimeT(this.locale, 'error.sendFailed'),
+          message.threadId,
+          session.id
+        );
       }
     }
   }
@@ -1165,6 +1201,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       cliId,
       sessionId: result.session?.id,
       ok: result.ok,
+      text: result.ok ? undefined : runtimeT(this.locale, 'error.sendFailed'),
     });
   }
 
@@ -1356,11 +1393,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return options;
   }
 
-  private postError(cliId: string, text: string): void {
+  private postError(
+    cliId: string,
+    text: string,
+    threadId?: string,
+    sessionId?: string
+  ): void {
     this.postToWebview({
       command: 'error',
       cliId,
       text,
+      threadId,
+      sessionId,
     });
   }
 

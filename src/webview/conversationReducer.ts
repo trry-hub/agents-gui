@@ -89,7 +89,10 @@ export function reduceConversation(
       ? {
           ...existing,
           providerId: envelope.providerId,
-          title: event.thread.title || existing.title,
+          title:
+            existing.turnOrder.length > 0
+              ? existing.title
+              : event.thread.title || existing.title,
           status: event.thread.status,
           updatedAt: event.thread.updatedAt,
         }
@@ -267,7 +270,9 @@ export function migrateLegacyConversations(
             ? 'user-message'
             : message.role === 'error'
               ? 'system-error'
-              : 'assistant-message';
+              : message.role === 'system'
+                ? 'system-message'
+                : 'assistant-message';
         const itemId = `${currentTurn.id}:message:${messageIndex}`;
         const item: ThreadItem = {
           id: itemId,
@@ -362,6 +367,79 @@ export function projectThreadSummaries(snapshot: ConversationSnapshot): ThreadSu
     }
   }
   return summaries;
+}
+
+export function projectLegacyThreads(
+  snapshot: ConversationSnapshot
+): Record<string, LegacyThread[]> {
+  const projected: Record<string, LegacyThread[]> = {};
+  for (const [providerId, threadOrder] of Object.entries(
+    snapshot.threadOrderByProvider
+  )) {
+    projected[providerId] = threadOrder.flatMap((threadId) => {
+      const thread = snapshot.threadsById[threadId];
+      if (!thread || thread.providerId !== providerId) {
+        return [];
+      }
+      const messages: LegacyMessage[] = [];
+      for (const turnId of thread.turnOrder) {
+        const turn = thread.turnsById[turnId];
+        let lastAssistant: LegacyMessage | undefined;
+        for (const itemId of turn?.itemOrder ?? []) {
+          const item = turn.itemsById[itemId];
+          if (!item) {
+            continue;
+          }
+          const running = item.status === 'running';
+          if (item.type === 'reasoning') {
+            if (lastAssistant) {
+              lastAssistant.thinking = [lastAssistant.thinking, item.content]
+                .map(clean)
+                .filter(Boolean)
+                .join('\n');
+            }
+            continue;
+          }
+          const role =
+            item.type === 'user-message'
+              ? 'user'
+              : item.type === 'assistant-message'
+                ? 'assistant'
+                : item.type === 'system-error'
+                  ? 'error'
+                  : 'system';
+          const message: LegacyMessage = {
+            role,
+            text: item.content ?? item.label ?? '',
+            running,
+            meta: item.meta,
+            attachments: item.attachments,
+            startedAt: item.startedAt,
+            durationMs:
+              item.completedAt === undefined
+                ? undefined
+                : Math.max(0, item.completedAt - item.startedAt),
+          };
+          messages.push(message);
+          lastAssistant = role === 'assistant' ? message : undefined;
+        }
+      }
+      return [
+        {
+          id: thread.id,
+          title: thread.title,
+          createdAt:
+            thread.turnOrder
+              .map((turnId) => thread.turnsById[turnId]?.startedAt)
+              .find((value): value is number => Number.isFinite(value)) ??
+            thread.updatedAt,
+          updatedAt: thread.updatedAt,
+          messages,
+        },
+      ];
+    });
+  }
+  return projected;
 }
 
 function ensureThread(

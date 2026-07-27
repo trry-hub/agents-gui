@@ -44,11 +44,31 @@ test('message items preserve the existing semantic message classes and stable id
   assert.match(assistant, /class="message-content"/);
 });
 
+test('user message items preserve image attachment chips in the React transcript', () => {
+  const user = renderItem('user-message', {
+    attachments: [
+      {
+        kind: 'image',
+        name: 'diagram.png',
+        mimeType: 'image/png',
+        size: 2048,
+        path: '/tmp/diagram.png',
+      },
+    ],
+  });
+
+  assert.match(user, /class="message-attachments"/);
+  assert.match(user, /class="message-attachment"/);
+  assert.match(user, /diagram\.png · 2 KB/);
+  assert.match(user, /title="\/tmp\/diagram\.png"/);
+});
+
 test('reasoning and activity item variants produce typed semantic markup', () => {
   const reasoning = renderItem('reasoning');
   const command = renderItem('command-execution');
   const file = renderItem('file-change');
   const tool = renderItem('mcp-tool-call');
+  const system = renderItem('system-message');
 
   assert.match(reasoning, /<details[^>]*class="message-thinking"/);
   assert.match(reasoning, /<summary/);
@@ -56,6 +76,7 @@ test('reasoning and activity item variants produce typed semantic markup', () =>
   assert.match(command, /class="thread-activity thread-activity-command"/);
   assert.match(file, /class="thread-activity thread-activity-file"/);
   assert.match(tool, /class="thread-activity thread-activity-tool"/);
+  assert.match(system, /class="message system"/);
 });
 
 test('approval and error items preserve actionable and accessible contracts', () => {
@@ -190,6 +211,104 @@ test('renderer controller schedules canonical events and exposes read-only proje
   assert.equal(controller.getThreadSummaries()[0].turnCount, 1);
   controller.dispose();
   assert.equal(persisted.at(-1).version, 2);
+});
+
+test('hidden and thread-switch persistence flush pending frame deltas first', () => {
+  let pendingFrame;
+  const persisted = [];
+  const controller = createCodexRendererController({
+    requestFrame: (callback) => {
+      pendingFrame = callback;
+      return 7;
+    },
+    cancelFrame: () => {
+      pendingFrame = undefined;
+    },
+    isHidden: () => false,
+    persist: (snapshot) => persisted.push(structuredClone(snapshot)),
+    setTimer: () => 9,
+    clearTimer: () => {},
+  });
+  const baseEnvelope = {
+    command: 'threadEvent',
+    providerId: 'codex',
+    threadId: 'thread-1',
+  };
+  controller.dispatch({
+    ...baseEnvelope,
+    sequence: 1,
+    event: {
+      type: 'thread/started',
+      thread: {
+        id: 'thread-1',
+        providerId: 'codex',
+        title: 'Thread',
+        status: 'running',
+        updatedAt: 10,
+      },
+    },
+  });
+  controller.dispatch({
+    ...baseEnvelope,
+    sequence: 2,
+    event: {
+      type: 'turn/started',
+      turn: { id: 'turn-1', status: 'running', startedAt: 10 },
+    },
+  });
+  controller.dispatch({
+    ...baseEnvelope,
+    sequence: 3,
+    event: {
+      type: 'item/started',
+      item: {
+        id: 'turn-1:assistant',
+        turnId: 'turn-1',
+        type: 'assistant-message',
+        status: 'running',
+        content: '',
+        startedAt: 10,
+      },
+    },
+  });
+  controller.dispatch({
+    ...baseEnvelope,
+    sequence: 4,
+    event: {
+      type: 'item/assistantMessage/delta',
+      turnId: 'turn-1',
+      itemId: 'turn-1:assistant',
+      delta: 'pending before hidden',
+    },
+  });
+
+  assert.equal(typeof pendingFrame, 'function');
+  controller.onHidden();
+  assert.equal(
+    persisted.at(-1).threadsById['thread-1'].turnsById['turn-1'].itemsById[
+      'turn-1:assistant'
+    ].content,
+    'pending before hidden'
+  );
+
+  controller.dispatch({
+    ...baseEnvelope,
+    sequence: 5,
+    event: {
+      type: 'item/assistantMessage/delta',
+      turnId: 'turn-1',
+      itemId: 'turn-1:assistant',
+      delta: ' and switch',
+    },
+  });
+  controller.onThreadSwitch();
+  assert.equal(
+    persisted.at(-1).threadsById['thread-1'].turnsById['turn-1'].itemsById[
+      'turn-1:assistant'
+    ].content,
+    'pending before hidden and switch'
+  );
+  controller.dispose();
 });
 
 test('build config emits the browser renderer bundle with locked React dependencies', () => {

@@ -117,14 +117,16 @@ interface ThreadEventEnvelope {
   command: 'threadEvent';
   providerId: string;
   threadId: string;
+  streamId: string;
   sequence: number;
   event: ThreadEvent;
 }
 ```
 
-`sequence` is monotonically increasing for a provider session. The Webview
-uses it to ignore duplicate delivery while still accepting late completion
-events.
+`streamId` identifies one Extension Host generation and `sequence` is
+monotonically increasing per thread within that generation. The Webview uses
+the pair to ignore duplicate delivery while still accepting late completion
+events and sequence restarts after a host reload.
 
 ### Conversation domain
 
@@ -163,6 +165,7 @@ interface TurnState {
 - `todo-list`
 - `mcp-tool-call`
 - `approval-request`
+- `system-message`
 - `system-error`
 
 Every item has a stable `id`, `turnId`, and `status`. Rendering never uses an
@@ -363,9 +366,10 @@ Persistence occurs:
 
 The current `threadsByProvider` payload is migrated once during hydration.
 Running legacy assistant placeholders become stopped items. A Webview reload
-also requests an active-session snapshot from the host; if the host still owns
-the session, the corresponding turn resumes as running instead of creating a
-duplicate assistant item.
+also announces renderer readiness and requests the host's bounded canonical
+replay buffer. Already persisted event identities are ignored; events emitted
+during the reload gap reconcile the active turn without creating a duplicate
+assistant item.
 
 ## Feature Flag and Rollback
 
@@ -386,6 +390,10 @@ When the flag is enabled:
 - legacy lifecycle handlers must not maintain a second conversation array;
 - the composer reads history from the conversation bridge;
 - the session-history UI reads summaries from the same bridge.
+
+Before the flag-off shell renders or persists, it projects any version-2
+conversation snapshot into the legacy thread/message shape. This makes the
+error-boundary recovery path lossless for React-only turns.
 
 ## Build and Asset Delivery
 

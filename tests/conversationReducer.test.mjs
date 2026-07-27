@@ -8,6 +8,7 @@ const {
   createEmptyConversationSnapshot,
   migrateLegacyConversations,
   projectConversationHistory,
+  projectLegacyThreads,
   projectThreadSummaries,
 } = reducerModule;
 const { createConversationStore } = storeModule;
@@ -162,6 +163,44 @@ test('store ignores exact duplicate sequences but accepts a distinct late envelo
   assert.equal(notifications, 4);
 });
 
+test('dedupe identity includes the host stream so sequence restart remains visible', () => {
+  const store = createConversationStore();
+  startThreadAndTurn(store, 'turn-a');
+  const restartedThread = envelope(
+    1,
+    {
+      type: 'turn/started',
+      turn: { id: 'turn-b', status: 'running', startedAt: 20 },
+    },
+    { streamId: 'host-b' }
+  );
+
+  assert.equal(store.dispatch(restartedThread), true);
+  assert.deepEqual(
+    store.getSnapshot().threadsById['thread-1'].turnOrder,
+    ['turn-a', 'turn-b']
+  );
+});
+
+test('later request starts preserve the established thread title', () => {
+  const store = createConversationStore();
+  startThreadAndTurn(store, 'turn-1');
+  store.dispatch(
+    envelope(3, {
+      type: 'thread/started',
+      thread: {
+        id: 'thread-1',
+        providerId: 'codex',
+        title: 'A different later prompt',
+        status: 'running',
+        updatedAt: 20,
+      },
+    })
+  );
+
+  assert.equal(store.getSnapshot().threadsById['thread-1'].title, 'Build');
+});
+
 test('item completion is authoritative and turn completion finalizes running siblings', () => {
   const store = createConversationStore();
   startThreadAndTurn(store, 'turn-1');
@@ -253,6 +292,51 @@ test('legacy migration groups messages into turns and stops running placeholders
       turnCount: 1,
     },
   ]);
+});
+
+test('canonical snapshots project back to legacy threads for renderer rollback', () => {
+  const attachments = [
+    {
+      kind: 'image',
+      name: 'diagram.png',
+      mimeType: 'image/png',
+      size: 2048,
+      path: '/tmp/diagram.png',
+    },
+  ];
+  const snapshot = migrateLegacyConversations(
+    {
+      codex: [
+        {
+          id: 'thread-1',
+          title: 'Rollback',
+          createdAt: 10,
+          updatedAt: 20,
+          messages: [
+            { role: 'user', text: 'question', attachments },
+            { role: 'assistant', text: 'answer', thinking: 'reason' },
+            { role: 'error', text: 'failed' },
+          ],
+        },
+      ],
+    },
+    { codex: 'thread-1' }
+  );
+
+  const projected = projectLegacyThreads(snapshot);
+  assert.deepEqual(
+    projected.codex[0].messages.map(({ role, text, thinking }) => ({
+      role,
+      text,
+      thinking,
+    })),
+    [
+      { role: 'user', text: 'question', thinking: undefined },
+      { role: 'assistant', text: 'answer', thinking: 'reason' },
+      { role: 'error', text: 'failed', thinking: undefined },
+    ]
+  );
+  assert.deepEqual(projected.codex[0].messages[0].attachments, attachments);
 });
 
 test('empty snapshots have stable versioned shape', () => {

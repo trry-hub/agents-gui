@@ -3,15 +3,18 @@ import test from 'node:test';
 
 import schedulerModule from '../.test-dist/webview/deltaScheduler.js';
 import persistenceModule from '../.test-dist/webview/persistenceCoordinator.js';
+import storeModule from '../.test-dist/webview/conversationStore.js';
 
 const { createDeltaScheduler } = schedulerModule;
 const { createPersistenceCoordinator } = persistenceModule;
+const { createConversationStore } = storeModule;
 
 function delta(sequence, itemId, text, type = 'item/assistantMessage/delta') {
   return {
     command: 'threadEvent',
     providerId: 'codex',
     threadId: 'thread-1',
+    streamId: 'host-a',
     sequence,
     event: {
       type,
@@ -82,6 +85,43 @@ test('same-item deltas coalesce once per frame while separate items stay separat
       [4, 'assistant', 'ABC'],
       [3, 'reasoning', 'R'],
     ]
+  );
+});
+
+test('mixed replay and fresh deltas coalesce without reapplying the persisted chunk', () => {
+  const initial = createConversationStore();
+  initial.dispatch({
+    command: 'threadEvent',
+    providerId: 'codex',
+    threadId: 'thread-1',
+    streamId: 'host-a',
+    sequence: 1,
+    event: {
+      type: 'turn/started',
+      turn: { id: 'turn-1', status: 'running', startedAt: 10 },
+    },
+  });
+  initial.dispatch(delta(2, 'assistant', 'A'));
+
+  const restored = createConversationStore();
+  restored.hydrate(structuredClone(initial.getSnapshot()));
+  const frames = fakeFrames();
+  const scheduler = createDeltaScheduler({
+    dispatch: restored.dispatch,
+    requestFrame: frames.requestFrame,
+    cancelFrame: frames.cancelFrame,
+    isHidden: () => false,
+  });
+
+  scheduler.schedule(delta(2, 'assistant', 'A'));
+  scheduler.schedule(delta(3, 'assistant', 'B'));
+  frames.flush();
+
+  assert.equal(
+    restored.getSnapshot().threadsById['thread-1'].turnsById['turn-1'].itemsById[
+      'assistant'
+    ].content,
+    'AB'
   );
 });
 
@@ -168,4 +208,3 @@ test('persistence checkpoints running turns at most once per 500ms and flushes l
   coordinator.dispose();
   assert.equal(persisted.at(-1), snapshots[1]);
 });
-

@@ -164,7 +164,13 @@
   let taskBoardDismissed = Boolean(saved.taskBoardDismissed);
   let legacyWorkflowMode = saved.workflowMode || (saved.mode === 'agent' ? 'execute' : undefined);
   let hasAppliedPersistentSelection = false;
-  let threadsByProvider = normalizeSavedThreads(saved.threadsByProvider, saved.conversations);
+  const projectedLegacyThreads = codexRendererEnabled
+    ? undefined
+    : codexRenderer?.projectLegacySnapshot(saved.conversationSnapshot);
+  let threadsByProvider = normalizeSavedThreads(
+    projectedLegacyThreads ?? saved.threadsByProvider,
+    saved.conversations
+  );
   let tasks = normalizeSavedTasks(saved.tasks);
   let activeThreadByProvider = saved.activeThreadByProvider || {};
   let contextOptions = { ...DEFAULT_CONTEXT_OPTIONS };
@@ -3773,20 +3779,26 @@
 
   function executeOpenCodeNativeSlashCommand(command) {
     if (!nativeApiCommandNames(activeProfile()).has(command.name)) {
-      addMessage(
+      appendShellFeedback(
         activeId,
         'system',
         i18n.t('slash.unsupported', {
           command: `/${command.name}`,
           provider: activeProfile()?.name || activeId,
-        })
+        }),
+        activeThreadId(activeId)
       );
       return;
     }
 
     const openCodeSessionId = activeOpenCodeSessionId();
     if (!openCodeSessionId) {
-      addMessage(activeId, 'error', i18n.t('slash.opencode.noSession'), undefined, false, activeThreadId(activeId));
+      appendShellFeedback(
+        activeId,
+        'error',
+        i18n.t('slash.opencode.noSession'),
+        activeThreadId(activeId)
+      );
       return;
     }
 
@@ -5579,6 +5591,10 @@
   }
 
   function renderMessages() {
+    if (codexRendererEnabled) {
+      syncCodexRendererContext();
+      return;
+    }
     const conversation = ensureConversation(activeId);
     const activeThread = ensureActiveThread(activeId);
     const messageThreadKey = `${activeId || 'none'}:${activeThread?.id || 'none'}`;
@@ -6849,6 +6865,7 @@
         codexRenderer.ensureThread(providerId, item.id, item.title, item.updatedAt);
       }
     }
+    vscode.postMessage({ command: 'codexRendererReady' });
   }
 
   function syncCodexRendererContext() {
@@ -6996,6 +7013,20 @@
     }
     renderSessionHistory();
     return { threadId: thread?.id || '', index: conversation.length - 1 };
+  }
+
+  function appendShellFeedback(cliId, role, text, threadId) {
+    const targetThreadId = threadId || activeThreadId(cliId);
+    if (codexRendererEnabled && targetThreadId) {
+      codexRenderer.appendFeedback(
+        cliId,
+        targetThreadId,
+        normalizeMessageText(text),
+        role === 'error'
+      );
+      return;
+    }
+    addMessage(cliId, role, text, undefined, false, targetThreadId);
   }
 
   function mergeStreamText(current, chunk) {
@@ -7662,7 +7693,7 @@
     if (key) {
       dismissedClaudeApprovalKeys.add(key);
     }
-    renderMessages();
+    refreshAfterClaudeApproval(key);
     requestAnimationFrame(() => input.focus());
   }
 
@@ -7678,11 +7709,25 @@
 
     if (runningByProvider[activeId] || pendingByProvider[activeId]) {
       vscode.postMessage({ command: 'sendSessionInput', cliId: activeId, text });
-      renderMessages();
+      refreshAfterClaudeApproval(key);
     } else {
       send('freeform', text);
     }
     requestAnimationFrame(() => input.focus());
+  }
+
+  function refreshAfterClaudeApproval(key) {
+    if (!codexRendererEnabled) {
+      renderMessages();
+      return;
+    }
+    messages
+      ?.querySelectorAll('.claude-approval-panel')
+      .forEach((panel) => {
+        if (!key || panel.dataset.claudeApprovalKey === key) {
+          panel.remove();
+        }
+      });
   }
 
   function appendMessageThinking(bubble, text, options = {}) {
@@ -10324,12 +10369,10 @@
         if (message.ok && message.nativeCommand === 'fork' && handleOpenCodeForkResult(message)) {
           break;
         }
-        addMessage(
+        appendShellFeedback(
           'opencode',
           message.ok ? 'system' : 'error',
           openCodeNativeCommandResultText(message),
-          undefined,
-          false,
           activeThreadId('opencode')
         );
         renderAll();
@@ -10340,7 +10383,7 @@
         }
         break;
       case 'sessionInputResult':
-        if (!message.ok) {
+        if (!message.ok && !codexRendererEnabled) {
           addMessage(
             message.cliId || activeId,
             'system',

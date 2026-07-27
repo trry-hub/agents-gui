@@ -16,6 +16,7 @@ export interface VirtualRangeOptions {
 export interface VirtualRange {
   start: number;
   end: number;
+  firstVisible: number;
   before: number;
   after: number;
   total: number;
@@ -32,7 +33,14 @@ export function computeVirtualRange(options: VirtualRangeOptions): VirtualRange 
     overscan = DEFAULT_OVERSCAN,
   } = options;
   if (turnIds.length === 0) {
-    return { start: 0, end: -1, before: 0, after: 0, total: 0 };
+    return {
+      start: 0,
+      end: -1,
+      firstVisible: 0,
+      before: 0,
+      after: 0,
+      total: 0,
+    };
   }
 
   const offsets = buildOffsets(turnIds, measuredHeights, estimatedHeight);
@@ -41,6 +49,7 @@ export function computeVirtualRange(options: VirtualRangeOptions): VirtualRange 
     return {
       start: 0,
       end: turnIds.length - 1,
+      firstVisible: 0,
       before: 0,
       after: 0,
       total,
@@ -59,6 +68,7 @@ export function computeVirtualRange(options: VirtualRangeOptions): VirtualRange 
   return {
     start,
     end,
+    firstVisible,
     before: offsets[start],
     after: Math.max(0, total - offsets[end + 1]),
     total,
@@ -152,4 +162,3 @@ function firstOffsetAtOrAfter(offsets: number[], target: number): number {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number(value) || 0));
 }
-

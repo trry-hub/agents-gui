@@ -70,6 +70,7 @@ export type WebviewToHostMessage =
   | { command: 'setOpenCodeModelVariant'; modelId?: string; variant?: string }
   | { command: 'copyMessageText'; text?: string }
   | { command: 'saveSelectionState'; state?: unknown }
+  | { command: 'codexRendererReady' }
   | { command: 'disableCodexRenderer' }
   | { command: 'reloadWindow' };
 
@@ -150,7 +151,13 @@ export type HostToWebviewMessage =
       title?: string;
     }
   | { command: 'sessionNotice'; cliId: string; sessionId?: string; text: string }
-  | { command: 'sessionInputResult'; cliId: string; sessionId?: string; ok: boolean }
+  | {
+      command: 'sessionInputResult';
+      cliId: string;
+      sessionId?: string;
+      ok: boolean;
+      text?: string;
+    }
   | {
       command: 'sessionEnd';
       cliId: string;
@@ -159,5 +166,11 @@ export type HostToWebviewMessage =
       openCodeSessionId?: string;
     }
   | { command: 'stopped'; cliId: string; sessionId?: string }
-  | { command: 'error'; cliId: string; text: string; sessionId?: string }
+  | {
+      command: 'error';
+      cliId: string;
+      text: string;
+      threadId?: string;
+      sessionId?: string;
+    }
   | { command: 'contextSummary'; cliId?: string; summary: AssistantContextSummary };

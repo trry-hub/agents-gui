@@ -134,3 +134,52 @@ test('hydrate and replay suppress duplicate canonical lifecycle envelopes', () =
   assert.equal(turn.status, 'completed');
   assert.equal(thread.status, 'completed');
 });
+
+test('renderer-ready replay reconciles deltas emitted across a webview reload gap', () => {
+  let now = 2_000;
+  const adapter = new ThreadEventAdapter({
+    now: () => ++now,
+    streamId: 'host-a',
+  });
+  const initial = createConversationStore();
+  const beforeReload = [
+    {
+      command: 'requestStarted',
+      cliId: 'codex',
+      threadId: 'thread-1',
+      sessionId: 'runtime-1',
+      text: 'Keep streaming',
+    },
+    {
+      command: 'output',
+      cliId: 'codex',
+      sessionId: 'runtime-1',
+      text: 'before ',
+    },
+  ].flatMap((message) => adapter.accept(message));
+  beforeReload.forEach((envelope) => initial.dispatch(envelope));
+  const persistedAtReload = structuredClone(initial.getSnapshot());
+
+  adapter.accept({
+    command: 'output',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    text: 'during reload',
+  });
+  adapter.accept({
+    command: 'sessionEnd',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    exitCode: 0,
+  });
+
+  const restored = createConversationStore();
+  restored.hydrate(persistedAtReload);
+  adapter.replayBuffered().forEach((envelope) => restored.dispatch(envelope));
+
+  const thread = restored.getSnapshot().threadsById['thread-1'];
+  const turn = thread.turnsById[thread.turnOrder[0]];
+  const assistant = turn.itemsById[`${turn.id}:assistant`];
+  assert.equal(assistant.content, 'before during reload');
+  assert.equal(turn.status, 'completed');
+});

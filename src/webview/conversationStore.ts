@@ -70,17 +70,16 @@ export function createConversationStore(
       if (!envelope || envelope.command !== 'threadEvent') {
         return false;
       }
-      const key = `${envelope.providerId}:${envelope.threadId}:${envelope.sequence}`;
-      if (seen.has(key)) {
+      const effectiveEnvelope = filterSeenDeltaSegments(envelope, seen);
+      if (!effectiveEnvelope) {
         return false;
       }
-      const sequenceKeys = [
-        ...(envelope.coalescedSequences ?? []),
-        envelope.sequence,
-      ].map(
-        (sequence) =>
-          `${envelope.providerId}:${envelope.threadId}:${sequence}`
-      );
+      const sequenceKeys = Array.from(
+        new Set([
+          ...(effectiveEnvelope.coalescedSequences ?? []),
+          effectiveEnvelope.sequence,
+        ])
+      ).map((sequence) => envelopeKey(effectiveEnvelope, sequence));
       for (const sequenceKey of sequenceKeys) {
         if (seen.has(sequenceKey)) {
           continue;
@@ -95,7 +94,7 @@ export function createConversationStore(
         }
       }
 
-      const next = reduceConversation(snapshot, envelope);
+      const next = reduceConversation(snapshot, effectiveEnvelope);
       if (next === snapshot) {
         return false;
       }
@@ -203,4 +202,81 @@ function normalizeSeenKeys(value: unknown): string[] {
   return value
     .filter((key): key is string => typeof key === 'string' && Boolean(key))
     .slice(-MAX_SEEN_ENVELOPES);
+}
+
+function filterSeenDeltaSegments(
+  envelope: ThreadEventEnvelope,
+  seen: Set<string>
+): ThreadEventEnvelope | undefined {
+  if (!isDelta(envelope)) {
+    return hasSeenSequence(seen, envelope, envelope.sequence)
+      ? undefined
+      : envelope;
+  }
+  const segments = envelope.deltaSegments ?? [
+    { sequence: envelope.sequence, delta: envelope.event.delta },
+  ];
+  const unseenSegments = segments.filter(
+    ({ sequence }) => !hasSeenSequence(seen, envelope, sequence)
+  );
+  if (unseenSegments.length === 0) {
+    return undefined;
+  }
+  const lastSegment = unseenSegments[unseenSegments.length - 1];
+  return {
+    ...envelope,
+    sequence: lastSegment.sequence,
+    coalescedSequences: unseenSegments.map(({ sequence }) => sequence),
+    deltaSegments: unseenSegments,
+    event: {
+      ...envelope.event,
+      delta: unseenSegments.map(({ delta }) => delta).join(''),
+    },
+  };
+}
+
+function envelopeKey(envelope: ThreadEventEnvelope, sequence: number): string {
+  return [
+    envelope.providerId,
+    envelope.threadId,
+    envelope.streamId ?? 'legacy',
+    sequence,
+  ].join(':');
+}
+
+function hasSeenSequence(
+  seen: Set<string>,
+  envelope: ThreadEventEnvelope,
+  sequence: number
+): boolean {
+  if (seen.has(envelopeKey(envelope, sequence))) {
+    return true;
+  }
+  return (
+    !envelope.streamId &&
+    seen.has([envelope.providerId, envelope.threadId, sequence].join(':'))
+  );
+}
+
+function isDelta(
+  envelope: ThreadEventEnvelope
+): envelope is ThreadEventEnvelope & {
+  event:
+    | {
+        type: 'item/assistantMessage/delta';
+        turnId: string;
+        itemId: string;
+        delta: string;
+      }
+    | {
+        type: 'item/reasoning/delta';
+        turnId: string;
+        itemId: string;
+        delta: string;
+      };
+} {
+  return (
+    envelope.event.type === 'item/assistantMessage/delta' ||
+    envelope.event.type === 'item/reasoning/delta'
+  );
 }

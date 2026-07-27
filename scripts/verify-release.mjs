@@ -4,6 +4,13 @@ import path from 'node:path';
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const root = process.cwd();
+const releaseBaseResult = spawnSync(
+  'git',
+  ['merge-base', 'HEAD', 'main'],
+  { cwd: root, encoding: 'utf8' }
+);
+const releaseBase =
+  releaseBaseResult.status === 0 ? releaseBaseResult.stdout.trim() : '';
 const assetManifest = JSON.parse(
   fs.readFileSync(path.join(root, 'media', 'webview-assets.json'), 'utf8')
 );
@@ -50,6 +57,15 @@ const steps = [
     command: 'git',
     args: ['diff', '--cached', '--check'],
   },
+  ...(releaseBase
+    ? [
+        {
+          label: 'committed release range whitespace check',
+          command: 'git',
+          args: ['diff', '--check', `${releaseBase}..HEAD`],
+        },
+      ]
+    : []),
 ];
 
 for (const step of steps) {

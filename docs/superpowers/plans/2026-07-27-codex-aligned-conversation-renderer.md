@@ -87,18 +87,20 @@ export type ThreadItemType =
   | 'todo-list'
   | 'mcp-tool-call'
   | 'approval-request'
+  | 'system-message'
   | 'system-error';
 
 export interface ThreadEventEnvelope {
   command: 'threadEvent';
   providerId: string;
   threadId: string;
+  streamId: string;
   sequence: number;
   event: ThreadEvent;
 }
 ```
 
-`ThreadEventAdapter` keeps a monotonically increasing turn counter, a per-thread sequence map, and an active runtime-session binding. `requestStarted` creates `<sessionId>:<counter>` as the turn ID; provider activity IDs are used when available and otherwise derive from the turn ID plus normalized activity identity.
+`ThreadEventAdapter` keeps a host-generation stream ID, monotonically increasing turn counter, a per-thread sequence map, a bounded replay buffer, and an active runtime-session binding. `requestStarted` creates `<sessionId>:<counter>` as the turn ID; provider activity IDs are used when available and otherwise derive from the turn ID plus normalized activity identity.
 
 - [ ] **Step 4: Wire dual delivery through `SidebarProvider`**
 
