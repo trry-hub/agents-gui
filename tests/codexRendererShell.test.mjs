@@ -69,7 +69,10 @@ test('legacy shell mounts and delegates transcript ownership to the renderer whe
     script,
     /codexRendererEnabled\s*\?\s*codexRenderer\.getConversationHistory\(cliId, activeThreadId\(cliId\)\)/
   );
-  assert.match(script, /conversationSnapshot: codexRendererEnabled \? codexRenderer\.serialize\(\) : undefined/);
+  assert.match(
+    script,
+    /conversationSnapshot:\s*codexRendererEnabled\s*\?\s*codexRenderer\.serialize\(\)\s*:\s*retainedConversationSnapshot/
+  );
 });
 
 test('flag-off startup projects the canonical snapshot into the legacy renderer', () => {
@@ -80,6 +83,14 @@ test('flag-off startup projects the canonical snapshot into the legacy renderer'
   assert.match(
     script,
     /normalizeSavedThreads\([\s\S]*projectedLegacyThreads\s*\?\?\s*saved\.threadsByProvider/
+  );
+  assert.match(
+    script,
+    /retainedConversationSnapshot[\s\S]*saved\.conversationSnapshot/
+  );
+  assert.match(
+    script,
+    /conversationSnapshot:\s*codexRendererEnabled\s*\?\s*codexRenderer\.serialize\(\)\s*:\s*retainedConversationSnapshot/
   );
 });
 
@@ -92,6 +103,22 @@ test('flag-on lifecycle handlers update shell state without mutating legacy tran
   assert.match(script, /codexRenderer\.ensureThread\(cliId, thread\.id, thread\.title/);
   assert.match(script, /codexRenderer\.deleteThread\(cliId, thread\.id\)/);
   assert.match(script, /codexRenderer\.getThreadSummaries\(\)/);
+  assert.match(
+    script,
+    /case 'error':[\s\S]*if \(codexRendererEnabled && message\.threadId\)[\s\S]*codexRenderer\.setActiveContext\(activeId, message\.threadId\)/
+  );
+  assert.match(
+    script,
+    /case 'rendererRuntimeSnapshot':\s*restoreRendererRuntimeSnapshot\(message\.runs\);/
+  );
+  assert.match(
+    script,
+    /providerRunState\.markProviderRunning\(providerRunStore, run\.providerId\)/
+  );
+  assert.match(
+    script,
+    /taskBySessionId\[run\.sessionId\]\s*=\s*task\.id/
+  );
 });
 
 test('legacy callbacks cannot clear the React-owned transcript DOM', () => {

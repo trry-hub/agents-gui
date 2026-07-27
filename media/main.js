@@ -167,6 +167,12 @@
   const projectedLegacyThreads = codexRendererEnabled
     ? undefined
     : codexRenderer?.projectLegacySnapshot(saved.conversationSnapshot);
+  const retainedConversationSnapshot =
+    !codexRendererEnabled &&
+    !projectedLegacyThreads &&
+    saved.conversationSnapshot?.version === 2
+      ? saved.conversationSnapshot
+      : undefined;
   let threadsByProvider = normalizeSavedThreads(
     projectedLegacyThreads ?? saved.threadsByProvider,
     saved.conversations
@@ -396,7 +402,9 @@
       activePermissionByProvider,
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
-      conversationSnapshot: codexRendererEnabled ? codexRenderer.serialize() : undefined,
+      conversationSnapshot: codexRendererEnabled
+        ? codexRenderer.serialize()
+        : retainedConversationSnapshot,
       threadsByProvider: conversationStore.serializeThreadsForState(threadsByProvider),
       tasks: serializeTasksForState(tasks),
       activeThreadByProvider,
@@ -7336,6 +7344,61 @@
     renderAll();
   }
 
+  function restoreRendererRuntimeSnapshot(rawRuns) {
+    const runs = (Array.isArray(rawRuns) ? rawRuns : []).filter((run) => (
+      run &&
+      typeof run.providerId === 'string' &&
+      typeof run.threadId === 'string' &&
+      typeof run.sessionId === 'string'
+    ));
+    const activeProviders = new Set(runs.map((run) => run.providerId));
+    for (const providerId of new Set([
+      ...Object.keys(runningByProvider),
+      ...Object.keys(pendingByProvider),
+    ])) {
+      if (!activeProviders.has(providerId)) {
+        providerRunState.clearProviderRunState(providerRunStore, providerId);
+      }
+    }
+
+    taskBySessionId = {};
+    for (const run of runs) {
+      providerRunState.markProviderRunning(providerRunStore, run.providerId);
+      activeThreadByProvider[run.providerId] = run.threadId;
+      codexRenderer?.ensureThread(run.providerId, run.threadId);
+
+      let task = tasks.find((item) => (
+        item.providerId === run.providerId &&
+        item.threadId === run.threadId &&
+        (item.status === 'running' || item.status === 'preparing' || item.status === 'stopped')
+      ));
+      if (!task) {
+        const profile = profiles.find((item) => item.id === run.providerId);
+        const thread = codexThreadSummary(run.providerId, run.threadId);
+        task = taskBoardState.createTask({
+          providerId: run.providerId,
+          providerName: profile?.name || run.providerId,
+          title: thread?.title || i18n.t('task.untitled'),
+          action: 'freeform',
+          agentMode: '',
+          status: 'running',
+          threadId: run.threadId,
+          now: Date.now(),
+        });
+        tasks = taskBoardState.upsertRecentTask(tasks, task, { limit: 20 });
+      }
+      Object.assign(task, {
+        status: 'running',
+        sessionId: run.sessionId,
+        threadId: run.threadId,
+        updatedAt: Date.now(),
+      });
+      taskBySessionId[run.sessionId] = task.id;
+    }
+    persist();
+    renderAll();
+  }
+
   function quickActionText(action) {
     switch (action) {
       case 'explainSelection':
@@ -10299,6 +10362,9 @@
           renderSessionHistory();
         }
         break;
+      case 'rendererRuntimeSnapshot':
+        restoreRendererRuntimeSnapshot(message.runs);
+        break;
       case 'requestStarted':
         if (!activeId || !installedProfiles().some((profile) => profile.id === activeId)) {
           activeId = message.cliId;
@@ -10419,7 +10485,12 @@
         providerRunState.clearProviderRunState(providerRunStore, message.cliId || activeId);
         updateTaskStatus(taskBySessionId[message.sessionId], { status: 'failed' });
         delete taskBySessionId[message.sessionId];
-        if (!codexRendererEnabled) {
+        if (codexRendererEnabled && message.threadId) {
+          activeId = message.cliId || activeId;
+          activeThreadByProvider[activeId] = message.threadId;
+          codexRenderer.ensureThread(activeId, message.threadId);
+          codexRenderer.setActiveContext(activeId, message.threadId);
+        } else if (!codexRendererEnabled) {
           addMessage(
             message.cliId || activeId,
             'error',

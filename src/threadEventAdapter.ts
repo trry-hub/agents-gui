@@ -37,6 +37,13 @@ export interface ThreadEventAdapterOptions {
   streamId?: string;
 }
 
+export interface ActiveRendererRun {
+  providerId: string;
+  threadId: string;
+  sessionId: string;
+  turnId: string;
+}
+
 const MAX_REPLAY_ENVELOPES = 4096;
 
 export class ThreadEventAdapter {
@@ -98,6 +105,18 @@ export class ThreadEventAdapter {
 
   replayBuffered(): ThreadEventEnvelope[] {
     return [...this.replayBuffer];
+  }
+
+  activeRuns(): ActiveRendererRun[] {
+    return Array.from(
+      this.activeTurnBySession.entries(),
+      ([sessionId, binding]) => ({
+        providerId: binding.providerId,
+        threadId: binding.threadId,
+        sessionId,
+        turnId: binding.turnId,
+      })
+    );
   }
 
   private startTurn(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {

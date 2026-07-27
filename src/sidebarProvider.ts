@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ApiProviderClient } from './apiProviderClient';
@@ -316,6 +317,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       permissionMode:
         action === 'explainSelection' ? preferredReadOnlyPermission(profile) : undefined,
       text: runtimeDefaultActionText(this.locale, action),
+      threadId: `${cliId}-editor-${randomUUID()}`,
       contextOptions: {
         includeWorkspace: true,
         includeCurrentFile: true,
@@ -450,6 +452,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     for (const envelope of this.threadEventAdapter.replayBuffered()) {
       await webview.postMessage(envelope);
     }
+    await webview.postMessage({
+      command: 'rendererRuntimeSnapshot',
+      runs: this.threadEventAdapter.activeRuns(),
+    });
   }
 
   stopAll(): void {

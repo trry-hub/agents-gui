@@ -274,6 +274,34 @@ test('adapter buffers canonical lifecycle events for webview reload replay', () 
   assert.ok(replay.every(({ streamId }) => streamId === 'host-a'));
 });
 
+test('adapter exposes active runtime bindings for webview run-state recovery', () => {
+  const adapter = new ThreadEventAdapter({ now: () => 42, streamId: 'host-a' });
+  adapter.accept({
+    command: 'requestStarted',
+    cliId: 'codex',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'build',
+  });
+
+  assert.deepEqual(adapter.activeRuns(), [
+    {
+      providerId: 'codex',
+      threadId: 'thread-1',
+      sessionId: 'runtime-1',
+      turnId: adapter.activeRuns()[0].turnId,
+    },
+  ]);
+
+  adapter.accept({
+    command: 'sessionEnd',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    exitCode: 0,
+  });
+  assert.deepEqual(adapter.activeRuns(), []);
+});
+
 test('sidebar dual-delivers canonical envelopes and preserves the legacy lifecycle message', () => {
   const assistantTypes = readFileSync(
     new URL('../src/assistantTypes.ts', import.meta.url),
@@ -300,6 +328,9 @@ test('sidebar dual-delivers canonical envelopes and preserves the legacy lifecyc
     sidebar,
     /case 'codexRendererReady':\s*await this\.replayBufferedThreadEvents\(\);/
   );
+  assert.match(sidebar, /command: 'rendererRuntimeSnapshot'/);
+  assert.match(sidebar, /runs: this\.threadEventAdapter\.activeRuns\(\)/);
+  assert.match(sidebar, /threadId: `\$\{cliId\}-editor-\$\{randomUUID\(\)\}`/);
   assert.match(
     sidebar,
     /const envelopes = this\.threadEventAdapter\.accept\(message\);[\s\S]*webview\.postMessage\(envelope\)[\s\S]*webview\.postMessage\(message\)/

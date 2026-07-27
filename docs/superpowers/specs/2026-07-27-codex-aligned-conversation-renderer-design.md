@@ -369,7 +369,8 @@ Running legacy assistant placeholders become stopped items. A Webview reload
 also announces renderer readiness and requests the host's bounded canonical
 replay buffer. Already persisted event identities are ignored; events emitted
 during the reload gap reconcile the active turn without creating a duplicate
-assistant item.
+assistant item. The same handshake restores active provider, runtime session,
+and task bindings so composer controls remain locked to the running process.
 
 ## Feature Flag and Rollback
 
@@ -393,7 +394,9 @@ When the flag is enabled:
 
 Before the flag-off shell renders or persists, it projects any version-2
 conversation snapshot into the legacy thread/message shape. This makes the
-error-boundary recovery path lossless for React-only turns.
+error-boundary recovery path lossless for React-only turns. If the renderer
+bundle is unavailable and projection cannot run, the original canonical
+snapshot is retained verbatim instead of being cleared.
 
 ## Build and Asset Delivery
 

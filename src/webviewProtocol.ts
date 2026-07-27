@@ -8,6 +8,7 @@ import type {
 import type { ApiProviderSettings } from './apiProviders';
 import type { CliAuthAction, CliProfile } from './cliProfiles';
 import type { ThreadEventEnvelope } from './threadProtocol';
+import type { ActiveRendererRun } from './threadEventAdapter';
 
 export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | 'mcp' | string;
 
@@ -120,6 +121,7 @@ export type HostToWebviewMessage =
   | { command: 'mcpServerSaved'; cliId: string; ok: boolean; message?: string; code?: string }
   | { command: 'openProviderSettings'; section?: SettingsSection }
   | { command: 'switchProvider'; providerId: string }
+  | { command: 'rendererRuntimeSnapshot'; runs: ActiveRendererRun[] }
   | ({
       command: 'requestStarted';
       cliId: string;
