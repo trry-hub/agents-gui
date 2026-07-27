@@ -1,20 +1,41 @@
 import * as vscode from 'vscode';
+import {
+  resolveApiProviderRuntime,
+  sanitizeApiProviderSettings,
+  type CustomApiProviderConfig,
+} from './apiProviders';
 import { SidebarProvider } from './sidebarProvider';
 import { CliManager } from './cliManager';
 import { CliAgentRuntime } from './agentRuntime';
+import { createCliAgentCapabilityRegistry } from './cliAgentCapabilities';
+import { CLI_PROFILES } from './cliProfiles';
+import { CliTextGenerationAdapter } from './cliTextGenerationAdapter';
 import { CliOpenCodeAgentCapability } from './openCodeAgentCapability';
 import { CommitMessageCommand } from './commitMessageCommand';
 import { runExtensionSmokeProbe } from './extensionSmokeHarness';
 import { resolveRuntimeLocale, runtimeT } from './localization';
+import { OpenCodeConfigSync } from './openCodeConfigSync';
 import { SYNCED_GLOBAL_STATE_KEYS } from './syncedState';
+import { GenerateCommitMessageUseCase } from './textGeneration';
 
 export function activate(context: vscode.ExtensionContext) {
   const locale = resolveRuntimeLocale(vscode.env.language);
   context.globalState.setKeysForSync(SYNCED_GLOBAL_STATE_KEYS);
   const cliManager = new CliManager();
   const agentRuntime = new CliAgentRuntime(cliManager);
+  const agentCapabilityRegistry = createCliAgentCapabilityRegistry(CLI_PROFILES);
   const openCodeCapability = new CliOpenCodeAgentCapability(cliManager);
-  const commitMessageCommand = new CommitMessageCommand(cliManager);
+  const openCodeConfig = new OpenCodeConfigSync();
+  const textGenerationAdapter = new CliTextGenerationAdapter(cliManager, {
+    resolveProviderRuntime: (providerId) =>
+      resolveApiProviderRuntime(readApiProviderSettings(), providerId, process.env),
+    readOpenCodeConfig: () => openCodeConfig.readConfig(),
+  });
+  const generateCommitMessage = new GenerateCommitMessageUseCase(textGenerationAdapter);
+  const commitMessageCommand = new CommitMessageCommand(
+    textGenerationAdapter,
+    generateCommitMessage
+  );
   let sidebarProvider: SidebarProvider | undefined;
 
   const getSidebarProvider = (showWarning = true): SidebarProvider | undefined => {
@@ -66,14 +87,17 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents-gui.openProviderSettings', async (section = 'agents') => {
-      const provider = getSidebarProvider(false);
-      if (!provider) {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'agents-gui');
-        return;
+    vscode.commands.registerCommand(
+      'agents-gui.openProviderSettings',
+      async (section = 'agents') => {
+        const provider = getSidebarProvider(false);
+        if (!provider) {
+          await vscode.commands.executeCommand('workbench.action.openSettings', 'agents-gui');
+          return;
+        }
+        await provider.openProviderSettings(section);
       }
-      await provider.openProviderSettings(section);
-    })
+    )
   );
 
   context.subscriptions.push(
@@ -131,9 +155,12 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents-gui.generateCommitMessage', (rootUri, _resourceGroups, token) => {
-      return commitMessageCommand.run(rootUri, token);
-    })
+    vscode.commands.registerCommand(
+      'agents-gui.generateCommitMessage',
+      (rootUri, _resourceGroups, token) => {
+        return commitMessageCommand.run(rootUri, token);
+      }
+    )
   );
 
   context.subscriptions.push(
@@ -150,14 +177,15 @@ export function activate(context: vscode.ExtensionContext) {
 
   if (context.extensionMode !== vscode.ExtensionMode.Production) {
     context.subscriptions.push(
-      vscode.commands.registerCommand('agents-gui.internal.runSmoke', () => (
+      vscode.commands.registerCommand('agents-gui.internal.runSmoke', () =>
         runExtensionSmokeProbe(context.extensionUri, { storageUri: context.globalStorageUri })
-      ))
+      )
     );
   }
 
   try {
     sidebarProvider = new SidebarProvider(context.extensionUri, agentRuntime, {
+      agentCapabilityRegistry,
       extensionMode: context.extensionMode,
       openCodeCapability,
       state: context.globalState,
@@ -166,11 +194,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register sidebar webview provider
     context.subscriptions.push(
-      vscode.window.registerWebviewViewProvider(
-        SidebarProvider.viewType,
-        sidebarProvider,
-        { webviewOptions: { retainContextWhenHidden: true } }
-      )
+      vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebarProvider, {
+        webviewOptions: { retainContextWhenHidden: true },
+      })
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -188,4 +214,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   // cleanup handled by disposables
+}
+
+function readApiProviderSettings() {
+  const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
+  return sanitizeApiProviderSettings({
+    customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
+    defaultProviderId: config.get<string>('defaultProviderId', ''),
+    agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
+  });
 }

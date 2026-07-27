@@ -7,11 +7,7 @@ export interface AssistantAgentModeRef {
 }
 
 export type AssistantActionId =
-  | 'freeform'
-  | 'explainSelection'
-  | 'reviewFile'
-  | 'generateTests'
-  | 'refactorSelection';
+  'freeform' | 'explainSelection' | 'reviewFile' | 'generateTests' | 'refactorSelection';
 
 export interface AssistantProviderRef {
   id: string;
@@ -153,12 +149,7 @@ export interface AssistantOpenCodeStatus {
 }
 
 export type AssistantOpenCodeNativeCommand =
-  | 'share'
-  | 'unshare'
-  | 'compact'
-  | 'fork'
-  | 'undo'
-  | 'redo';
+  'share' | 'unshare' | 'compact' | 'fork' | 'undo' | 'redo';
 
 export interface AssistantOpenCodeNativeCommandResult {
   command: AssistantOpenCodeNativeCommand;

@@ -41,6 +41,9 @@ export class OpenCodeConfigSync {
   /**
    * Resolve which API provider is active for opencode, then write it into
    * opencode.json so OpenCode picks it up natively.
+   *
+   * Skips the write when the config already matches to avoid unnecessary file
+   * I/O and OpenCode server reloads on every startup.
    */
   async sync(settings: ApiProviderSettings): Promise<void> {
     const provider = resolveActiveProviderForOpenCode(settings);
@@ -48,7 +51,31 @@ export class OpenCodeConfigSync {
       return;
     }
 
+    // Skip if the config already has the right provider/model — avoids
+    // rewriting opencode.json (and triggering server reloads) on every startup.
+    const providerKey = `agents_gui_${sanitizeKey(provider.id || provider.name || 'custom')}`;
+    const canonicalModelId = resolveCanonicalModelId(
+      provider,
+      buildOpenCodeProviderEntry(provider)
+    );
+    const expectedModel = `${providerKey}/${canonicalModelId || provider.model}`;
+    if (this.readCurrentModel() === expectedModel && this.hasSyncedProvider(providerKey)) {
+      return;
+    }
+
     await this.writeProviderConfig(provider);
+  }
+
+  /**
+   * Check whether a synced provider entry already exists in opencode.json.
+   */
+  private hasSyncedProvider(providerKey: string): boolean {
+    const config = this.readConfig();
+    const providers = config?.provider;
+    if (!providers || typeof providers !== 'object') {
+      return false;
+    }
+    return Boolean((providers as Record<string, unknown>)[providerKey]);
   }
 
   /**
@@ -121,11 +148,7 @@ export class OpenCodeConfigSync {
     };
 
     await this.backupConfig(existing);
-    await fs.promises.writeFile(
-      this.configPath,
-      `${JSON.stringify(next, null, 2)}\n`,
-      'utf8'
-    );
+    await fs.promises.writeFile(this.configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   }
 
   private async backupConfig(currentConfig: Record<string, unknown>): Promise<void> {
@@ -203,13 +226,8 @@ function resolveActiveProviderForOpenCode(
  * - openai protocol → @ai-sdk/openai-compatible
  * - anthropic protocol → @ai-sdk/anthropic
  */
-function buildOpenCodeProviderEntry(
-  provider: CustomApiProviderConfig
-): Record<string, unknown> {
-  const npm =
-    provider.protocol === 'anthropic'
-      ? '@ai-sdk/anthropic'
-      : '@ai-sdk/openai-compatible';
+function buildOpenCodeProviderEntry(provider: CustomApiProviderConfig): Record<string, unknown> {
+  const npm = provider.protocol === 'anthropic' ? '@ai-sdk/anthropic' : '@ai-sdk/openai-compatible';
 
   const options: Record<string, unknown> = {};
   if (provider.apiKey) {
@@ -276,10 +294,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function sanitizeKey(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'custom';
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'custom'
+  );
 }

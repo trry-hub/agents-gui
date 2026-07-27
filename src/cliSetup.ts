@@ -47,7 +47,9 @@ export class CliSetupController {
       return;
     }
     await vscode.env.clipboard.writeText(text);
-    vscode.window.showInformationMessage(runtimeT(this.locale, 'notification.installCommandCopied'));
+    vscode.window.showInformationMessage(
+      runtimeT(this.locale, 'notification.installCommandCopied')
+    );
   }
 
   async installCli(cliId: unknown): Promise<void> {

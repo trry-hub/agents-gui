@@ -1,13 +1,8 @@
 import { AssistantActionId } from './assistantTypes';
 
-const SELECTION_ACTIONS = new Set<AssistantActionId>([
-  'explainSelection',
-  'refactorSelection',
-]);
+const SELECTION_ACTIONS = new Set<AssistantActionId>(['explainSelection', 'refactorSelection']);
 
-const ACTIVE_FILE_ACTIONS = new Set<AssistantActionId>([
-  'reviewFile',
-]);
+const ACTIVE_FILE_ACTIONS = new Set<AssistantActionId>(['reviewFile']);
 
 export function actionRequiresSelection(action: AssistantActionId): boolean {
   return SELECTION_ACTIONS.has(action);

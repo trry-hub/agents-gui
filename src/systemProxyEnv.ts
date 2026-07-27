@@ -2,7 +2,9 @@ import { execFileSync } from 'child_process';
 
 let cachedProxyEnv: Record<string, string> | undefined;
 
-export function getSystemProxyEnv(sourceEnv: NodeJS.ProcessEnv = process.env): Record<string, string> {
+export function getSystemProxyEnv(
+  sourceEnv: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
   if (hasProxyEnv(sourceEnv) || process.platform !== 'darwin') {
     return {};
   }
@@ -14,11 +16,11 @@ export function getSystemProxyEnv(sourceEnv: NodeJS.ProcessEnv = process.env): R
 function hasProxyEnv(env: NodeJS.ProcessEnv): boolean {
   return Boolean(
     env.HTTP_PROXY ||
-      env.HTTPS_PROXY ||
-      env.ALL_PROXY ||
-      env.http_proxy ||
-      env.https_proxy ||
-      env.all_proxy
+    env.HTTPS_PROXY ||
+    env.ALL_PROXY ||
+    env.http_proxy ||
+    env.https_proxy ||
+    env.all_proxy
   );
 }
 
@@ -71,7 +73,11 @@ function readScutilProxy(): string {
   }
 }
 
-function readProxyUrl(output: string, prefix: 'HTTP' | 'HTTPS' | 'SOCKS', scheme: 'http' | 'socks5'): string {
+function readProxyUrl(
+  output: string,
+  prefix: 'HTTP' | 'HTTPS' | 'SOCKS',
+  scheme: 'http' | 'socks5'
+): string {
   const enabled = readScutilValue(output, `${prefix}Enable`);
   const host = readScutilValue(output, `${prefix}Proxy`);
   const port = readScutilValue(output, `${prefix}Port`);

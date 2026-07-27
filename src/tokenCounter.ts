@@ -43,11 +43,12 @@ export function estimateTextTokens(text: string, tokenizer?: CliTokenizerConfig)
     otherChars += 1;
   }
 
-  const asciiCharsPerToken = tokenizer?.provider === 'anthropic'
-    ? 3.7
-    : tokenizer?.provider === 'openai' && tokenizer.encoding === 'cl100k_base'
-      ? 3.8
-      : 4;
+  const asciiCharsPerToken =
+    tokenizer?.provider === 'anthropic'
+      ? 3.7
+      : tokenizer?.provider === 'openai' && tokenizer.encoding === 'cl100k_base'
+        ? 3.8
+        : 4;
   const asciiTokens = asciiChars / asciiCharsPerToken;
   const cjkTokens = cjkChars * 0.95;
   const otherTokens = otherChars * 0.6;

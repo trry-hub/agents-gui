@@ -49,12 +49,11 @@ export function parseOpenCodeConfigAgents(config: unknown): OpenCodeAgentDiscove
   const modelBoundAgentIds: string[] = [];
   let defaultAgentModel: string | undefined;
   for (const [id, value] of Object.entries(agents as Record<string, unknown>)) {
-    const agent = value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {};
-    const role = agent.mode === 'primary' || agent.mode === 'subagent'
-      ? agent.mode
-      : 'primary';
+    const agent =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    const role = agent.mode === 'primary' || agent.mode === 'subagent' ? agent.mode : 'primary';
     if (role !== 'primary' || isInternalOpenCodeAgent(id)) {
       continue;
     }
@@ -86,7 +85,7 @@ export function parseOpenCodeModelState(state: unknown): OpenCodeModelState {
     openCodeModelSelectionId(record.model) ??
     pickString(record.currentModel, record.currentModelId, record.defaultModel);
   const recentModelIds = Array.isArray(record.recent)
-    ? record.recent.map(openCodeModelSelectionId).filter(Boolean) as string[]
+    ? (record.recent.map(openCodeModelSelectionId).filter(Boolean) as string[])
     : [];
   const currentModelId = explicitCurrent ?? recentModelIds[0];
   return {
@@ -102,7 +101,7 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
     /^\s*"default_agent"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
   );
   const topLevelModelId = parseJsonStringCapture(
-    /^  "model"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
+    /^ {2}"model"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
   );
   const modes: CliAgentMode[] = [];
   const modelBoundAgentIds: string[] = [];
@@ -138,18 +137,18 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.replace(ANSI_PATTERN, '');
     if (!inAgentBlock) {
-      if (/^  "agent"\s*:\s*\{/.test(line)) {
+      if (/^ {2}"agent"\s*:\s*\{/.test(line)) {
         inAgentBlock = true;
       }
       continue;
     }
 
-    if (/^  \}/.test(line)) {
+    if (/^ {2}\}/.test(line)) {
       pushCurrent();
       break;
     }
 
-    const agentMatch = /^    "((?:\\.|[^"\\])*)"\s*:\s*\{/.exec(line);
+    const agentMatch = /^ {4}"((?:\\.|[^"\\])*)"\s*:\s*\{/.exec(line);
     if (agentMatch) {
       pushCurrent();
       const id = parseJsonStringCapture(agentMatch[1]);
@@ -181,7 +180,12 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
     }
   }
 
-  return { modes, defaultAgentId, defaultModelId: topLevelModelId ?? defaultAgentModelId, modelBoundAgentIds };
+  return {
+    modes,
+    defaultAgentId,
+    defaultModelId: topLevelModelId ?? defaultAgentModelId,
+    modelBoundAgentIds,
+  };
 }
 
 export function parseOpenCodeModelsOutput(output: string): CliModelOption[] {
@@ -234,12 +238,14 @@ export function parseOpenCodeProviderModels(payload: unknown): CliModelOption[] 
       }
 
       seen.add(fullId);
-      options.push(createOpenCodeModelOption(
-        fullId,
-        pickString(model.name) ?? undefined,
-        providerName,
-        parseOpenCodeReasoningVariantOptions(model)
-      ));
+      options.push(
+        createOpenCodeModelOption(
+          fullId,
+          pickString(model.name) ?? undefined,
+          providerName,
+          parseOpenCodeReasoningVariantOptions(model)
+        )
+      );
     }
   }
 
@@ -273,7 +279,9 @@ export function parseOpenCodeModelMetadata(payload: unknown): OpenCodeModelMetad
   return result;
 }
 
-export function parseOpenCodeModelId(modelId: string | undefined): OpenCodeModelSelection | undefined {
+export function parseOpenCodeModelId(
+  modelId: string | undefined
+): OpenCodeModelSelection | undefined {
   if (!modelId || modelId === 'default' || modelId === 'custom') {
     return undefined;
   }
@@ -299,14 +307,16 @@ function createOpenCodeAgentMode(
     id,
     label,
     description: agentDescription ? `${sourceDescription} ${agentDescription}` : sourceDescription,
-    instruction:
-      `OpenCode ${label} agent: use the provider-native agent behavior configured by OpenCode.`,
+    instruction: `OpenCode ${label} agent: use the provider-native agent behavior configured by OpenCode.`,
     args: ['--agent', id],
   };
 }
 
 function isInternalOpenCodeAgent(id: string): boolean {
-  const normalized = id.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().toLowerCase();
+  const normalized = id
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toLowerCase();
   return normalized === 'title' || normalized === 'summary' || normalized === 'compaction';
 }
 
@@ -327,12 +337,14 @@ function parseOpenCodeModelArray(models: unknown[]): CliModelOption[] {
     }
 
     seen.add(fullId);
-    options.push(createOpenCodeModelOption(
-      fullId,
-      pickString(model.name) ?? undefined,
-      undefined,
-      parseOpenCodeReasoningVariantOptions(model)
-    ));
+    options.push(
+      createOpenCodeModelOption(
+        fullId,
+        pickString(model.name) ?? undefined,
+        undefined,
+        parseOpenCodeReasoningVariantOptions(model)
+      )
+    );
   }
   return options;
 }
@@ -345,9 +357,10 @@ function createOpenCodeModelOption(
 ): CliModelOption {
   const [provider, ...modelParts] = id.split('/');
   const modelName = modelParts.join('/') || id;
-  const variantDescription = variantOptions.length > 0
-    ? ` Supports OpenCode reasoning depth: ${variantOptions.join(', ')}.`
-    : '';
+  const variantDescription =
+    variantOptions.length > 0
+      ? ` Supports OpenCode reasoning depth: ${variantOptions.join(', ')}.`
+      : '';
   return {
     id,
     label: label ?? id,
@@ -360,7 +373,7 @@ function createOpenCodeModelOption(
 
 function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -397,9 +410,7 @@ function parseOpenCodeReasoningVariantOptions(model: Record<string, unknown>): s
     return [];
   }
 
-  const reasoningOptions = Array.isArray(model.reasoning_options)
-    ? model.reasoning_options
-    : [];
+  const reasoningOptions = Array.isArray(model.reasoning_options) ? model.reasoning_options : [];
   const effortOption = reasoningOptions
     .map(objectRecord)
     .find((option) => pickString(option.type) === 'effort');

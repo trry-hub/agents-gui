@@ -6,21 +6,83 @@ const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.
 const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
 const cliDiscoverySource = readFileSync(new URL('../src/cliDiscovery.ts', import.meta.url), 'utf8');
-const cliProcessRunnerSource = readFileSync(new URL('../src/cliProcessRunner.ts', import.meta.url), 'utf8');
-const apiProviderClientSource = readFileSync(new URL('../src/apiProviderClient.ts', import.meta.url), 'utf8');
+const cliProcessRunnerSource = readFileSync(
+  new URL('../src/cliProcessRunner.ts', import.meta.url),
+  'utf8'
+);
+const apiProviderClientSource = readFileSync(
+  new URL('../src/apiProviderClient.ts', import.meta.url),
+  'utf8'
+);
 const agentRuntimeSource = readFileSync(new URL('../src/agentRuntime.ts', import.meta.url), 'utf8');
-const agentSessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
-const attachmentStoreSource = readFileSync(new URL('../src/attachmentStore.ts', import.meta.url), 'utf8');
-const openCodeAgentCapabilitySource = readFileSync(new URL('../src/openCodeAgentCapability.ts', import.meta.url), 'utf8');
-const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
-const openCodeServerClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-const extensionSmokeHarnessSource = readFileSync(new URL('../src/extensionSmokeHarness.ts', import.meta.url), 'utf8');
-const webviewProtocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
-const webviewHtmlRendererSource = readFileSync(new URL('../src/webviewHtmlRenderer.ts', import.meta.url), 'utf8');
-const architectureDoc = readFileSync(new URL('../docs/architecture/agent-runtime.md', import.meta.url), 'utf8');
-const extensionSmokeRunnerSource = readFileSync(new URL('../tests/extension-smoke/run.mjs', import.meta.url), 'utf8');
-const extensionSmokeSuiteSource = readFileSync(new URL('../tests/extension-smoke/suite/index.js', import.meta.url), 'utf8');
-const releaseVerifySource = readFileSync(new URL('../scripts/verify-release.mjs', import.meta.url), 'utf8');
+const agentSessionControllerSource = readFileSync(
+  new URL('../src/agentSessionController.ts', import.meta.url),
+  'utf8'
+);
+const attachmentStoreSource = readFileSync(
+  new URL('../src/attachmentStore.ts', import.meta.url),
+  'utf8'
+);
+const openCodeAgentCapabilitySource = readFileSync(
+  new URL('../src/openCodeAgentCapability.ts', import.meta.url),
+  'utf8'
+);
+const openCodeLocalStateSource = readFileSync(
+  new URL('../src/openCodeLocalState.ts', import.meta.url),
+  'utf8'
+);
+const openCodeServerClientSource = readFileSync(
+  new URL('../src/openCodeServerClient.ts', import.meta.url),
+  'utf8'
+);
+const extensionSmokeHarnessSource = readFileSync(
+  new URL('../src/extensionSmokeHarness.ts', import.meta.url),
+  'utf8'
+);
+const webviewProtocolSource = readFileSync(
+  new URL('../src/webviewProtocol.ts', import.meta.url),
+  'utf8'
+);
+const webviewHtmlRendererSource = readFileSync(
+  new URL('../src/webviewHtmlRenderer.ts', import.meta.url),
+  'utf8'
+);
+const architectureDoc = readFileSync(
+  new URL('../docs/architecture/agent-runtime.md', import.meta.url),
+  'utf8'
+);
+const taskRuntimeArchitectureDoc = readFileSync(
+  new URL('../docs/architecture/task-runtime-control-plane.md', import.meta.url),
+  'utf8'
+);
+const textGenerationSource = readFileSync(
+  new URL('../src/textGeneration.ts', import.meta.url),
+  'utf8'
+);
+const cliTextGenerationAdapterSource = readFileSync(
+  new URL('../src/cliTextGenerationAdapter.ts', import.meta.url),
+  'utf8'
+);
+const agentCapabilitiesSource = readFileSync(
+  new URL('../src/agentCapabilities.ts', import.meta.url),
+  'utf8'
+);
+const cliAgentCapabilitiesSource = readFileSync(
+  new URL('../src/cliAgentCapabilities.ts', import.meta.url),
+  'utf8'
+);
+const extensionSmokeRunnerSource = readFileSync(
+  new URL('../tests/extension-smoke/run.mjs', import.meta.url),
+  'utf8'
+);
+const extensionSmokeSuiteSource = readFileSync(
+  new URL('../tests/extension-smoke/suite/index.js', import.meta.url),
+  'utf8'
+);
+const releaseVerifySource = readFileSync(
+  new URL('../scripts/verify-release.mjs', import.meta.url),
+  'utf8'
+);
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const esbuildScript = readFileSync(new URL('../esbuild.mjs', import.meta.url), 'utf8');
 const vscodeIgnore = readFileSync(new URL('../.vscodeignore', import.meta.url), 'utf8');
@@ -31,9 +93,10 @@ function escapeRegExp(value) {
 
 test('all contributed commands are registered by the extension host entrypoint', () => {
   for (const command of manifest.contributes.commands.map((entry) => entry.command)) {
+    const escaped = escapeRegExp(command);
     assert.match(
       extensionSource,
-      new RegExp(`registerCommand\\('${escapeRegExp(command)}'`),
+      new RegExp(`registerCommand\\(\\s*'${escaped}'`),
       `${command} must be registered in src/extension.ts`
     );
   }
@@ -44,12 +107,20 @@ test('view title commands are registered before the sidebar provider is construc
   assert.notEqual(providerIndex, -1, 'expected SidebarProvider construction in src/extension.ts');
 
   for (const command of ['agents-gui.refreshProviders', 'agents-gui.openProviderSettings']) {
-    const commandIndex = extensionSource.indexOf(`registerCommand('${command}'`);
-    assert.notEqual(commandIndex, -1, `expected ${command} registration in src/extension.ts`);
-    assert.ok(
-      commandIndex < providerIndex,
-      `${command} must be registered before SidebarProvider construction`
-    );
+    const commandIndex = extensionSource.indexOf(`registerCommand(\n      '${command}'`);
+    if (commandIndex === -1) {
+      const commandIndex2 = extensionSource.indexOf(`registerCommand('${command}'`);
+      assert.notEqual(commandIndex2, -1, `expected ${command} registration in src/extension.ts`);
+      assert.ok(
+        commandIndex2 < providerIndex,
+        `${command} must be registered before SidebarProvider construction`
+      );
+    } else {
+      assert.ok(
+        commandIndex < providerIndex,
+        `${command} must be registered before SidebarProvider construction`
+      );
+    }
   }
 });
 
@@ -60,21 +131,36 @@ test('refresh providers title action reloads the full sidebar state', () => {
   );
   assert.match(
     sidebarSource,
-    /async refreshProviders\(\): Promise<void> \{\s*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);\s*await this\.sendProfiles\(\{ force: true \}\);\s*await this\.sendContextSummary\(\);\s*await this\.sendHomeAgentSettings\(\);\s*await this\.sendApiProviderSettings\(\);\s*await this\.sendCommitMessageSettings\(\);\s*\}/s
+    /async refreshProviders\(\): Promise<void> \{[\s\S]*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);[\s\S]*await this\.sendProfiles\(\{ force: true \}\);[\s\S]*await this\.sendContextSummary\(\);[\s\S]*await this\.sendHomeAgentSettings\(\);[\s\S]*await this\.sendApiProviderSettings\(\);[\s\S]*await this\.sendCommitMessageSettings\(\);[\s\S]*\}/
   );
 });
 
 test('extension host depends on agent runtime and typed webview protocol ports', () => {
   assert.match(extensionSource, /import \{ CliAgentRuntime \} from '\.\/agentRuntime';/);
-  assert.match(extensionSource, /import \{ CliOpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/);
+  assert.match(
+    extensionSource,
+    /import \{ CliOpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/
+  );
   assert.match(extensionSource, /const agentRuntime = new CliAgentRuntime\(cliManager\);/);
-  assert.match(extensionSource, /const openCodeCapability = new CliOpenCodeAgentCapability\(cliManager\);/);
+  assert.match(
+    extensionSource,
+    /const openCodeCapability = new CliOpenCodeAgentCapability\(cliManager\);/
+  );
   assert.match(extensionSource, /new SidebarProvider\(context\.extensionUri, agentRuntime, \{/);
-  assert.match(sidebarSource, /import type \{ AgentProfileStatusOptions, AgentRuntime \} from '\.\/agentRuntime';/);
-  assert.match(sidebarSource, /import \{ AgentSessionController \} from '\.\/agentSessionController';/);
+  assert.match(
+    sidebarSource,
+    /import type \{ AgentProfileStatusOptions, AgentRuntime \} from '\.\/agentRuntime';/
+  );
+  assert.match(
+    sidebarSource,
+    /import \{ AgentSessionController \} from '\.\/agentSessionController';/
+  );
   assert.match(sidebarSource, /import \{ ImageAttachmentStore \} from '\.\/attachmentStore';/);
   assert.match(sidebarSource, /import \{ OpenCodeLocalState \} from '\.\/openCodeLocalState';/);
-  assert.match(sidebarSource, /import type \{ OpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/);
+  assert.match(
+    sidebarSource,
+    /import type \{ OpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/
+  );
   assert.doesNotMatch(sidebarSource, /import \{ CliManager, Session \} from '\.\/cliManager';/);
   assert.match(sidebarSource, /private readonly agentRuntime: AgentRuntime/);
   assert.match(sidebarSource, /private readonly sessionController: AgentSessionController/);
@@ -88,7 +174,10 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(sidebarSource, /this\.postToWebview\(\{/);
   assert.doesNotMatch(sidebarSource, /this\.view\?\.webview\.postMessage\(\{/);
   assert.match(sidebarSource, /import \{ renderWebviewHtml \} from '\.\/webviewHtmlRenderer';/);
-  assert.match(sidebarSource, /return renderWebviewHtml\(\{ extensionUri: this\.extensionUri, webview, locale: this\.locale \}\)/);
+  assert.match(
+    sidebarSource,
+    /return renderWebviewHtml\(\{ extensionUri: this\.extensionUri, webview, locale: this\.locale \}\)/
+  );
   assert.doesNotMatch(sidebarSource, /fs\.readFileSync\(htmlPath/);
   assert.match(webviewHtmlRendererSource, /export function renderWebviewHtml/);
   assert.match(webviewHtmlRendererSource, /const WEBVIEW_ASSETS = \[/);
@@ -104,8 +193,12 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(attachmentStoreSource, /export class ImageAttachmentStore/);
   assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
   assert.match(openCodeAgentCapabilitySource, /export interface OpenCodeAgentCapability/);
-  assert.match(openCodeAgentCapabilitySource, /export class CliOpenCodeAgentCapability implements OpenCodeAgentCapability/);
-  const runtimeInterface = agentRuntimeSource.match(/export interface AgentRuntime \{[\s\S]*?\n\}/)?.[0] ?? '';
+  assert.match(
+    openCodeAgentCapabilitySource,
+    /export class CliOpenCodeAgentCapability implements OpenCodeAgentCapability/
+  );
+  const runtimeInterface =
+    agentRuntimeSource.match(/export interface AgentRuntime \{[\s\S]*?\n\}/)?.[0] ?? '';
   assert.ok(runtimeInterface, 'expected AgentRuntime interface source');
   assert.doesNotMatch(runtimeInterface, /OpenCode/);
   assert.doesNotMatch(runtimeInterface, /runPrompt/);
@@ -118,6 +211,61 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(architectureDoc, /src\/attachmentStore\.ts/);
   assert.match(architectureDoc, /src\/openCodeLocalState\.ts/);
   assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
+});
+
+test('commit generation is wired as a task-scoped application use case', () => {
+  assert.match(
+    extensionSource,
+    /import \{ CliTextGenerationAdapter \} from '\.\/cliTextGenerationAdapter';/
+  );
+  assert.match(
+    extensionSource,
+    /import \{ GenerateCommitMessageUseCase \} from '\.\/textGeneration';/
+  );
+  assert.match(
+    extensionSource,
+    /const textGenerationAdapter = new CliTextGenerationAdapter\(cliManager,/
+  );
+  assert.match(
+    extensionSource,
+    /const generateCommitMessage = new GenerateCommitMessageUseCase\(textGenerationAdapter\);/
+  );
+  assert.match(
+    extensionSource,
+    /new CommitMessageCommand\(\s*textGenerationAdapter,\s*generateCommitMessage\s*\)/
+  );
+  assert.match(textGenerationSource, /export interface TextGenerationPort/);
+  assert.match(textGenerationSource, /export class GenerateCommitMessageUseCase/);
+  assert.match(
+    cliTextGenerationAdapterSource,
+    /implements TextGenerationPort, TextGenerationProviderRegistry/
+  );
+  assert.match(cliTextGenerationAdapterSource, /buildOpenCodeFastGenerationEnv/);
+  assert.match(cliSource, /const cwd = options\.cwd\?\.trim\(\) \|\| this\.getWorkspaceRoot\(\)/);
+  assert.match(architectureDoc, /task-runtime-control-plane\.md/);
+  assert.match(taskRuntimeArchitectureDoc, /fast text generation/);
+});
+
+test('interactive agent requests pass through the capability control plane', () => {
+  assert.match(
+    extensionSource,
+    /import \{ createCliAgentCapabilityRegistry \} from '\.\/cliAgentCapabilities';/
+  );
+  assert.match(
+    extensionSource,
+    /const agentCapabilityRegistry = createCliAgentCapabilityRegistry\(CLI_PROFILES\);/
+  );
+  assert.match(extensionSource, /agentCapabilityRegistry,/);
+  assert.match(sidebarSource, /resolveAgentTaskIntent/);
+  assert.match(sidebarSource, /resolveAgentCapabilityPolicy/);
+  assert.match(sidebarSource, /this\.agentCapabilityRegistry\.resolve\(/);
+  assert.match(sidebarSource, /capabilityResolution\.transport !== 'cli'/);
+  assert.match(cliAgentCapabilitiesSource, /export function createCliAgentCapabilityRegistry/);
+  assert.doesNotMatch(agentCapabilitiesSource, /from ['"]vscode['"]/);
+  assert.doesNotMatch(agentCapabilitiesSource, /CliManager/);
+  assert.doesNotMatch(agentCapabilitiesSource, /child_process/);
+  assert.match(taskRuntimeArchitectureDoc, /capability registry/i);
+  assert.match(taskRuntimeArchitectureDoc, /ACP[\s\S]*native[\s\S]*CLI/i);
 });
 
 test('session lifecycle stays behind a dedicated controller', () => {
@@ -160,7 +308,10 @@ test('OpenCode local state paths stay behind a dedicated adapter', () => {
 });
 
 test('extension smoke script covers command entrypoints and harnessed runtime flows', () => {
-  assert.equal(manifest.scripts['smoke:extension'], 'npm run build && node tests/extension-smoke/run.mjs');
+  assert.equal(
+    manifest.scripts['smoke:extension'],
+    'npm run build && node tests/extension-smoke/run.mjs'
+  );
   assert.equal(manifest.scripts['verify:release'], 'node scripts/verify-release.mjs');
   assert.match(JSON.stringify(manifest.devDependencies), /@vscode\/test-electron/);
   assert.match(extensionSource, /context\.extensionMode !== vscode\.ExtensionMode\.Production/);
@@ -193,7 +344,10 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
 
 test('opencode server IO stays behind the server client adapter', () => {
   assert.match(cliSource, /new OpenCodeServerClient/);
-  assert.match(cliSource, /this\.openCodeClient\.runPrompt\(prompt, token, directory, modelId, onPartial\)/);
+  assert.match(
+    cliSource,
+    /this\.openCodeClient\.runPrompt\(prompt, token, directory, modelId, onPartial\)/
+  );
   assert.match(cliSource, /this\.openCodeClient\.getStatus\(\)/);
   assert.match(cliSource, /this\.openCodeClient\.executeNativeCommand\(command, sessionId\)/);
   assert.match(cliSource, /this\.openCodeClient\.deleteSession\(sessionId\)/);
@@ -215,9 +369,12 @@ test('CLI discovery stays behind a dedicated provider discovery adapter', () => 
   assert.doesNotMatch(cliSource, /import \* as os from 'os';/);
   assert.match(cliDiscoverySource, /export class CliDiscovery/);
   assert.match(cliDiscoverySource, /async resolveCommandPath\(command: string\)/);
-  assert.match(cliDiscoverySource, /PROFILE_STATUS_CACHE_MS = 10_000/);
+  assert.match(cliDiscoverySource, /PROFILE_STATUS_CACHE_MS = 300_000/);
   assert.match(cliDiscoverySource, /private profileStatusInflight\?/);
-  assert.match(cliDiscoverySource, /async getProfilesWithStatus\(\s*baseProfiles: CliProfile\[\],\s*options: CliProfileStatusOptions = \{\}/s);
+  assert.match(
+    cliDiscoverySource,
+    /async getProfilesWithStatus\(\s*baseProfiles: CliProfile\[\],\s*options: CliProfileStatusOptions = \{\}/s
+  );
   assert.match(cliDiscoverySource, /expandProfileEnv/);
   assert.match(cliDiscoverySource, /import \* as fs from 'fs';/);
   assert.match(cliDiscoverySource, /import \* as os from 'os';/);
@@ -242,7 +399,10 @@ test('CLI process lifecycle stays behind a dedicated process runner', () => {
 test('custom API provider model fetching stays behind a provider client adapter', () => {
   assert.match(sidebarSource, /import \{ ApiProviderClient \} from '\.\/apiProviderClient';/);
   assert.match(sidebarSource, /private readonly apiProviderClient: ApiProviderClient/);
-  assert.match(sidebarSource, /this\.apiProviderClient\.listModels\(\{ protocol, baseUrl, apiKey \}\)/);
+  assert.match(
+    sidebarSource,
+    /this\.apiProviderClient\.listModels\(\{ protocol, baseUrl, apiKey \}\)/
+  );
   assert.doesNotMatch(sidebarSource, /import \* as http from 'http';/);
   assert.doesNotMatch(sidebarSource, /import \* as https from 'https';/);
   assert.doesNotMatch(sidebarSource, /function requestJson/);

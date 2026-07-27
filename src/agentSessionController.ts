@@ -231,7 +231,12 @@ export class AgentSessionController {
     } else {
       this.promptEchoBuffers.delete(session.id);
     }
-    if (!filtered.text && !normalized.thinking && !normalized.activities?.length && normalized.status !== 'thinking') {
+    if (
+      !filtered.text &&
+      !normalized.thinking &&
+      !normalized.activities?.length &&
+      normalized.status !== 'thinking'
+    ) {
       return;
     }
 
@@ -243,7 +248,8 @@ export class AgentSessionController {
       activities: normalized.activities,
       status: normalized.status,
       sessionId: session.id,
-      openCodeSessionId: openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
+      openCodeSessionId:
+        openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
       stream,
     });
   }
@@ -268,7 +274,8 @@ export class AgentSessionController {
     exitCode: number,
     openCodeSessionId: string | undefined
   ): void {
-    const resolvedSessionId = openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId();
+    const resolvedSessionId =
+      openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId();
     if (resolvedSessionId && resolvedSessionId.startsWith('ses')) {
       this.lastOpenCodeSessionIdByCli.set(session.cliId, resolvedSessionId);
       if (session.optionKey) {
@@ -291,7 +298,8 @@ export class AgentSessionController {
         cliId: session.cliId,
         text: filtered.text,
         sessionId: session.id,
-        openCodeSessionId: openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
+        openCodeSessionId:
+          openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
         stream: 'stdout',
       });
     }
@@ -301,7 +309,8 @@ export class AgentSessionController {
       cliId: session.cliId,
       exitCode,
       sessionId: session.id,
-      openCodeSessionId: openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
+      openCodeSessionId:
+        openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
     });
     this.cleanup(session);
   }

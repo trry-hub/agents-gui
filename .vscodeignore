@@ -1,7 +1,10 @@
 .vscode/**
 .vscode-test/**
 .github/**
+.husky/**
 .neuralmemory/**
+.prettierignore
+.prettierrc
 .playwright-mcp/**
 .claude/**
 .aider*
@@ -16,6 +19,7 @@ node_modules/**
 .gitignore
 tsconfig.json
 esbuild.mjs
+eslint.config.js
 dist/release-notes.md
 dist/release-docs/**
 dist/tiktoken_bg.wasm

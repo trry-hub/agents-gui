@@ -21,6 +21,7 @@ const WEBVIEW_ASSETS = [
   ['__COMPOSER_STATE_JS_URI__', ['media', 'composerState.js']],
   ['__PROVIDER_OPTIONS_JS_URI__', ['media', 'providerOptions.js']],
   ['__STATE_MANAGER_JS_URI__', ['media', 'stateManager.js']],
+  ['__PACED_REVEAL_JS_URI__', ['media', 'pacedReveal.js']],
   ['__MAIN_JS_URI__', ['media', 'main.js']],
 ] as const;
 
@@ -55,7 +56,11 @@ export function renderWebviewHtml(options: {
   return html;
 }
 
-function getWebviewUri(extensionUri: vscode.Uri, webview: vscode.Webview, ...paths: string[]): string {
+function getWebviewUri(
+  extensionUri: vscode.Uri,
+  webview: vscode.Webview,
+  ...paths: string[]
+): string {
   return webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, ...paths)).toString();
 }
 

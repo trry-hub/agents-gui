@@ -40,7 +40,8 @@ export class AssistantContextCollector {
     const workspaceFolder = editor
       ? vscode.workspace.getWorkspaceFolder(editor.document.uri)
       : workspaceFolders[0];
-    const workspaceName = vscode.workspace.name ?? workspaceFolder?.name ?? workspaceFolders[0]?.name;
+    const workspaceName =
+      vscode.workspace.name ?? workspaceFolder?.name ?? workspaceFolders[0]?.name;
 
     const snapshot: AssistantContextSnapshot = {
       diagnostics: [],
@@ -86,7 +87,10 @@ export class AssistantContextCollector {
     }
 
     if (options.includeSelection && !editor.selection.isEmpty) {
-      const bounded = boundText(document.getText(editor.selection), resolvedLimits.maxSelectionChars);
+      const bounded = boundText(
+        document.getText(editor.selection),
+        resolvedLimits.maxSelectionChars
+      );
       snapshot.selection = {
         text: bounded.text,
         startLine: editor.selection.start.line + 1,

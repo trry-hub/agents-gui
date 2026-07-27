@@ -10,10 +10,7 @@ import type {
 } from './assistantTypes';
 import type { CliModelOption, CliProfile } from './cliProfiles';
 import { getCliProfile } from './cliProfiles';
-import {
-  buildCliLookupPath,
-  mergePathEntries,
-} from './cliPathResolver';
+import { buildCliLookupPath, mergePathEntries } from './cliPathResolver';
 import { CliDiscovery, stableHash } from './cliDiscovery';
 import { CliProcessRunner } from './cliProcessRunner';
 import { OpenCodeServerClient, type OpenCodeEventStream } from './openCodeServerClient';
@@ -71,10 +68,11 @@ interface ResolvedBackgroundServer {
   port: number;
 }
 
-interface StartPromptOptions {
+export interface StartPromptOptions {
   attachBackgroundServer?: boolean;
   promptArgs?: string[];
   continueSessionId?: string;
+  cwd?: string;
 }
 
 export class CliManager {
@@ -121,30 +119,32 @@ export class CliManager {
     options: StartPromptOptions = {}
   ): Promise<Session | null> {
     const profile = getCliProfile(cliId);
-    if (!profile) { return null; }
+    if (!profile) {
+      return null;
+    }
 
-    const cwd = this.getWorkspaceRoot();
+    const cwd = options.cwd?.trim() || this.getWorkspaceRoot();
     const n = (this.counters.get(cliId) ?? 0) + 1;
     this.counters.set(cliId, n);
     const sessionId = `${cliId}-${n}`;
-    const command = await this.resolveCommandPath(profile.command) ?? profile.command;
+    const command = (await this.resolveCommandPath(profile.command)) ?? profile.command;
     const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
     const env = {
       ...process.env,
       ...getSystemProxyEnv(process.env),
-      PATH: mergePathEntries([
-        commandDir,
-        buildCliLookupPath(process.env.PATH, process.env.HOME),
-      ]),
+      PATH: mergePathEntries([commandDir, buildCliLookupPath(process.env.PATH, process.env.HOME)]),
       ...this.cliDiscovery.expandProfileEnv(profile.env, cwd),
       ...envOverrides,
     };
-    const backgroundAttachArgs = options.attachBackgroundServer === false
-      ? []
-      : await this.getBackgroundAttachArgs(profile, command, cwd, env);
+    const backgroundAttachArgs =
+      options.attachBackgroundServer === false
+        ? []
+        : await this.getBackgroundAttachArgs(profile, command, cwd, env);
     const promptArgs = options.promptArgs ?? profile.promptArgs;
     const continueArgs =
-      options.continueSessionId && cliId === 'opencode' && options.continueSessionId.startsWith('ses')
+      options.continueSessionId &&
+      cliId === 'opencode' &&
+      options.continueSessionId.startsWith('ses')
         ? ['--session', options.continueSessionId]
         : [];
     const args =
@@ -177,13 +177,14 @@ export class CliManager {
       onEnd.fire(exitCode);
       onEvent.fire({ type: 'end', exitCode, openCodeSessionId });
     };
-    const eventStreamUrl = options.attachBackgroundServer === false
-      ? undefined
-      : this.getOpenCodeEventStreamUrl(profile, backgroundAttachArgs);
+    const eventStreamUrl =
+      options.attachBackgroundServer === false
+        ? undefined
+        : this.getOpenCodeEventStreamUrl(profile, backgroundAttachArgs);
     const eventStream = eventStreamUrl
       ? this.openCodeClient.openEventStream(eventStreamUrl, (text, openCodeSessionId) => {
-        emitOutput(text, 'stdout', 'sse', openCodeSessionId);
-      })
+          emitOutput(text, 'stdout', 'sse', openCodeSessionId);
+        })
       : undefined;
 
     const proc = this.processRunner.spawnPromptProcess(
@@ -210,7 +211,9 @@ export class CliManager {
     };
 
     proc.stdout?.on('data', (data: Buffer) => {
-      const detectedOpenCodeSessionId = this.openCodeClient.extractSessionIdFromJsonText(data.toString());
+      const detectedOpenCodeSessionId = this.openCodeClient.extractSessionIdFromJsonText(
+        data.toString()
+      );
       if (detectedOpenCodeSessionId) {
         session.openCodeSessionId = detectedOpenCodeSessionId;
         eventStream?.setSessionId(detectedOpenCodeSessionId);
@@ -227,7 +230,12 @@ export class CliManager {
     });
 
     proc.stderr?.on('data', (data: Buffer) => {
-      emitOutput(data.toString(), 'stderr', 'process', session.openCodeSessionId ?? eventStream?.sessionId());
+      emitOutput(
+        data.toString(),
+        'stderr',
+        'process',
+        session.openCodeSessionId ?? eventStream?.sessionId()
+      );
     });
 
     let endEmitted = false;
@@ -267,7 +275,9 @@ export class CliManager {
 
   sendInput(sessionId: string, text: string, closeAfterWrite = false): boolean {
     const session = this.sessions.get(sessionId);
-    if (!session || !session.process.stdin || session.process.stdin.destroyed) { return false; }
+    if (!session || !session.process.stdin || session.process.stdin.destroyed) {
+      return false;
+    }
     const normalized = `${String(text || '').replace(/\n+$/, '')}\n`;
     session.process.stdin.write(normalized);
     if (closeAfterWrite) {
@@ -289,7 +299,9 @@ export class CliManager {
 
   stop(sessionId: string): void {
     const session = this.sessions.get(sessionId);
-    if (!session) { return; }
+    if (!session) {
+      return;
+    }
     try {
       session.eventStream?.close();
       this.processRunner.terminate(session.process);
@@ -359,10 +371,7 @@ export class CliManager {
     const env = {
       ...process.env,
       ...getSystemProxyEnv(process.env),
-      PATH: mergePathEntries([
-        commandDir,
-        buildCliLookupPath(process.env.PATH, process.env.HOME),
-      ]),
+      PATH: mergePathEntries([commandDir, buildCliLookupPath(process.env.PATH, process.env.HOME)]),
       ...this.cliDiscovery.expandProfileEnv(profile.env, cwd),
     };
     const attachArgs = await this.getBackgroundAttachArgs(profile, command, cwd, env);
@@ -386,14 +395,13 @@ export class CliManager {
 
     for (const server of this.resolveBackgroundServerCandidates(profile, cwd)) {
       const state = this.backgroundServers.get(server.key);
-      const ownedProcess =
-        state?.process && this.processRunner.isRunning(state.process);
+      const ownedProcess = state?.process && this.processRunner.isRunning(state.process);
 
-      if (ownedProcess && await this.isBackgroundServerAvailable(profile, server, cwd, 120)) {
+      if (ownedProcess && (await this.isBackgroundServerAvailable(profile, server, cwd, 120))) {
         return server.attachArgs;
       }
 
-      if (!ownedProcess && await this.waitForTcp(server.host, server.port, 120)) {
+      if (!ownedProcess && (await this.waitForTcp(server.host, server.port, 120))) {
         // Do not attach to stale OpenCode servers started by a previous extension host or another workspace.
         // Older servers can collapse provider/auth failures into generic "Unexpected server error" messages.
         continue;
@@ -415,7 +423,7 @@ export class CliManager {
       }
 
       const ready = await nextState.starting;
-      if (ready && await this.isBackgroundServerAvailable(profile, server, cwd, 1800)) {
+      if (ready && (await this.isBackgroundServerAvailable(profile, server, cwd, 1800))) {
         return server.attachArgs;
       }
     }
@@ -445,7 +453,9 @@ export class CliManager {
           key: `${profile.id}:${url}`,
           url,
           args: server.args.map((arg) => this.expandBackgroundServerArg(arg, cwd, port)),
-          attachArgs: server.attachArgs.map((arg) => this.expandBackgroundServerArg(arg, cwd, port)),
+          attachArgs: server.attachArgs.map((arg) =>
+            this.expandBackgroundServerArg(arg, cwd, port)
+          ),
           host: target.host,
           port: target.port,
         };
@@ -484,15 +494,10 @@ export class CliManager {
   }
 
   private expandBackgroundServerArg(value: string, cwd: string, port: number): string {
-    return value
-      .replace(/\{cwd\}/g, cwd)
-      .replace(/\{port\}/g, String(port));
+    return value.replace(/\{cwd\}/g, cwd).replace(/\{port\}/g, String(port));
   }
 
-  private getOpenCodeEventStreamUrl(
-    profile: CliProfile,
-    attachArgs: string[]
-  ): string | undefined {
+  private getOpenCodeEventStreamUrl(profile: CliProfile, attachArgs: string[]): string | undefined {
     if (profile.id !== 'opencode') {
       return undefined;
     }

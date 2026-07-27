@@ -1,36 +1,19 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import {
-  resolveApiProviderRuntime,
-  sanitizeApiProviderSettings,
-  type ApiProviderSettings,
-  type CustomApiProviderConfig,
-} from './apiProviders';
-import { CliManager, Session } from './cliManager';
-import {
-  CLI_PROFILES,
-  getCliAgentMode,
-  getCliPermissionMode,
-  getCliProfile,
-  getCliRuntimeMode,
-  resolveCliInstallHint,
-  type CliAgentMode,
-  type CliPermissionMode,
-  type CliProfile,
-} from './cliProfiles';
+import { CLI_PROFILES, getCliProfile, resolveCliInstallHint, type CliProfile } from './cliProfiles';
 import {
   buildCommitMessagePrompt,
-  cleanGeneratedCommitMessage,
   resolveCommitMessageLanguage,
   truncateCommitDiff,
   type CommitMessageLanguage,
   type CommitMessageLanguageSetting,
 } from './commitMessage';
 import {
-  flushCliOutputBuffer,
-  normalizeCliOutput,
-  normalizeCliOutputChunk,
-} from './outputFormatter';
+  GenerateCommitMessageUseCase,
+  TextGenerationError,
+  type TextGenerationCancellationSignal,
+  type TextGenerationProviderRegistry,
+} from './textGeneration';
 
 interface GitInputBox {
   value: string;
@@ -81,8 +64,6 @@ interface CommitMessageGenerationResult {
 const DEFAULT_CLI_ID = 'opencode';
 const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
 const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
-const OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS = ['run', '--format', 'json'];
-const COMMIT_MESSAGE_TIMEOUT_MS = 90_000;
 const HAS_STAGED_CHANGES_CONTEXT = 'agents-gui.hasStagedChanges';
 const STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui.commitMessageStagedRoots';
 const COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui.commitMessageGenerating';
@@ -100,22 +81,26 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     openSourceControl: 'Open Source Control',
     stageAllAndGenerate: 'Stage All and Generate',
     providerUnavailable: '{provider} is not installed or cannot be started.',
-    chooseInstalledProvider: '{provider} is not installed. Choose an installed provider for commit messages.',
+    chooseInstalledProvider:
+      '{provider} is not installed. Choose an installed provider for commit messages.',
     chooseCommitCli: 'Choose a CLI for this commit message',
     useProviderForCommitMessage: 'Use for Git commit messages',
     useOnceForCommitMessage: 'Use once for this commit message',
     openCommitSettings: 'Open Commit Message Settings',
     openCommitSettingsDescription: 'Configure CLI, language, and diff limits',
     providerSelected: '{provider} will be used for Git commit messages.',
-    providerSetupRequired: '{provider} is not installed. Install or configure a CLI to generate commit messages.',
+    providerSetupRequired:
+      '{provider} is not installed. Install or configure a CLI to generate commit messages.',
     openSetup: 'Open Setup',
     copyInstallCommand: 'Copy Install Command',
     installCommandCopied: 'Install command copied.',
     emptyOutput: 'The CLI did not return a commit message.',
     generated: 'Commit message generated from staged changes.',
     generatedTruncated: 'Commit message generated from truncated staged changes.',
-    generatedWithFallback: 'Commit message generated with {provider} after {fallbackProvider} was unavailable.',
-    generatedTruncatedWithFallback: 'Commit message generated from truncated staged changes with {provider} after {fallbackProvider} was unavailable.',
+    generatedWithFallback:
+      'Commit message generated with {provider} after {fallbackProvider} was unavailable.',
+    generatedTruncatedWithFallback:
+      'Commit message generated from truncated staged changes with {provider} after {fallbackProvider} was unavailable.',
     cancelled: 'Commit message generation was cancelled.',
     failed: 'Failed to generate commit message: {message}',
   },
@@ -145,7 +130,8 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     generated: '已根据暂存区变更生成提交信息。',
     generatedTruncated: '已根据截断后的暂存区变更生成提交信息。',
     generatedWithFallback: '已在 {fallbackProvider} 不可用后，降级使用 {provider} 生成提交信息。',
-    generatedTruncatedWithFallback: '已根据截断后的暂存区变更生成提交信息，并在 {fallbackProvider} 不可用后降级使用 {provider}。',
+    generatedTruncatedWithFallback:
+      '已根据截断后的暂存区变更生成提交信息，并在 {fallbackProvider} 不可用后降级使用 {provider}。',
     cancelled: '已取消生成提交信息。',
     failed: '生成提交信息失败：{message}',
   },
@@ -155,7 +141,8 @@ export class CommitMessageCommand {
   private readonly cancellationsByRoot = new Map<string, vscode.CancellationTokenSource>();
 
   constructor(
-    private readonly cliManager: CliManager
+    private readonly providerRegistry: TextGenerationProviderRegistry,
+    private readonly commitMessageUseCase: GenerateCommitMessageUseCase
   ) {}
 
   watchStagedChangesContext(context: vscode.ExtensionContext): void {
@@ -195,9 +182,7 @@ export class CommitMessageCommand {
       this.cancellationsByRoot.set(repositoryRootKey, cancellation);
       await this.setGeneratingContext();
 
-      let rawDiff = repository.state.indexChanges.length > 0
-        ? await repository.diff(true)
-        : '';
+      let rawDiff = repository.state.indexChanges.length > 0 ? await repository.diff(true) : '';
       if (!rawDiff.trim()) {
         const shouldContinue = await this.handleNoStagedChanges(repository, locale);
         if (!shouldContinue) {
@@ -226,15 +211,11 @@ export class CommitMessageCommand {
       streamingRepository = repository;
       originalInputValue = repository.inputBox.value;
       repository.inputBox.value = '';
-      const streamCommitMessage = (output: string) => {
-        const partialMessage = this.cleanCommitMessageOutput(output, language, diff, inputMessage, true);
-        if (partialMessage) {
-          repository.inputBox.value = partialMessage;
-        }
+      const streamCommitMessage = (message: string) => {
+        repository.inputBox.value = message;
       };
-      const result = await this.generateCommitMessageWithFallback(
+      const result = await this.generateCommitMessageWithCancellation(
         primaryProfile,
-        () => this.resolveFallbackGenerationProfiles(primaryProfile),
         prompt,
         repository.rootUri.fsPath,
         language,
@@ -252,18 +233,24 @@ export class CommitMessageCommand {
       repository.inputBox.value = result.message;
       await vscode.commands.executeCommand('workbench.view.scm');
       const messageKey = result.fallbackFrom
-        ? (truncated ? 'generatedTruncatedWithFallback' : 'generatedWithFallback')
-        : (truncated ? 'generatedTruncated' : 'generated');
-      vscode.window.showInformationMessage(this.t(locale, messageKey, {
-        provider: result.profile.name,
-        fallbackProvider: result.fallbackFrom?.name ?? '',
-      }));
+        ? truncated
+          ? 'generatedTruncatedWithFallback'
+          : 'generatedWithFallback'
+        : truncated
+          ? 'generatedTruncated'
+          : 'generated';
+      vscode.window.showInformationMessage(
+        this.t(locale, messageKey, {
+          provider: result.profile.name,
+          fallbackProvider: result.fallbackFrom?.name ?? '',
+        })
+      );
     } catch (error) {
       if (!completedGeneration && streamingRepository) {
         streamingRepository.inputBox.value = originalInputValue;
       }
 
-      const message = error instanceof Error ? error.message : String(error);
+      const message = this.generationErrorMessage(error, locale);
       if (message === 'cancelled') {
         vscode.window.showInformationMessage(this.t(locale, 'cancelled'));
         return;
@@ -332,11 +319,7 @@ export class CommitMessageCommand {
         HAS_STAGED_CHANGES_CONTEXT,
         stagedRoots.length > 0
       );
-      void vscode.commands.executeCommand(
-        'setContext',
-        STAGED_CHANGE_ROOTS_CONTEXT,
-        stagedRoots
-      );
+      void vscode.commands.executeCommand('setContext', STAGED_CHANGE_ROOTS_CONTEXT, stagedRoots);
     };
     const watchRepositories = () => {
       disposeRepositoryStateWatchers();
@@ -435,14 +418,13 @@ export class CommitMessageCommand {
     const openSourceControl = this.t(locale, 'openSourceControl');
     const hasWorkingTreeChanges = (repository.state.workingTreeChanges?.length ?? 0) > 0;
     if (!hasWorkingTreeChanges) {
-      void vscode.window.showInformationMessage(
-        this.t(locale, 'noStagedChanges'),
-        openSourceControl
-      ).then(async (choice) => {
-        if (choice === openSourceControl) {
-          await vscode.commands.executeCommand('workbench.view.scm');
-        }
-      });
+      void vscode.window
+        .showInformationMessage(this.t(locale, 'noStagedChanges'), openSourceControl)
+        .then(async (choice) => {
+          if (choice === openSourceControl) {
+            await vscode.commands.executeCommand('workbench.view.scm');
+          }
+        });
 
       return false;
     }
@@ -483,7 +465,7 @@ export class CommitMessageCommand {
       );
     }
 
-    if (await this.cliManager.checkInstalled(preferred.id)) {
+    if (await this.providerRegistry.isAvailable(preferred.id)) {
       return preferred;
     }
 
@@ -557,11 +539,9 @@ export class CommitMessageCommand {
     }
 
     if (persistSelection) {
-      await vscode.workspace.getConfiguration('agents-gui.commitMessage').update(
-        'provider',
-        picked.profile.id,
-        vscode.ConfigurationTarget.Global
-      );
+      await vscode.workspace
+        .getConfiguration('agents-gui.commitMessage')
+        .update('provider', picked.profile.id, vscode.ConfigurationTarget.Global);
       vscode.window.showInformationMessage(
         this.t(locale, 'providerSelected', { provider: picked.profile.name })
       );
@@ -574,14 +554,16 @@ export class CommitMessageCommand {
     const results = await Promise.all(
       CLI_PROFILES.map(async (profile) => ({
         profile,
-        installed: await this.cliManager.checkInstalled(profile.id),
+        installed: await this.providerRegistry.isAvailable(profile.id),
       }))
     );
 
     return results.filter((result) => result.installed).map((result) => result.profile);
   }
 
-  private async resolveFallbackGenerationProfiles(primaryProfile: CliProfile): Promise<CliProfile[]> {
+  private async resolveFallbackGenerationProfiles(
+    primaryProfile: CliProfile
+  ): Promise<CliProfile[]> {
     const seen = new Set<string>([primaryProfile.id]);
     const profiles: CliProfile[] = [];
     for (const profile of await this.getInstalledProfiles()) {
@@ -605,162 +587,6 @@ export class CommitMessageCommand {
     await vscode.commands.executeCommand('agents-gui.refreshProviders');
   }
 
-  private async generateCommitMessage(
-    profile: CliProfile,
-    prompt: string,
-    repositoryRoot: string,
-    language: CommitMessageLanguage,
-    diff: string,
-    onPartial: (output: string) => void,
-    inputMessage: string,
-    token: vscode.CancellationToken
-  ): Promise<string> {
-    const agentMode = preferredCommitAgentMode(profile);
-    const permissionMode = preferredCommitPermissionMode(profile);
-    const runtimeMode = getCliRuntimeMode(profile);
-    const apiProviderRuntime = resolveApiProviderRuntime(
-      this.getApiProviderSettings(),
-      profile.id,
-      process.env
-    );
-    const optionArgs = [
-      ...(runtimeMode.args ?? []),
-      ...(permissionMode.args ?? []),
-    ];
-    const startOptions = profile.id === 'opencode'
-      ? {
-          promptArgs: OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS,
-          attachBackgroundServer: false,
-        }
-      : {};
-    const session = await this.cliManager.startPrompt(
-      profile.id,
-      prompt,
-      [...optionArgs, ...(agentMode.args ?? [])],
-      agentMode.id,
-      [
-        'commitMessage',
-        agentMode.id,
-        'configured',
-        runtimeMode.id,
-        permissionMode.id,
-        apiProviderRuntime.selectionKey,
-      ].join('|'),
-      apiProviderRuntime.env,
-      startOptions
-    );
-
-    if (!session) {
-      throw new Error(
-        this.t(this.getRuntimeLocale(), 'providerUnavailable', { provider: profile.name })
-      );
-    }
-
-    const output = await this.waitForSessionOutput(session, token, onPartial);
-    if (isProviderErrorOutput(output)) {
-      throw new Error(output.trim().replace(/^Error:\s*/i, ''));
-    }
-
-    return this.cleanCommitMessageOutput(output, language, diff, inputMessage);
-  }
-
-  private cleanCommitMessageOutput(
-    output: string,
-    language: CommitMessageLanguage,
-    diff: string,
-    inputMessage: string,
-    allowEmpty = false
-  ): string {
-    const message = cleanGeneratedCommitMessage(output, { language, diff, inputMessage });
-    if (!message && !allowEmpty) {
-      throw new Error(this.t(this.getRuntimeLocale(), 'emptyOutput'));
-    }
-
-    return message;
-  }
-
-  private waitForSessionOutput(
-    session: Session,
-    token: vscode.CancellationToken,
-    onPartial: (output: string) => void
-  ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      if (token.isCancellationRequested) {
-        this.cliManager.stop(session.id);
-        reject(new Error('cancelled'));
-        return;
-      }
-
-      let output = '';
-      let stderr = '';
-      let buffer = '';
-      let settled = false;
-
-      const disposables: vscode.Disposable[] = [];
-      let timeout: ReturnType<typeof setTimeout>;
-      const settle = (callback: () => void) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        clearTimeout(timeout);
-        disposables.forEach((disposable) => disposable.dispose());
-        callback();
-      };
-      timeout = setTimeout(() => {
-        this.cliManager.stop(session.id);
-        settle(() => reject(new Error('Timed out waiting for the AI provider.')));
-      }, COMMIT_MESSAGE_TIMEOUT_MS);
-
-      disposables.push(
-        session.onEvent.event((event) => {
-          if (event.type === 'output' && event.stream === 'stdout') {
-            const normalized = normalizeCliOutputChunk(event.text, session.cliId, buffer);
-            buffer = normalized.buffer;
-            output += normalized.text;
-            onPartial(normalizeCliOutput(output, session.cliId));
-            return;
-          }
-
-          if (event.type === 'output' && event.stream === 'stderr') {
-            stderr += normalizeCliOutput(event.text, session.cliId);
-            return;
-          }
-
-          if (event.type === 'error') {
-            settle(() => reject(new Error(event.message)));
-            return;
-          }
-
-          if (event.type !== 'end') {
-            return;
-          }
-
-          output += flushCliOutputBuffer(buffer, session.cliId);
-          if (event.exitCode === 0) {
-            const normalizedOutput = normalizeCliOutput(output, session.cliId);
-            const normalizedStderr = normalizeCliOutput(stderr, session.cliId).trim();
-            if (!normalizedOutput.trim() && isLikelyCliError(normalizedStderr)) {
-              settle(() => reject(new Error(normalizedStderr)));
-              return;
-            }
-
-            settle(() => resolve(normalizedOutput));
-            return;
-          }
-
-          const details = (stderr || output || `CLI exited with code ${event.exitCode}`).trim();
-          settle(() => reject(new Error(details)));
-        }),
-        token.onCancellationRequested(() => {
-          this.cliManager.stop(session.id);
-          settle(() => reject(new Error('cancelled')));
-        })
-      );
-    });
-  }
-
   private getDefaultProfile(): CliProfile {
     const configured = this.getConfiguredProvider();
 
@@ -774,9 +600,9 @@ export class CommitMessageCommand {
   private getConfiguredProvider(): string {
     const commitProvider = this.getConfiguredCommitMessageProvider();
     if (
-      commitProvider
-      && commitProvider !== DEFAULT_COMMIT_MESSAGE_PROVIDER
-      && commitProvider !== ASK_COMMIT_MESSAGE_PROVIDER
+      commitProvider &&
+      commitProvider !== DEFAULT_COMMIT_MESSAGE_PROVIDER &&
+      commitProvider !== ASK_COMMIT_MESSAGE_PROVIDER
     ) {
       return commitProvider;
     }
@@ -809,48 +635,60 @@ export class CommitMessageCommand {
       .get<number>('maxDiffChars', 60_000);
   }
 
-  private getApiProviderSettings(): ApiProviderSettings {
-    const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
-    return sanitizeApiProviderSettings({
-      customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
-      defaultProviderId: config.get<string>('defaultProviderId', ''),
-      agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
-    });
-  }
-
   private getRuntimeLocale(): RuntimeLocale {
     return vscode.env.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
   }
 
   private async generateCommitMessageWithCancellation(
-    profile: CliProfile,
+    primaryProfile: CliProfile,
     prompt: string,
     repositoryRoot: string,
     language: CommitMessageLanguage,
     diff: string,
-    onPartial: (output: string) => void,
+    onPartial: (message: string) => void,
+    onAttemptStart: () => void,
     inputMessage: string,
     token: vscode.CancellationToken,
     externalToken?: vscode.CancellationToken
-  ): Promise<string> {
+  ): Promise<CommitMessageGenerationResult> {
     return vscode.window.withProgress(
       { location: vscode.ProgressLocation.SourceControl },
       async () => {
-        if (!externalToken) {
-          if (token.isCancellationRequested) {
-            throw new Error('cancelled');
-          }
-
-          return this.generateCommitMessage(
-            profile,
+        const execute = async (
+          signal: TextGenerationCancellationSignal
+        ): Promise<CommitMessageGenerationResult> => {
+          const generation = await this.commitMessageUseCase.execute({
+            primaryProviderId: primaryProfile.id,
+            resolveFallbackProviderIds: async () =>
+              (await this.resolveFallbackGenerationProfiles(primaryProfile)).map(
+                (profile) => profile.id
+              ),
             prompt,
-            repositoryRoot,
+            repositoryRoot: repositoryRoot,
             language,
             diff,
-            onPartial,
             inputMessage,
-            token
-          );
+            signal,
+            onPartial: (message) => onPartial(message),
+            onAttemptStart: () => onAttemptStart(),
+          });
+          const profile = getCliProfile(generation.providerId) ?? primaryProfile;
+          const fallbackFrom = generation.fallbackFrom
+            ? getCliProfile(generation.fallbackFrom)
+            : undefined;
+          return {
+            message: generation.message,
+            profile,
+            ...(fallbackFrom ? { fallbackFrom } : {}),
+          };
+        };
+
+        if (!externalToken) {
+          if (token.isCancellationRequested) {
+            throw new TextGenerationError('cancelled', 'cancelled', primaryProfile.id);
+          }
+
+          return execute(token);
         }
 
         const linkedCancellation = new vscode.CancellationTokenSource();
@@ -864,19 +702,10 @@ export class CommitMessageCommand {
 
         try {
           if (linkedCancellation.token.isCancellationRequested) {
-            throw new Error('cancelled');
+            throw new TextGenerationError('cancelled', 'cancelled', primaryProfile.id);
           }
 
-          return await this.generateCommitMessage(
-            profile,
-            prompt,
-            repositoryRoot,
-            language,
-            diff,
-            onPartial,
-            inputMessage,
-            linkedCancellation.token
-          );
+          return await execute(linkedCancellation.token);
         } finally {
           disposables.forEach((disposable) => disposable.dispose());
           linkedCancellation.dispose();
@@ -885,64 +714,23 @@ export class CommitMessageCommand {
     );
   }
 
-  private async generateCommitMessageWithFallback(
-    primaryProfile: CliProfile,
-    resolveFallbackProfiles: () => Promise<CliProfile[]>,
-    prompt: string,
-    repositoryRoot: string,
-    language: CommitMessageLanguage,
-    diff: string,
-    onPartial: (output: string) => void,
-    onAttemptStart: (profile: CliProfile) => void,
-    inputMessage: string,
-    token: vscode.CancellationToken,
-    externalToken?: vscode.CancellationToken
-  ): Promise<CommitMessageGenerationResult> {
-    const profiles = [primaryProfile];
-    let fallbackProfilesLoaded = false;
-    let lastError: Error | undefined;
-
-    for (let index = 0; index < profiles.length; index += 1) {
-      const profile = profiles[index];
-      onAttemptStart(profile);
-
-      try {
-        const message = await this.generateCommitMessageWithCancellation(
-          profile,
-          prompt,
-          repositoryRoot,
-          language,
-          diff,
-          onPartial,
-          inputMessage,
-          token,
-          externalToken
-        );
-
-        return {
-          message,
-          profile,
-          ...(index > 0 && primaryProfile ? { fallbackFrom: primaryProfile } : {}),
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message === 'cancelled') {
-          throw error;
-        }
-
-        lastError = error instanceof Error ? error : new Error(message);
-        if (!fallbackProfilesLoaded) {
-          fallbackProfilesLoaded = true;
-          profiles.push(...await resolveFallbackProfiles());
-        }
-
-        if (index >= profiles.length - 1) {
-          throw lastError;
-        }
+  private generationErrorMessage(error: unknown, locale: RuntimeLocale): string {
+    if (error instanceof TextGenerationError) {
+      if (error.code === 'cancelled') {
+        return 'cancelled';
+      }
+      if (error.code === 'invalid-output') {
+        return this.t(locale, 'emptyOutput');
+      }
+      if (error.code === 'provider-unavailable') {
+        const profile = error.providerId ? getCliProfile(error.providerId) : undefined;
+        return this.t(locale, 'providerUnavailable', {
+          provider: profile?.name ?? error.providerId ?? 'AI provider',
+        });
       }
     }
 
-    throw lastError ?? new Error(this.t(this.getRuntimeLocale(), 'emptyOutput'));
+    return error instanceof Error ? error.message : String(error);
   }
 
   private t(locale: RuntimeLocale, key: string, values: Record<string, string> = {}): string {
@@ -952,30 +740,6 @@ export class CommitMessageCommand {
     }
     return message;
   }
-}
-
-function preferredCommitAgentMode(profile: CliProfile): CliAgentMode {
-  return (
-    profile.agentModes.find((mode) => mode.id === 'plan' && !mode.disabled) ??
-    profile.agentModes.find((mode) => mode.id === 'review' && !mode.disabled) ??
-    getCliAgentMode(profile)
-  );
-}
-
-function preferredCommitPermissionMode(profile: CliProfile): CliPermissionMode {
-  return (
-    profile.permissionModes?.find((mode) => mode.id === 'readOnly' && !mode.disabled) ??
-    profile.permissionModes?.find((mode) => mode.id === 'plan' && !mode.disabled) ??
-    getCliPermissionMode(profile)
-  );
-}
-
-function isLikelyCliError(text: string): boolean {
-  return /\b(?:error|failed|exception|eperm|eacces|enoent|timeout|timed out|http\s*5\d\d)\b/i.test(text);
-}
-
-function isProviderErrorOutput(text: string): boolean {
-  return /^Error:\s+\S/.test(text.trim());
 }
 
 function resolveRepositoryRootUri(

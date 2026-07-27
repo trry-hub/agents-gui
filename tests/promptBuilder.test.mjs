@@ -704,12 +704,12 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(discoverySource, /baseVisibleModes\s*=\s*discoveredModes\.length > 0 && !options\.includeBaseWhenDiscovered\s*\?\s*\[\]\s*:\s*baseModes/s);
   assert.match(discoverySource, /const upsert = \(mode: CliAgentMode\)/);
   assert.match(discoverySource, /merged\[index\] = decorated/);
-  assert.match(discoverySource, /defaultAgentMode:\s*pickOpenCodeDefaultAgentMode\(mergedAgentModes, discovery\.defaultAgentId\)/);
+  assert.match(discoverySource, /defaultAgentMode:\s*pickOpenCodeDefaultAgentMode\(/);
   assert.match(discoverySource, /selectableModes\.find\(\(mode\) => mode\.id === 'build'\)/);
   assert.match(discoverySource, /decorateOpenCodeConfiguredAgentMode/);
   assert.doesNotMatch(discoverySource, /preferredOpenCodeDefaultAgent/);
   assert.match(discoverySource, /getOpenCodeModelOptions/);
-  assert.match(discoverySource, /this\.options\.openCodeClient\.fetchModelOptions\(cwd\)/);
+  assert.match(discoverySource, /\.fetchModelOptions\(cwd\)/);
   assert.match(openCodeClientSource, /apiUrl\(serverUrl, '\/config\/providers', cwd\)/);
   assert.match(openCodeClientSource, /parseOpenCodeProviderModels\(payload\)/);
   assert.match(discoverySource, /\['models'\]/);
@@ -741,12 +741,12 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /promptArgs\?: string\[\]/);
   assert.match(
     source,
-    /const backgroundAttachArgs = options\.attachBackgroundServer === false\s*\?\s*\[\]\s*:\s*await this\.getBackgroundAttachArgs/s
+    /const backgroundAttachArgs =\s*options\.attachBackgroundServer === false\s*\?\s*\[\]\s*:\s*await this\.getBackgroundAttachArgs/s
   );
   assert.match(source, /const promptArgs = options\.promptArgs \?\? profile\.promptArgs/);
   assert.match(
     source,
-    /if \(!ownedProcess && await this\.waitForTcp\(server\.host, server\.port, 120\)\) \{\s*\/\/ Do not attach to stale OpenCode servers[\s\S]*continue;\s*\}/
+    /if \(!ownedProcess && \(await this\.waitForTcp\(server\.host, server\.port, 120\)\)\) \{\s*\/\/ Do not attach to stale OpenCode servers[\s\S]*continue;\s*\}/
   );
   assert.doesNotMatch(
     source,
@@ -754,7 +754,7 @@ test('cli manager warms and attaches background CLI servers when available', () 
   );
   assert.match(
     source,
-    /const eventStreamUrl = options\.attachBackgroundServer === false\s*\?\s*undefined\s*:\s*this\.getOpenCodeEventStreamUrl/s
+    /const eventStreamUrl =\s*options\.attachBackgroundServer === false\s*\?\s*undefined\s*:\s*this\.getOpenCodeEventStreamUrl/s
   );
   assert.match(
     source,
@@ -809,8 +809,8 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /backgroundServerPorts/);
   assert.match(source, /isBackgroundServerAvailable/);
   assert.match(source, /this\.openCodeClient\.isServerAvailable\(server\.url, cwd, timeoutMs\)/);
-  assert.match(source, /ownedProcess && await this\.isBackgroundServerAvailable/);
-  assert.match(source, /!ownedProcess && await this\.waitForTcp/);
+  assert.match(source, /ownedProcess && \(await this\.isBackgroundServerAvailable/);
+  assert.match(source, /!ownedProcess && \(await this\.waitForTcp/);
   assert.match(source, /continue;/);
   assert.match(source, /stableHash\(`\$\{profileId\}:\$\{cwd\}`\)/);
   assert.match(discoverySource, /export function stableHash\(value: string\): number/);
@@ -830,13 +830,13 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(sidebarSource, /const newSession = await this\.agentRuntime\.startPrompt/);
   assert.match(sidebarSource, /this\.sessionController\.register\(session\)/);
   assert.match(sessionControllerSource, /session\.onEvent\.event\(\(event\) =>/);
-  assert.match(sessionControllerSource, /openCodeSessionId: openCodeSessionId \?\? session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\)/);
+  assert.match(sessionControllerSource, /openCodeSessionId:\s*openCodeSessionId \?\? session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\),/);
   assert.doesNotMatch(sidebarSource, /session\.onOutput\.event/);
   assert.doesNotMatch(sidebarSource, /session\.onStderr\.event/);
   assert.doesNotMatch(sidebarSource, /session\.onError\.event/);
   assert.doesNotMatch(sidebarSource, /session\.onEnd\.event/);
   assert.match(sidebarSource, /case 'openCodeNativeCommand':/);
-  assert.match(sidebarSource, /this\.openCodeCapability\.executeNativeCommand/);
+  assert.match(sidebarSource, /\.executeNativeCommand/);
   assert.match(sidebarSource, /command: 'openCodeNativeCommandResult'/);
   assert.match(sidebarSource, /this\.sessionController\.stopAll\(\);/);
   assert.match(sessionControllerSource, /this\.options\.agentRuntime\.stopAll\(\);/);
@@ -974,7 +974,7 @@ test('CLI profiles expose provider model, runtime, and permission option args', 
     }),
     ['--model', 'qwen2.5-coder:14b', '--sandbox', 'read-only']
   );
-  assert.match(sidebarSource, /const agentArgs = \[\s*\.\.\.\(agentMode\.args \?\? \[\]\),\s*\.\.\.optionArgs,\s*\];/s);
+  assert.match(sidebarSource, /const agentArgs = \[\.\.\.\(agentMode\.args \?\? \[\]\), \.\.\.optionArgs\];/);
 });
 
 test('CLI profiles expose task routing scores for agent recommendations', () => {
@@ -1047,7 +1047,7 @@ test('CLI manager revalidates cached command paths before spawning', () => {
   const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
   const discoverySource = readFileSync(new URL('../src/cliDiscovery.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /const command = await this\.resolveCommandPath\(profile\.command\) \?\? profile\.command/);
+  assert.match(source, /const command = \(await this\.resolveCommandPath\(profile\.command\)\) \?\? profile\.command/);
   assert.match(source, /return this\.cliDiscovery\.resolveCommandPath\(command\)/);
   assert.match(discoverySource, /private commandPathCache = new Map/);
   assert.doesNotMatch(source, /this\.commandPathCache\.get\(profile\.command\) \?\? profile\.command/);
@@ -1121,15 +1121,16 @@ test('extension defaults to OpenCode as the active provider', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const settingsManagerSource = readFileSync(new URL('../src/settingsManager.ts', import.meta.url), 'utf8');
   const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
   const previewSource = readFileSync(new URL('../scripts/preview-webview.mjs', import.meta.url), 'utf8');
   const defaultProvider = manifest.contributes.configuration.properties['agents-gui.defaultProvider'];
 
   assert.equal(defaultProvider.default, 'opencode');
   assert.equal(defaultProvider.enum, undefined);
-  assert.match(sidebarSource, /const DEFAULT_CLI_ID = 'opencode';/);
-  assert.match(sidebarSource, /get<string>\('defaultProvider', DEFAULT_CLI_ID\)/);
-  assert.match(sidebarSource, /getCliProfile\(DEFAULT_CLI_ID\)\?\.id/);
+  assert.match(settingsManagerSource, /const DEFAULT_CLI_ID = 'opencode';/);
+  assert.match(settingsManagerSource, /get<string>\('defaultProvider', DEFAULT_CLI_ID\)/);
+  assert.match(settingsManagerSource, /getCliProfile\(DEFAULT_CLI_ID\)\?\.id/);
   assert.match(previewSource, /defaultProviderId: 'opencode'/);
   assert.match(extensionSource, /state:\s*context\.globalState/);
   assert.match(syncedStateSource, /LAST_PROVIDER_STATE_KEY = 'agents-gui\.lastProviderId'/);
@@ -1138,13 +1139,13 @@ test('extension defaults to OpenCode as the active provider', () => {
   assert.match(sidebarSource, /AGENT_MODE_STATE_KEY,\n/);
   assert.match(sidebarSource, /const installedProfiles = profiles\.filter\(\(profile\) => profile\.installed\)/);
   assert.match(sidebarSource, /this\.profilesById\.set\(profile\.id, profile\)/);
-  assert.match(sidebarSource, /const storedProviderId = this\.getStoredProviderId\(installedProfiles\)/);
+  assert.match(sidebarSource, /const storedProviderId = this\.settingsManager\.getStoredProviderId\(installedProfiles\)/);
   assert.match(sidebarSource, /profiles: installedProfiles\.map\(\(profile\) => \(\{/);
   assert.match(sidebarSource, /setupProfiles: profiles\.map\(\(profile\) => this\.toSetupProfile\(profile\)\)/);
   assert.match(sidebarSource, /private toSetupProfile\(profile: CliProfile\): SetupCliProfile/);
   assert.match(sidebarSource, /\.\.\.toCliSetupProfile\(profile\)/);
   assert.match(sidebarSource, /activeProviderId: storedProviderId/);
-  assert.match(sidebarSource, /activeAgentModeByProvider: this\.getStoredAgentModeState\(\)/);
+  assert.match(sidebarSource, /activeAgentModeByProvider: this\.settingsManager\.getStoredAgentModeState\(this\.profilesById\)/);
 });
 
 test('workspace debug config starts the extension host with the watch task', () => {
@@ -1317,7 +1318,7 @@ test('webview omits the composer advanced toggle but keeps provider setup action
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles', force: true \}\)/);
   assert.match(sidebarSource, /case 'openSettings':/);
   assert.match(sidebarSource, /case 'runCliAuthAction':/);
-  assert.match(sidebarSource, /this\.cliSetup\.runCliAuthAction\(this\.resolveCliId\(message\), message\.action\)/);
+  assert.match(sidebarSource, /this\.cliSetup\.runCliAuthAction\(\s*this\.settingsManager\.resolveCliId\(message\),\s*message\.action\s*\)/s);
   assert.match(sidebarSource, /case 'copyInstallCommand':/);
   assert.match(sidebarSource, /this\.cliSetup\.copyInstallCommand\(message\.installCommand\)/);
   assert.match(sidebarSource, /case 'installCli':/);
@@ -1602,7 +1603,7 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /function updateStreamActivity\(message\)/);
   assert.match(script, /function sanitizeThinkingText\(text\)/);
   assert.match(script, /target\.thinkingBuffer = mergeStreamText\(existingThinking, message\.thinking\);/);
-  assert.match(script, /item\.thinking = filtered\.pending \? '' : sanitizeThinkingText\(filtered\.text\);/);
+  assert.match(script, /const fullThinking = filtered\.pending \? '' : sanitizeThinkingText\(filtered\.text\);/);
   assert.match(script, /const hasAssistantActivity = hasOpenCodeActivity\(item\.activity\);/);
   assert.match(script, /const hasInlineAssistantActivity = hasOpenCodeActivityTimeline\(item\.activityTimeline\);/);
   assert.match(script, /const showAssistantThinkingDetails = shouldShowAssistantThinkingDetails\(\s*hasAssistantThinking,\s*hasAssistantActivity,\s*hasInlineAssistantActivity\s*\);/);
@@ -1788,7 +1789,7 @@ test('sidebar opens provider VS Code extensions through a whitelisted bridge', (
   const source = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 
   assert.match(source, /case 'openProviderExtension':/);
-  assert.match(source, /await this\.openProviderExtension\(this\.resolveCliId\(message\)\);/);
+  assert.match(source, /await this\.openProviderExtension\(this\.settingsManager\.resolveCliId\(message\)\);/);
   assert.match(source, /vscodeExtension: this\.getProviderExtensionStatus\(profile\.id\)/);
   assert.match(source, /const bridge = getProviderExtensionBridge\(cliId\);/);
   assert.match(source, /for \(const command of bridge\.openCommands\)/);
@@ -2037,7 +2038,7 @@ test('webview renders installed provider logo tabs in the header', () => {
         assert.equal(icon.subarray(1, 4).toString('ascii'), 'PNG');
       }
     }
-    assert.match(sidebarSource, new RegExp(`${provider}: \\{ light: '${providerIcons[provider].light}'`));
+    assert.match(sidebarSource, new RegExp(`${provider}:\\s*\\{\\s*light: '${providerIcons[provider].light}'`));
   }
 
   assert.match(sidebarSource, /private getProviderIconUris\(providerId: string\)/);
@@ -2087,6 +2088,7 @@ test('manifest exposes title actions and custom API provider settings', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const settingsManagerSource = readFileSync(new URL('../src/settingsManager.ts', import.meta.url), 'utf8');
   const commands = JSON.stringify(manifest.contributes.commands);
   const titleActions = JSON.stringify(manifest.contributes.menus['view/title']);
   const properties = manifest.contributes.configuration.properties;
@@ -2171,10 +2173,10 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(script, /function moveHomeAgent\(/);
   assert.match(script, /data-home-agent-move/);
   assert.match(script, /agentOrder/);
-  assert.match(sidebarSource, /config\.get<string\[]>\('agentOrder', \[]\)/);
+  assert.match(settingsManagerSource, /config\.get<string\[]>\('agentOrder', \[]\)/);
   assert.match(sidebarSource, /config\.update\('agentOrder', settings\.agentOrder/);
-  assert.match(sidebarSource, /private filterApiProviderSettingsForInstalledAgents/);
-  assert.match(sidebarSource, /this\.profilesById\.has\(cliId\)/);
+  assert.match(settingsManagerSource, /filterApiProviderSettingsForInstalledAgents/);
+  assert.match(settingsManagerSource, /profilesById\.has\(cliId\)/);
   assert.match(sidebarSource, /saveCommitMessageSettings/);
   assert.match(sidebarSource, /command:\s*'settingsSaveResult'/);
   assert.match(sidebarSource, /section,\s*ok:\s*true/);
@@ -4133,7 +4135,7 @@ test('webview and host surface the authoritative selected model for each run', (
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
   const promptSource = readFileSync(new URL('../src/promptBuilder.ts', import.meta.url), 'utf8');
 
-  assert.match(sidebarSource, /const effectiveModel = effectiveCliModelSelection\(modelOption, message\.customModel, message\.modelVariant\);/);
+  assert.match(sidebarSource, /const effectiveModel = effectiveCliModelSelection\(/);
   assert.match(sidebarSource, /modelId: effectiveModel\.id/);
   assert.match(sidebarSource, /modelLabel: effectiveModel\.label/);
   assert.match(sidebarSource, /runtime:\s*\{[\s\S]*modelId: effectiveModel\.id,[\s\S]*modelLabel: effectiveModel\.label,[\s\S]*modelVariant: effectiveModel\.variant,/);
@@ -4154,6 +4156,7 @@ test('webview and host surface the authoritative selected model for each run', (
 test('agent mode select is persisted per provider', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const settingsManagerSource = readFileSync(new URL('../src/settingsManager.ts', import.meta.url), 'utf8');
   const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
   const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
 
@@ -4192,10 +4195,10 @@ test('agent mode select is persisted per provider', () => {
   assert.match(sidebarSource, /private async saveSelectionState\(message: unknown\)/);
   assert.match(sidebarSource, /this\.state\.update\(LAST_PROVIDER_STATE_KEY, providerId\)/);
   assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
-  assert.match(sidebarSource, /usesProviderNativeAgentConfig\(providerId\)/);
-  assert.match(sidebarSource, /this\.state\.update\(RUNTIME_STATE_KEY,/);
-  assert.match(sidebarSource, /this\.state\.update\(PERMISSION_STATE_KEY,/);
-  assert.match(sidebarSource, /this\.state\.update\(CONTEXT_OPTIONS_STATE_KEY,/);
+  assert.match(settingsManagerSource, /normalizeAgentModeState\(/);
+  assert.match(sidebarSource, /this\.state\.update\(\s*RUNTIME_STATE_KEY,/s);
+  assert.match(sidebarSource, /this\.state\.update\(\s*PERMISSION_STATE_KEY,/s);
+  assert.match(sidebarSource, /this\.state\.update\(\s*CONTEXT_OPTIONS_STATE_KEY,/s);
   assert.match(extensionSource, /context\.globalState\.setKeysForSync\(SYNCED_GLOBAL_STATE_KEYS\)/);
   assert.match(syncedStateSource, /LAST_PROVIDER_STATE_KEY = 'agents-gui\.lastProviderId'/);
   assert.match(syncedStateSource, /DISABLED_MCP_STATE_KEY = 'agents-gui\.disabledMcpByProvider'/);
@@ -5210,8 +5213,8 @@ test('sidebar blocks current-file actions before building a CLI prompt', () => {
 test('editor explain action prefers provider read-only mode', () => {
   const source = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /agentMode: action === 'explainSelection' \? preferredReadOnlyMode\(profile\) : undefined/);
-  assert.match(source, /permissionMode: action === 'explainSelection' \? preferredReadOnlyPermission\(profile\) : undefined/);
+  assert.match(source, /agentMode:\s*action === 'explainSelection' \? preferredReadOnlyMode\(profile\) : undefined/);
+  assert.match(source, /permissionMode:\s*action === 'explainSelection' \? preferredReadOnlyPermission\(profile\) : undefined/);
   assert.match(source, /item\.id === 'plan'/);
   assert.match(source, /item\.id === 'suggest'/);
   assert.match(source, /item\.id === 'readOnly'/);

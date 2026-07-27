@@ -4,6 +4,10 @@ Agents GUI should use a ports-and-adapters architecture so the UI only speaks on
 agent protocol while each local CLI keeps its provider-specific behavior at the
 edge.
 
+Lightweight text-only tasks use the control plane described in
+[`task-runtime-control-plane.md`](./task-runtime-control-plane.md). Git commit
+messages are the first task routed through that independent generation lane.
+
 ## Dependency direction
 
 ```text

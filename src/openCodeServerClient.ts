@@ -64,14 +64,11 @@ export class OpenCodeServerClient {
     await this.waitForServerReady(serverUrl, directory);
 
     const session = this.objectRecord(
-      await this.requestJson(
-        this.apiUrl(serverUrl, '/session', directory),
-        {
-          method: 'POST',
-          timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,
-          body: { title: 'Generate commit message' },
-        }
-      )
+      await this.requestJson(this.apiUrl(serverUrl, '/session', directory), {
+        method: 'POST',
+        timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,
+        body: { title: 'Generate commit message' },
+      })
     );
     const sessionId = this.pickString(session.id);
     if (!sessionId?.startsWith('ses')) {
@@ -152,22 +149,20 @@ export class OpenCodeServerClient {
     }
 
     if (command === 'share') {
-      const payload = await this.requestJson(
-        this.sessionUrl(serverUrl, sessionId, '/share'),
-        { method: 'POST' }
-      );
+      const payload = await this.requestJson(this.sessionUrl(serverUrl, sessionId, '/share'), {
+        method: 'POST',
+      });
       const payloadRecord = this.objectRecord(payload);
       const dataRecord = this.objectRecord(payloadRecord.data);
       const shareRecord = this.objectRecord(payloadRecord.share);
       const dataShareRecord = this.objectRecord(dataRecord.share);
-      const url = this.pickString(
-        shareRecord.url,
-        dataShareRecord.url
-      );
+      const url = this.pickString(shareRecord.url, dataShareRecord.url);
       return {
         command,
         ok: true,
-        ...(url ? { url, message: `OpenCode session shared: ${url}` } : { message: 'OpenCode session shared.' }),
+        ...(url
+          ? { url, message: `OpenCode session shared: ${url}` }
+          : { message: 'OpenCode session shared.' }),
       };
     }
 
@@ -259,10 +254,7 @@ export class OpenCodeServerClient {
       return [];
     }
 
-    const payload = await this.fetchJson(
-      this.apiUrl(serverUrl, '/config/providers', cwd),
-      2400
-    );
+    const payload = await this.fetchJson(this.apiUrl(serverUrl, '/config/providers', cwd), 2400);
     return parseOpenCodeProviderModels(payload);
   }
 
@@ -285,10 +277,13 @@ export class OpenCodeServerClient {
     if (!connection) {
       return undefined;
     }
-    const renderStateBySession = new Map<string, {
-      partTypes: Map<string, string>;
-      partTexts: Map<string, string>;
-    }>();
+    const renderStateBySession = new Map<
+      string,
+      {
+        partTypes: Map<string, string>;
+        partTexts: Map<string, string>;
+      }
+    >();
     const pendingBySession = new Map<string, string[]>();
     const renderStateForSession = (sessionId: string) => {
       let state = renderStateBySession.get(sessionId);
@@ -440,7 +435,8 @@ export class OpenCodeServerClient {
       return '';
     }
 
-    const partType = (partId ? partTypes.get(partId) : undefined) ??
+    const partType =
+      (partId ? partTypes.get(partId) : undefined) ??
       this.pickString(part.type, properties.partType, event.partType);
     if (partType === 'tool') {
       return `${JSON.stringify({
@@ -532,9 +528,7 @@ export class OpenCodeServerClient {
           this.apiUrl(serverUrl, `/session/${encodeURIComponent(sessionId)}/message`, directory)
         ),
       ]);
-      const status = this.objectRecord(
-        this.objectRecord(statusPayload)[sessionId]
-      );
+      const status = this.objectRecord(this.objectRecord(statusPayload)[sessionId]);
       const statusError = this.statusError(status);
       if (statusError) {
         throw new Error(statusError);
@@ -675,7 +669,7 @@ export class OpenCodeServerClient {
         .map((part) => {
           const partRecord = this.objectRecord(part);
           return this.pickString(partRecord.type) === 'text'
-            ? this.pickString(partRecord.text) ?? ''
+            ? (this.pickString(partRecord.text) ?? '')
             : '';
         })
         .join('');
@@ -718,8 +712,8 @@ export class OpenCodeServerClient {
     );
     const messages = Array.isArray(messagesPayload)
       ? messagesPayload
-        .map((entry) => this.objectRecord(this.objectRecord(entry).info))
-        .filter((entry) => this.pickString(entry.id))
+          .map((entry) => this.objectRecord(this.objectRecord(entry).info))
+          .filter((entry) => this.pickString(entry.id))
       : [];
     const revert = this.objectRecord(session.revert);
     const revertMessageId = this.pickString(revert.messageID);
@@ -771,6 +765,7 @@ export class OpenCodeServerClient {
     let closed = false;
     let streamFailed = false;
     let request: http.ClientRequest | undefined;
+    // eslint-disable-next-line prefer-const
     let readyTimer: NodeJS.Timeout | undefined;
     let resolveReady: (ready: boolean) => void = () => {};
     let readySettled = false;
@@ -804,42 +799,39 @@ export class OpenCodeServerClient {
       }
     };
 
-    readyTimer = setTimeout(() => markReady(false), 1000);
+    const timer = setTimeout(() => markReady(false), 1000);
+    readyTimer = timer;
 
     try {
       const eventUrl = new URL('/event', serverUrl);
       const client = eventUrl.protocol === 'https:' ? https : http;
-      request = client.get(
-        eventUrl,
-        { headers: { Accept: 'text/event-stream' } },
-        (response) => {
-          if ((response.statusCode ?? 200) >= 400) {
-            markFailed();
-            response.resume();
-            return;
-          }
-
-          markReady(true);
-          response.setEncoding('utf8');
-          let buffer = '';
-
-          response.on('data', (chunk: string) => {
-            buffer += chunk.replace(/\r\n/g, '\n');
-            let boundary = buffer.indexOf('\n\n');
-            while (boundary >= 0) {
-              const block = buffer.slice(0, boundary);
-              buffer = buffer.slice(boundary + 2);
-              emitBlock(block);
-              boundary = buffer.indexOf('\n\n');
-            }
-          });
-          response.on('end', () => {
-            if (!closed) {
-              streamFailed = true;
-            }
-          });
+      request = client.get(eventUrl, { headers: { Accept: 'text/event-stream' } }, (response) => {
+        if ((response.statusCode ?? 200) >= 400) {
+          markFailed();
+          response.resume();
+          return;
         }
-      );
+
+        markReady(true);
+        response.setEncoding('utf8');
+        let buffer = '';
+
+        response.on('data', (chunk: string) => {
+          buffer += chunk.replace(/\r\n/g, '\n');
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary >= 0) {
+            const block = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            emitBlock(block);
+            boundary = buffer.indexOf('\n\n');
+          }
+        });
+        response.on('end', () => {
+          if (!closed) {
+            streamFailed = true;
+          }
+        });
+      });
 
       request.on('error', markFailed);
     } catch {
@@ -949,7 +941,11 @@ export class OpenCodeServerClient {
 
   private requestJson(
     url: URL,
-    options: { method?: 'GET' | 'POST' | 'DELETE' | 'PATCH'; body?: unknown; timeoutMs?: number } = {}
+    options: {
+      method?: 'GET' | 'POST' | 'DELETE' | 'PATCH';
+      body?: unknown;
+      timeoutMs?: number;
+    } = {}
   ): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const client = url.protocol === 'https:' ? https : http;
@@ -961,7 +957,11 @@ export class OpenCodeServerClient {
         }
 
         settled = true;
-        error ? reject(error) : resolve(value);
+        if (error) {
+          reject(error);
+        } else {
+          resolve(value);
+        }
       };
 
       const request = client.request(
@@ -970,7 +970,9 @@ export class OpenCodeServerClient {
           method: options.method ?? 'GET',
           headers: {
             Accept: 'application/json',
-            ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
+            ...(body
+              ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+              : {}),
           },
         },
         (response) => {
@@ -1006,7 +1008,9 @@ export class OpenCodeServerClient {
         request.destroy();
         finish(new Error(`OpenCode request to ${url.pathname} timed out.`));
       });
-      request.on('error', (error) => finish(error instanceof Error ? error : new Error(String(error))));
+      request.on('error', (error) =>
+        finish(error instanceof Error ? error : new Error(String(error)))
+      );
       if (body) {
         request.write(body);
       }
@@ -1027,33 +1031,29 @@ export class OpenCodeServerClient {
         resolve(value);
       };
 
-      const request = client.get(
-        url,
-        { headers: { Accept: 'application/json' } },
-        (response) => {
-          response.setEncoding('utf8');
-          let body = '';
-          response.on('data', (chunk: string) => {
-            body += chunk;
-            if (body.length > 1024 * 1024) {
-              request.destroy();
-              finish(undefined);
-            }
-          });
-          response.on('end', () => {
-            if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
-              finish(undefined);
-              return;
-            }
+      const request = client.get(url, { headers: { Accept: 'application/json' } }, (response) => {
+        response.setEncoding('utf8');
+        let body = '';
+        response.on('data', (chunk: string) => {
+          body += chunk;
+          if (body.length > 1024 * 1024) {
+            request.destroy();
+            finish(undefined);
+          }
+        });
+        response.on('end', () => {
+          if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+            finish(undefined);
+            return;
+          }
 
-            try {
-              finish(JSON.parse(body));
-            } catch {
-              finish(undefined);
-            }
-          });
-        }
-      );
+          try {
+            finish(JSON.parse(body));
+          } catch {
+            finish(undefined);
+          }
+        });
+      });
       request.setTimeout(timeoutMs, () => {
         request.destroy();
         finish(undefined);
@@ -1074,9 +1074,7 @@ export class OpenCodeServerClient {
       return normalized;
     }
 
-    return rawMessage.length > 240
-      ? `${rawMessage.slice(0, 240).trim()}...`
-      : rawMessage;
+    return rawMessage.length > 240 ? `${rawMessage.slice(0, 240).trim()}...` : rawMessage;
   }
 
   private httpErrorBodyMessage(responseBody: string): string | undefined {
@@ -1110,13 +1108,16 @@ export class OpenCodeServerClient {
   private httpErrorObjectMessage(record: Record<string, unknown>): string | undefined {
     const error = this.objectRecord(record.error);
     const data = this.objectRecord(error.data);
-    return this.errorMessage(record) ?? this.pickString(
-      data.message,
-      data.code,
-      error.message,
-      error.code,
-      record.message,
-      record.code
+    return (
+      this.errorMessage(record) ??
+      this.pickString(
+        data.message,
+        data.code,
+        error.message,
+        error.code,
+        record.message,
+        record.code
+      )
     );
   }
 
@@ -1137,13 +1138,17 @@ export class OpenCodeServerClient {
 
     return Object.entries(payload as Record<string, unknown>)
       .map(([name, value]) => {
-        const record = value && typeof value === 'object' && !Array.isArray(value)
-          ? value as Record<string, unknown>
-          : {};
+        const record =
+          value && typeof value === 'object' && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : {};
         const status = typeof record.status === 'string' ? record.status : 'unknown';
-        const error = typeof record.error === 'string'
-          ? record.error
-          : (typeof record.message === 'string' ? record.message : undefined);
+        const error =
+          typeof record.error === 'string'
+            ? record.error
+            : typeof record.message === 'string'
+              ? record.message
+              : undefined;
 
         return {
           name,
@@ -1184,13 +1189,9 @@ export class OpenCodeServerClient {
     }
 
     const record = this.objectRecord(value);
-    const name = this.pickString(
-      record.name,
-      record.id,
-      record.language,
-      record.server,
-      record.extension
-    ) ?? fallbackName;
+    const name =
+      this.pickString(record.name, record.id, record.language, record.server, record.extension) ??
+      fallbackName;
     const status = this.pickString(record.status, record.state);
     const error = this.pickString(record.error, record.message);
 
@@ -1296,7 +1297,13 @@ export class OpenCodeServerClient {
       event.tool,
       event.name
     );
-    const status = this.pickString(state.status, state.state, part.status, properties.status, event.status);
+    const status = this.pickString(
+      state.status,
+      state.state,
+      part.status,
+      properties.status,
+      event.status
+    );
     const output = this.compactToolText(
       this.pickString(
         input.output,
@@ -1358,9 +1365,7 @@ export class OpenCodeServerClient {
       return undefined;
     }
 
-    return normalized.length > 6000
-      ? `${normalized.slice(0, 6000)}\n...`
-      : normalized;
+    return normalized.length > 6000 ? `${normalized.slice(0, 6000)}\n...` : normalized;
   }
 
   private renderUpdatedTextDelta(
@@ -1414,9 +1419,7 @@ export class OpenCodeServerClient {
       }
 
       const event = parsed as Record<string, unknown>;
-      return typeof event.type === 'string' || !eventName
-        ? event
-        : { ...event, type: eventName };
+      return typeof event.type === 'string' || !eventName ? event : { ...event, type: eventName };
     } catch {
       return undefined;
     }
@@ -1435,10 +1438,7 @@ export class OpenCodeServerClient {
     return sessionId?.startsWith('ses') ? sessionId : undefined;
   }
 
-  private eventBelongsToSession(
-    event: Record<string, unknown>,
-    sessionId: string
-  ): boolean {
+  private eventBelongsToSession(event: Record<string, unknown>, sessionId: string): boolean {
     return this.eventSessionId(event) === sessionId;
   }
 
@@ -1506,7 +1506,9 @@ export class OpenCodeServerClient {
       return 'OpenCode provider rate limit exceeded. Switch model/provider or wait before retrying.';
     }
 
-    if (/model[_ -]?not[_ -]?found|model_not_found|unsupported model|unknown model/i.test(message)) {
+    if (
+      /model[_ -]?not[_ -]?found|model_not_found|unsupported model|unknown model/i.test(message)
+    ) {
       return 'OpenCode model is not available in the current provider. Choose Configured or another listed OpenCode model, then retry.';
     }
 
@@ -1526,11 +1528,7 @@ export class OpenCodeServerClient {
     return new URL(`/session/${encodedSessionId}${suffix}`, serverUrl);
   }
 
-  private apiUrl(
-    serverUrl: string | URL,
-    pathname: string,
-    directory?: string
-  ): URL {
+  private apiUrl(serverUrl: string | URL, pathname: string, directory?: string): URL {
     const url = new URL(pathname, serverUrl);
     if (directory) {
       url.searchParams.set('directory', directory);
@@ -1540,7 +1538,7 @@ export class OpenCodeServerClient {
 
   private objectRecord(value: unknown): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
+      ? (value as Record<string, unknown>)
       : {};
   }
 

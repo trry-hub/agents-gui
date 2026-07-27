@@ -15,7 +15,8 @@ const ACTION_LABELS: Record<AssistantActionId, string> = {
 };
 
 const ACTION_INSTRUCTIONS: Record<AssistantActionId, string> = {
-  freeform: 'Answer the user request using the provided IDE context. Be concrete and reference files when useful.',
+  freeform:
+    'Answer the user request using the provided IDE context. Be concrete and reference files when useful.',
   explainSelection:
     'Explain the selected code clearly. Cover intent, important control flow, edge cases, and any risky assumptions.',
   reviewFile:
@@ -117,7 +118,9 @@ function buildOpenCodeFreeformPrompt(request: AssistantPromptRequest): string {
   }
 
   lines.push('Keep the answer concise. Do not inspect the project unless the request needs it.');
-  lines.push('Only when progress is blocked until the user chooses among discrete options, first ask the user to choose, then put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies. Do not use that format for optional follow-up suggestions after a completed answer.');
+  lines.push(
+    'Only when progress is blocked until the user chooses among discrete options, first ask the user to choose, then put each choice on its own line as "Option N — label" or "选项 N — 标签" so the UI can render quick replies. Do not use that format for optional follow-up suggestions after a completed answer.'
+  );
   lines.push('');
   lines.push(DELIVERY_REQUIREMENTS);
 
@@ -142,14 +145,18 @@ function renderRuntimeSelection(request: AssistantPromptRequest): string {
     lines.push(`- Reasoning depth: ${runtime.modelVariant}`);
   }
   if (runtime.runtimeId || runtime.runtimeLabel) {
-    lines.push(`- Runtime mode: ${runtime.runtimeLabel || runtime.runtimeId}${runtime.runtimeId ? ` (${runtime.runtimeId})` : ''}`);
+    lines.push(
+      `- Runtime mode: ${runtime.runtimeLabel || runtime.runtimeId}${runtime.runtimeId ? ` (${runtime.runtimeId})` : ''}`
+    );
   }
   if (runtime.permissionModeId || runtime.permissionModeLabel) {
     lines.push(
       `- Permission mode: ${runtime.permissionModeLabel || runtime.permissionModeId}${runtime.permissionModeId ? ` (${runtime.permissionModeId})` : ''}`
     );
   }
-  lines.push('If the user asks which model, reasoning depth, agent, runtime, or permission mode is selected, answer from this Agents GUI runtime selection instead of guessing from prior conversation, provider memory, or model self-knowledge.');
+  lines.push(
+    'If the user asks which model, reasoning depth, agent, runtime, or permission mode is selected, answer from this Agents GUI runtime selection instead of guessing from prior conversation, provider memory, or model self-knowledge.'
+  );
   return lines.join('\n');
 }
 
@@ -180,7 +187,9 @@ export function renderAssistantContext(context: AssistantContextSnapshot): strin
     if (Array.isArray(context.workspace.folders) && context.workspace.folders.length > 1) {
       sections.push('VS Code multi-root workspace folders:');
       for (const folder of context.workspace.folders) {
-        sections.push(`- ${folder.name}${folder.active ? ' (active file folder)' : ''}: ${folder.rootPath}`);
+        sections.push(
+          `- ${folder.name}${folder.active ? ' (active file folder)' : ''}: ${folder.rootPath}`
+        );
       }
       if (context.workspace.activeFolderName && context.workspace.activeFolderRootPath) {
         sections.push(`Active workspace folder: ${context.workspace.activeFolderName}`);
@@ -234,10 +243,7 @@ export function renderAssistantContext(context: AssistantContextSnapshot): strin
 
 function hasSubstantialContext(context: AssistantContextSnapshot): boolean {
   return Boolean(
-    context.workspace ||
-    context.activeFile ||
-    context.selection ||
-    context.diagnostics.length > 0
+    context.workspace || context.activeFile || context.selection || context.diagnostics.length > 0
   );
 }
 
@@ -266,7 +272,9 @@ function renderConversationHistory(history: AssistantConversationHistoryMessage[
 }
 
 function compactHistoryText(value: string): string {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return text.length > 1200 ? `${safeSlice(text, 1197)}...` : text;
 }
 
@@ -276,7 +284,7 @@ function safeSlice(text: string, max: number): string {
   }
   let end = max;
   const preceding = text.charCodeAt(end - 1);
-  if (preceding >= 0xD800 && preceding <= 0xDBFF) {
+  if (preceding >= 0xd800 && preceding <= 0xdbff) {
     end -= 1;
   }
   return text.slice(0, end);
@@ -290,9 +298,7 @@ export function renderAssistantAttachments(attachments: AssistantImageAttachment
 
   const sections = ['Attached images:'];
   for (const image of images) {
-    sections.push(
-      `- ${image.name} (${image.mimeType}, ${formatBytes(image.size)}): ${image.path}`
-    );
+    sections.push(`- ${image.name} (${image.mimeType}, ${formatBytes(image.size)}): ${image.path}`);
   }
   sections.push(
     'Use these local image paths when the selected provider can inspect image files. If image inspection is unavailable, say so clearly and work from the user request.'

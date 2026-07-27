@@ -24,7 +24,9 @@ export interface McpOperationResult {
 
 registerMcpAdapter(new CcSwitchMcpAdapter());
 
-async function adapterIsAvailable(adapter: { isAvailable?: () => Promise<boolean> }): Promise<boolean> {
+async function adapterIsAvailable(adapter: {
+  isAvailable?: () => Promise<boolean>;
+}): Promise<boolean> {
   return typeof adapter.isAvailable === 'function' ? adapter.isAvailable() : true;
 }
 
@@ -39,7 +41,9 @@ function adapterUnavailableResult(cliId: string, configPath: string | undefined)
 }
 
 function classifyRuntimeStatus(rawStatus: string | undefined): McpRuntimeStatus['status'] {
-  const normalized = String(rawStatus || '').trim().toLowerCase();
+  const normalized = String(rawStatus || '')
+    .trim()
+    .toLowerCase();
   if (!normalized) {
     return 'unknown';
   }
@@ -103,7 +107,9 @@ export class McpManager {
       runtimeStatus: runtimeStatusFromMcpStatus(statusByName.get(server.name)),
     }));
 
-    const orphanRuntimeEntries = runtimeStatus.filter((entry) => !servers.some((server) => server.name === entry.name));
+    const orphanRuntimeEntries = runtimeStatus.filter(
+      (entry) => !servers.some((server) => server.name === entry.name)
+    );
     for (const orphan of orphanRuntimeEntries) {
       merged.push({
         name: orphan.name,
@@ -128,10 +134,18 @@ export class McpManager {
   async upsert(cliId: string, server: Partial<McpServerConfig>): Promise<McpOperationResult> {
     const adapter = getMcpAdapter(cliId);
     if (!adapter.supported) {
-      return { ok: false, message: adapter.reason || 'MCP management is not supported', code: 'mcp_unsupported' };
+      return {
+        ok: false,
+        message: adapter.reason || 'MCP management is not supported',
+        code: 'mcp_unsupported',
+      };
     }
     if (!(await adapterIsAvailable(adapter))) {
-      return { ok: false, message: adapterUnavailableResult(cliId, adapter.configPath).reason, code: 'mcp_unavailable' };
+      return {
+        ok: false,
+        message: adapterUnavailableResult(cliId, adapter.configPath).reason,
+        code: 'mcp_unavailable',
+      };
     }
 
     const nameError = validateMcpServerName(server.name || '');
@@ -159,10 +173,18 @@ export class McpManager {
   async remove(cliId: string, name: string): Promise<McpOperationResult> {
     const adapter = getMcpAdapter(cliId);
     if (!adapter.supported) {
-      return { ok: false, message: adapter.reason || 'MCP management is not supported', code: 'mcp_unsupported' };
+      return {
+        ok: false,
+        message: adapter.reason || 'MCP management is not supported',
+        code: 'mcp_unsupported',
+      };
     }
     if (!(await adapterIsAvailable(adapter))) {
-      return { ok: false, message: adapterUnavailableResult(cliId, adapter.configPath).reason, code: 'mcp_unavailable' };
+      return {
+        ok: false,
+        message: adapterUnavailableResult(cliId, adapter.configPath).reason,
+        code: 'mcp_unavailable',
+      };
     }
     const trimmed = String(name || '').trim();
     if (!trimmed) {
@@ -184,10 +206,18 @@ export class McpManager {
   async setEnabled(cliId: string, name: string, enabled: boolean): Promise<McpOperationResult> {
     const adapter = getMcpAdapter(cliId);
     if (!adapter.supported) {
-      return { ok: false, message: adapter.reason || 'MCP management is not supported', code: 'mcp_unsupported' };
+      return {
+        ok: false,
+        message: adapter.reason || 'MCP management is not supported',
+        code: 'mcp_unsupported',
+      };
     }
     if (!(await adapterIsAvailable(adapter))) {
-      return { ok: false, message: adapterUnavailableResult(cliId, adapter.configPath).reason, code: 'mcp_unavailable' };
+      return {
+        ok: false,
+        message: adapterUnavailableResult(cliId, adapter.configPath).reason,
+        code: 'mcp_unavailable',
+      };
     }
     const trimmed = String(name || '').trim();
     if (!trimmed) {

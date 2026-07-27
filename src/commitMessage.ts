@@ -88,7 +88,7 @@ function escapePromptFence(text: string): string {
 
 export function cleanGeneratedCommitMessage(
   text: string,
-  options: CleanCommitMessageOptions = {}
+  _options: CleanCommitMessageOptions = {}
 ): string {
   const fenced = extractFirstFence(text);
   const source = fenced ?? text;
@@ -161,10 +161,7 @@ function stripTrailingExplanation(message: string): string {
 }
 
 function normalizeCommitMessageFormat(message: string): string {
-  const normalized = message
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .trim();
+  const normalized = message.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   const lines = normalized.split('\n');
   const subject = (lines[0] ?? '').trim();
   const body = lines.slice(1).join('\n').trim();

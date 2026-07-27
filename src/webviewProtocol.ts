@@ -95,11 +95,24 @@ export type HostToWebviewMessage =
       settings: ApiProviderSettings;
       envStatusByProviderId?: Record<string, { apiKeyEnv: string; apiKeyEnvAvailable: boolean }>;
     } & Record<string, unknown>)
-  | { command: 'apiProviderModelsResult'; requestId?: unknown; ok: boolean; models?: string[]; message?: string }
+  | {
+      command: 'apiProviderModelsResult';
+      requestId?: unknown;
+      ok: boolean;
+      models?: string[];
+      message?: string;
+    }
   | { command: 'settingsSaveResult'; section: SettingsSection; ok: boolean; message?: string }
   | { command: 'homeAgentSettings'; settings: unknown }
   | { command: 'commitMessageSettings'; settings: unknown }
-  | { command: 'mcpServers'; cliId: string; supported: boolean; configPath?: string; reason?: string; servers?: unknown[] }
+  | {
+      command: 'mcpServers';
+      cliId: string;
+      supported: boolean;
+      configPath?: string;
+      reason?: string;
+      servers?: unknown[];
+    }
   | { command: 'mcpServerSaved'; cliId: string; ok: boolean; message?: string; code?: string }
   | { command: 'openProviderSettings'; section?: SettingsSection }
   | { command: 'switchProvider'; providerId: string }
@@ -109,10 +122,10 @@ export type HostToWebviewMessage =
       sessionId: string;
       text: string;
       contextSummary: AssistantContextSummary;
-	      modelId?: string;
-	      modelLabel?: string;
-	      modelVariant?: string;
-	      runtimeId?: string;
+      modelId?: string;
+      modelLabel?: string;
+      modelVariant?: string;
+      runtimeId?: string;
       runtimeLabel?: string;
       permissionModeId?: string;
       permissionModeLabel?: string;
@@ -134,7 +147,13 @@ export type HostToWebviewMessage =
     }
   | { command: 'sessionNotice'; cliId: string; sessionId?: string; text: string }
   | { command: 'sessionInputResult'; cliId: string; sessionId?: string; ok: boolean }
-  | { command: 'sessionEnd'; cliId: string; exitCode: number; sessionId?: string; openCodeSessionId?: string }
+  | {
+      command: 'sessionEnd';
+      cliId: string;
+      exitCode: number;
+      sessionId?: string;
+      openCodeSessionId?: string;
+    }
   | { command: 'stopped'; cliId: string; sessionId?: string }
   | { command: 'error'; cliId: string; text: string; sessionId?: string }
   | { command: 'contextSummary'; cliId?: string; summary: AssistantContextSummary };

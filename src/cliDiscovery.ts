@@ -29,7 +29,10 @@ export interface CliProfileStatusOptions {
   force?: boolean;
 }
 
-const PROFILE_STATUS_CACHE_MS = 10_000;
+// Cache profile status for 5 minutes. The list of installed CLIs and their
+// models rarely changes during a session, so this avoids repeated `opencode
+// debug config` / `opencode models` spawns on every sidebar focus or refresh.
+const PROFILE_STATUS_CACHE_MS = 300_000;
 
 export class CliDiscovery {
   private commandPathCache = new Map<string, string>();
@@ -127,7 +130,10 @@ export class CliDiscovery {
             profile = {
               ...profile,
               agentModes: mergedAgentModes,
-              defaultAgentMode: pickOpenCodeDefaultAgentMode(mergedAgentModes, discovery.defaultAgentId),
+              defaultAgentMode: pickOpenCodeDefaultAgentMode(
+                mergedAgentModes,
+                discovery.defaultAgentId
+              ),
             };
           }
           if (discoveredModels.length > 0) {
@@ -155,11 +161,9 @@ export class CliDiscovery {
   private profileStatusCacheKey(baseProfiles: CliProfile[]): string {
     return [
       this.options.workspaceRoot(),
-      ...baseProfiles.map((profile) => [
-        profile.id,
-        profile.command,
-        (profile.versionArgs ?? ['--version']).join(' '),
-      ].join(':')),
+      ...baseProfiles.map((profile) =>
+        [profile.id, profile.command, (profile.versionArgs ?? ['--version']).join(' ')].join(':')
+      ),
     ].join('|');
   }
 
@@ -196,10 +200,7 @@ export class CliDiscovery {
     this.commandPathCache.delete(command);
   }
 
-  expandProfileEnv(
-    env: Record<string, string> | undefined,
-    cwd: string
-  ): Record<string, string> {
+  expandProfileEnv(env: Record<string, string> | undefined, cwd: string): Record<string, string> {
     if (!env) {
       return {};
     }
@@ -214,7 +215,10 @@ export class CliDiscovery {
     return Object.fromEntries(
       Object.entries(env).map(([key, value]) => [
         key,
-        value.replace(/\{(cwd|cwdHash|tmp)\}/g, (_match, token: string) => replacements[token] ?? ''),
+        value.replace(
+          /\{(cwd|cwdHash|tmp)\}/g,
+          (_match, token: string) => replacements[token] ?? ''
+        ),
       ])
     );
   }
@@ -360,7 +364,21 @@ export class CliDiscovery {
   private getOpenCodeModelOptions(command: string): Promise<CliModelOption[]> {
     const cwd = this.options.workspaceRoot();
     return new Promise<CliModelOption[]>((resolve) => {
-      const runCliFallback = () => {
+      let settled = false;
+
+      const settle = (options: CliModelOption[]) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(options);
+      };
+
+      // Run CLI and server API in parallel (race). Whichever returns valid
+      // results first wins. This avoids the 2.4s server-timeout penalty when
+      // the background server is stale — the CLI path finishes in ~600ms.
+      // CLI fallback path
+      const runCli = () => {
         const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
         const env = {
           ...process.env,
@@ -381,16 +399,15 @@ export class CliDiscovery {
           stdio: ['ignore', 'pipe', 'ignore'],
         });
         let output = '';
-        let settled = false;
+        let cliDone = false;
 
-        const finish = () => {
-          if (settled) {
+        const finishCli = () => {
+          if (cliDone) {
             return;
           }
-
-          settled = true;
+          cliDone = true;
           clearTimeout(timeout);
-          resolve(parseOpenCodeModelsOutput(output));
+          settle(parseOpenCodeModelsOutput(output));
         };
 
         const timeout = setTimeout(() => {
@@ -399,7 +416,7 @@ export class CliDiscovery {
           } catch {
             // Process may already be gone.
           }
-          finish();
+          finishCli();
         }, 5000);
 
         proc.stdout?.on('data', (data: Buffer) => {
@@ -410,23 +427,27 @@ export class CliDiscovery {
             } catch {
               // Process may already be gone.
             }
-            finish();
+            finishCli();
           }
         });
-        proc.on('close', finish);
-        proc.on('error', () => finish());
+        proc.on('close', finishCli);
+        proc.on('error', () => finishCli());
       };
 
-      void this.options.openCodeClient.fetchModelOptions(cwd)
+      // Server API path (in parallel)
+      void this.options.openCodeClient
+        .fetchModelOptions(cwd)
         .then((serverOptions) => {
           if (serverOptions.length > 0) {
-            resolve(serverOptions);
-            return;
+            settle(serverOptions);
           }
-
-          runCliFallback();
         })
-        .catch(() => runCliFallback());
+        .catch(() => {
+          // Server failed — CLI path will resolve.
+        });
+
+      // Start CLI immediately alongside the server attempt
+      runCli();
     });
   }
 
@@ -531,9 +552,8 @@ function mergeOpenCodeAgentModes(
   configuredAgentId?: string,
   options: { includeBaseWhenDiscovered?: boolean } = {}
 ): CliAgentMode[] {
-  const baseVisibleModes = discoveredModes.length > 0 && !options.includeBaseWhenDiscovered
-    ? []
-    : baseModes;
+  const baseVisibleModes =
+    discoveredModes.length > 0 && !options.includeBaseWhenDiscovered ? [] : baseModes;
   const merged: CliAgentMode[] = [];
   const upsert = (mode: CliAgentMode) => {
     const decorated = decorateOpenCodeConfiguredAgentMode(mode, configuredAgentId);
@@ -583,10 +603,12 @@ function pickOpenCodeDefaultAgentMode(
   configuredAgentId: string | undefined
 ): string {
   const selectableModes = modes.filter((mode) => !mode.disabled);
-  return selectableModes.find((mode) => mode.id === configuredAgentId)?.id
-    ?? selectableModes.find((mode) => mode.id === 'build')?.id
-    ?? selectableModes[0]?.id
-    ?? 'configured';
+  return (
+    selectableModes.find((mode) => mode.id === configuredAgentId)?.id ??
+    selectableModes.find((mode) => mode.id === 'build')?.id ??
+    selectableModes[0]?.id ??
+    'configured'
+  );
 }
 
 function decorateOpenCodeConfiguredAgentMode(
@@ -610,9 +632,10 @@ function mergeOpenCodeModelOptions(
   variants: Record<string, string> = {},
   modelMetadata: OpenCodeModelMetadataMap = {}
 ): CliModelOption[] {
-  const baseVisibleOptions = discoveredOptions.length > 0
-    ? baseOptions.filter((option) => option.id !== 'default')
-    : baseOptions;
+  const baseVisibleOptions =
+    discoveredOptions.length > 0
+      ? baseOptions.filter((option) => option.id !== 'default')
+      : baseOptions;
   const defaultOptions = baseVisibleOptions.filter((option) => !option.custom);
   const customOptions = baseVisibleOptions.filter((option) => option.custom);
   const seen = new Set<string>();
@@ -631,13 +654,15 @@ function mergeOpenCodeModelOptions(
     }
 
     seen.add(option.id);
-    merged.push(decorateOpenCodeModelOption(
-      option,
-      configuredModelId,
-      variants,
-      modelMetadata,
-      variantOptionsByModel
-    ));
+    merged.push(
+      decorateOpenCodeModelOption(
+        option,
+        configuredModelId,
+        variants,
+        modelMetadata,
+        variantOptionsByModel
+      )
+    );
   }
 
   return merged;
@@ -651,8 +676,9 @@ function decorateOpenCodeModelOption(
   variantOptionsByModel: Map<string, string[]>
 ): CliModelOption {
   const variant = variants[option.id];
-  const variantOptions = variantOptionsByModel.get(option.id)
-    ?? normalizeOpenCodeVariantOptions(modelMetadata[option.id]?.variantOptions);
+  const variantOptions =
+    variantOptionsByModel.get(option.id) ??
+    normalizeOpenCodeVariantOptions(modelMetadata[option.id]?.variantOptions);
   if (option.id !== 'configured') {
     return {
       ...option,
@@ -668,8 +694,9 @@ function decorateOpenCodeModelOption(
     return option;
   }
 
-  const configuredVariantOptions = variantOptionsByModel.get(configuredModelId)
-    ?? normalizeOpenCodeVariantOptions(modelMetadata[configuredModelId]?.variantOptions);
+  const configuredVariantOptions =
+    variantOptionsByModel.get(configuredModelId) ??
+    normalizeOpenCodeVariantOptions(modelMetadata[configuredModelId]?.variantOptions);
   const [, ...modelParts] = configuredModelId.split('/');
   const summaryLabel = formatConfiguredOpenCodeModelSummary(
     modelParts.join('/') || configuredModelId,
@@ -688,7 +715,10 @@ function decorateOpenCodeModelOption(
   };
 }
 
-function formatConfiguredOpenCodeModelSummary(modelLabel: string, variant: string | undefined): string {
+function formatConfiguredOpenCodeModelSummary(
+  modelLabel: string,
+  variant: string | undefined
+): string {
   return variant ? `${modelLabel} · ${variant}` : modelLabel;
 }
 
@@ -716,8 +746,11 @@ function normalizeOpenCodeVariantOptions(value: unknown): string[] {
 }
 
 function normalizeCommandVersionOutput(output: string): string | undefined {
+  const ansiEscapeRegex =
+    // eslint-disable-next-line no-control-regex
+    /\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g;
   const firstLine = output
-    .replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g, '')
+    .replace(ansiEscapeRegex, '')
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);

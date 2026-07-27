@@ -37,7 +37,9 @@ export class OpenCodeLocalState {
 
   readModelState(): OpenCodeModelState {
     try {
-      return parseOpenCodeModelState(JSON.parse(fs.readFileSync(this.paths().modelStatePath, 'utf8')));
+      return parseOpenCodeModelState(
+        JSON.parse(fs.readFileSync(this.paths().modelStatePath, 'utf8'))
+      );
     } catch {
       return { recentModelIds: [], variants: {} };
     }
@@ -45,7 +47,9 @@ export class OpenCodeLocalState {
 
   readModelMetadata(): OpenCodeModelMetadataMap {
     try {
-      return parseOpenCodeModelMetadata(JSON.parse(fs.readFileSync(this.paths().modelMetadataPath, 'utf8')));
+      return parseOpenCodeModelMetadata(
+        JSON.parse(fs.readFileSync(this.paths().modelMetadataPath, 'utf8'))
+      );
     } catch {
       return {};
     }
@@ -54,9 +58,10 @@ export class OpenCodeLocalState {
   async updateModelVariant(modelId: string, variant: string): Promise<void> {
     const modelStatePath = this.paths().modelStatePath;
     const state = await this.readModelStateRecord(modelStatePath);
-    const existingVariants = state.variant && typeof state.variant === 'object' && !Array.isArray(state.variant)
-      ? state.variant as Record<string, unknown>
-      : {};
+    const existingVariants =
+      state.variant && typeof state.variant === 'object' && !Array.isArray(state.variant)
+        ? (state.variant as Record<string, unknown>)
+        : {};
     state.variant = {
       ...existingVariants,
       [modelId]: variant,
@@ -70,7 +75,7 @@ export class OpenCodeLocalState {
     try {
       const parsed = JSON.parse(await fs.promises.readFile(modelStatePath, 'utf8'));
       return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
+        ? (parsed as Record<string, unknown>)
         : {};
     } catch {
       return {};
@@ -93,9 +98,7 @@ export class OpenCodeLocalState {
     const platform = this.options.platform ?? process.platform;
     const localAppData = platform === 'win32' ? usableAbsolutePath(env.LOCALAPPDATA) : undefined;
     return (
-      usableAbsolutePath(env.XDG_CACHE_HOME) ??
-      localAppData ??
-      path.join(this.homeDir(), '.cache')
+      usableAbsolutePath(env.XDG_CACHE_HOME) ?? localAppData ?? path.join(this.homeDir(), '.cache')
     );
   }
 

@@ -52,10 +52,7 @@ export function sanitizeApiProviderSettings(value: unknown): ApiProviderSettings
   const defaultProviderId = enabledIds.has(stringValue(record.defaultProviderId))
     ? stringValue(record.defaultProviderId)
     : '';
-  const agentProviderByCliId = normalizeAgentProviderMap(
-    record.agentProviderByCliId,
-    enabledIds
-  );
+  const agentProviderByCliId = normalizeAgentProviderMap(record.agentProviderByCliId, enabledIds);
 
   return {
     customProviders: providers,
@@ -183,9 +180,7 @@ export function resolveApiProviderForAgent(
 ): CustomApiProviderConfig | undefined {
   const configured = settings.agentProviderByCliId[cliId];
   const providerId =
-    configured && configured !== API_PROVIDER_INHERIT
-      ? configured
-      : settings.defaultProviderId;
+    configured && configured !== API_PROVIDER_INHERIT ? configured : settings.defaultProviderId;
 
   return settings.customProviders.find(
     (provider) => provider.enabled && provider.id === providerId

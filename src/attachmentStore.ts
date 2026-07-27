@@ -1,9 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import type {
-  AssistantImageAttachment,
-  AssistantImageAttachmentInput,
-} from './assistantTypes';
+import type { AssistantImageAttachment, AssistantImageAttachmentInput } from './assistantTypes';
 
 const DEFAULT_MAX_IMAGE_ATTACHMENTS = 8;
 const DEFAULT_MAX_IMAGE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
@@ -28,10 +25,13 @@ export class ImageAttachmentStore {
     this.maxAttachments = options.maxAttachments ?? DEFAULT_MAX_IMAGE_ATTACHMENTS;
     this.maxAttachmentBytes = options.maxAttachmentBytes ?? DEFAULT_MAX_IMAGE_ATTACHMENT_BYTES;
     this.retentionMs = options.retentionMs ?? DEFAULT_IMAGE_ATTACHMENT_RETENTION_MS;
-    this.maxStoredAttachments = options.maxStoredAttachments ?? DEFAULT_MAX_STORED_IMAGE_ATTACHMENTS;
+    this.maxStoredAttachments =
+      options.maxStoredAttachments ?? DEFAULT_MAX_STORED_IMAGE_ATTACHMENTS;
   }
 
-  async materialize(inputs: AssistantImageAttachmentInput[] = []): Promise<AssistantImageAttachment[]> {
+  async materialize(
+    inputs: AssistantImageAttachmentInput[] = []
+  ): Promise<AssistantImageAttachment[]> {
     const imageInputs = inputs
       .filter((input) => this.isImageAttachmentInput(input))
       .slice(0, this.maxAttachments);

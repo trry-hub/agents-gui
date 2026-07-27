@@ -61,7 +61,10 @@ const MCP_NAME_MAX_LENGTH = 64;
 const SQLITE_TIMEOUT_MS = 8000;
 
 export class McpConfigError extends Error {
-  constructor(message: string, public readonly code: string = 'mcp_config_error') {
+  constructor(
+    message: string,
+    public readonly code: string = 'mcp_config_error'
+  ) {
     super(message);
     this.name = 'McpConfigError';
   }
@@ -81,7 +84,9 @@ export function validateMcpServerName(name: string): string | undefined {
   return undefined;
 }
 
-export function sanitizeMcpServerConfig(input: Partial<McpServerConfig> | undefined): McpServerConfig | undefined {
+export function sanitizeMcpServerConfig(
+  input: Partial<McpServerConfig> | undefined
+): McpServerConfig | undefined {
   if (!input || typeof input !== 'object') {
     return undefined;
   }
@@ -150,9 +155,10 @@ export function sanitizeStringRecord(value: unknown): Record<string, string> | u
 }
 
 export function normalizeEnabledByCli(value: unknown): McpEnabledByCli {
-  const record = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   return {
     claude: record.claude !== false,
     codex: record.codex !== false,
@@ -178,8 +184,12 @@ function usableAbsoluteEnvPath(value: string | undefined): string | undefined {
 }
 
 function defaultConfigHome(): string {
-  const appData = process.platform === 'win32' ? usableAbsoluteEnvPath(process.env.APPDATA) : undefined;
-  const home = usableAbsoluteEnvPath(os.homedir()) || usableAbsoluteEnvPath(process.env.HOME) || usableAbsoluteEnvPath(process.env.USERPROFILE);
+  const appData =
+    process.platform === 'win32' ? usableAbsoluteEnvPath(process.env.APPDATA) : undefined;
+  const home =
+    usableAbsoluteEnvPath(os.homedir()) ||
+    usableAbsoluteEnvPath(process.env.HOME) ||
+    usableAbsoluteEnvPath(process.env.USERPROFILE);
   if (appData) {
     return appData;
   }
@@ -196,7 +206,7 @@ function openCodeConfigPath(): string {
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -284,10 +294,7 @@ function toOpenCodeEntry(server: McpServerConfig): Record<string, unknown> {
     }
   } else {
     entry.type = 'local';
-    const fullCommand = [
-      ...(server.command || []),
-      ...(server.args || []),
-    ];
+    const fullCommand = [...(server.command || []), ...(server.args || [])];
     entry.command = fullCommand;
   }
 
@@ -296,41 +303,6 @@ function toOpenCodeEntry(server: McpServerConfig): Record<string, unknown> {
   }
 
   return entry;
-}
-
-function fromOpenCodeEntry(name: string, entry: Record<string, unknown>): McpServerConfig | undefined {
-  const isRemote = entry.type === 'remote' || typeof entry.url === 'string';
-  const enabled = entry.enabled !== false;
-
-  if (isRemote) {
-    const url = typeof entry.url === 'string' ? entry.url.trim() : '';
-    if (!url) {
-      return undefined;
-    }
-    return {
-      name,
-      type: 'remote',
-      url,
-      headers: asStringRecord(entry.headers),
-      environment: asStringRecord(entry.environment),
-      enabled,
-    };
-  }
-
-  const command = asStringArray(entry.command);
-  if (!command || command.length === 0) {
-    return undefined;
-  }
-
-  return {
-    name,
-    type: 'local',
-    command,
-    args: asStringArray(entry.args),
-    headers: asStringRecord(entry.headers),
-    environment: asStringRecord(entry.environment),
-    enabled,
-  };
 }
 
 function toCcSwitchServerConfig(server: McpServerConfig): Record<string, unknown> {
@@ -350,10 +322,7 @@ function toCcSwitchServerConfig(server: McpServerConfig): Record<string, unknown
   if (command.length > 0) {
     config.command = command[0];
   }
-  const args = [
-    ...command.slice(1),
-    ...(Array.isArray(server.args) ? server.args : []),
-  ];
+  const args = [...command.slice(1), ...(Array.isArray(server.args) ? server.args : [])];
   if (args.length > 0) {
     config.args = args;
   }
@@ -395,7 +364,8 @@ function fromCcSwitchServerConfig(
     };
   }
 
-  const commandField = typeof config.command === 'string' ? [config.command] : asStringArray(config.command);
+  const commandField =
+    typeof config.command === 'string' ? [config.command] : asStringArray(config.command);
   const argsField = asStringArray(config.args) || [];
   const fullCommand = [...(commandField || []), ...argsField];
   if (fullCommand.length === 0) {
@@ -469,7 +439,7 @@ async function sqliteQuery(dbPath: string, sql: string): Promise<CcSwitchMcpRow[
       return [];
     }
     const parsed = JSON.parse(stdout);
-    return Array.isArray(parsed) ? parsed as CcSwitchMcpRow[] : [];
+    return Array.isArray(parsed) ? (parsed as CcSwitchMcpRow[]) : [];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new McpConfigError(`SQLite query failed: ${message}`, 'mcp_sqlite_read_failed');
@@ -568,12 +538,13 @@ export class CcSwitchMcpAdapter implements CliMcpAdapter {
     const homepage = server.homepage ?? prior?.homepage ?? '';
     const docs = server.docs ?? prior?.docs ?? '';
     const tags = JSON.stringify(server.tags ?? prior?.tags ?? []);
-    const enabledByCli = cleaned.enabledByCli ?? prior?.enabledByCli ?? {
-      claude: true,
-      codex: true,
-      gemini: true,
-      opencode: cleaned.enabled !== false,
-    };
+    const enabledByCli = cleaned.enabledByCli ??
+      prior?.enabledByCli ?? {
+        claude: true,
+        codex: true,
+        gemini: true,
+        opencode: cleaned.enabled !== false,
+      };
 
     const serverConfig = JSON.stringify(toCcSwitchServerConfig(cleaned));
 

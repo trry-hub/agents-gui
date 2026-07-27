@@ -33,7 +33,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'statusBar.tooltip': 'Open Agents GUI',
     'notification.stoppedAll': 'All AI CLI processes stopped.',
     'notification.installCommandCopied': 'Installation command copied to clipboard.',
-    'notification.installCommandSent': 'Installation command sent to the terminal. Click refresh after it finishes.',
+    'notification.installCommandSent':
+      'Installation command sent to the terminal. Click refresh after it finishes.',
     'notification.authCommandSent': '{provider} authentication command sent to the terminal.',
     'notification.messageCopied': 'Message copied to clipboard.',
     'notification.refreshingProviders': 'Refreshing Agents GUI providers...',
@@ -49,7 +50,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'warning.apiProviderMissingKey':
       'API provider {provider} references {envName}, but that environment variable is not available to VS Code.',
     'providerExtension.notConfigured': 'No VS Code extension bridge is configured for {provider}.',
-    'providerExtension.notInstalled': '{extension} is not installed. Opening the Extensions search.',
+    'providerExtension.notInstalled':
+      '{extension} is not installed. Opening the Extensions search.',
     'providerExtension.openFailed': 'Failed to open {extension}.',
     'providerAuth.unsupported': '{provider} does not expose a supported authentication command.',
     'mcpSettings.delete': 'Delete',

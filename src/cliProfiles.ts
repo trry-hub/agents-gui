@@ -1,3 +1,5 @@
+import type { AgentCapability, AgentPermissionPosture } from './agentCapabilities';
+
 export interface CliAgentMode {
   id: string;
   label: string;
@@ -28,10 +30,11 @@ export interface CliModelOption extends CliProfileOption {
   variantOptions?: string[];
 }
 
-export interface CliRuntimeMode extends CliProfileOption {}
+export type CliRuntimeMode = CliProfileOption;
 
 export interface CliPermissionMode extends CliProfileOption {
   instruction?: string;
+  posture: AgentPermissionPosture;
 }
 
 export type CliAuthAction = 'login' | 'logout' | 'status';
@@ -63,12 +66,7 @@ export type CliInstallPlatform = NodeJS.Platform | 'default';
 export type CliInstallHints = Partial<Record<CliInstallPlatform, string>>;
 
 export type CliTaskIntent =
-  | 'planning'
-  | 'implementation'
-  | 'review'
-  | 'tests'
-  | 'refactor'
-  | 'explain';
+  'planning' | 'implementation' | 'review' | 'tests' | 'refactor' | 'explain';
 
 export type CliTaskRouting = Record<CliTaskIntent, number>;
 
@@ -128,6 +126,8 @@ export interface CliProfile {
   icon: string;
   /** Capability labels shown in the assistant workbench */
   capabilities: string[];
+  /** Provider capabilities enforced by the agent execution control plane. */
+  executionCapabilities: AgentCapability[];
   /** Provider-owned slash commands and native controls exposed by the webview. */
   slashCommands?: CliSlashCommand[];
   /** Task-fit scores used by the workbench recommendation engine */
@@ -239,6 +239,12 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#d97757',
     icon: '◆',
     capabilities: ['agent', 'multi-file', 'refactor'],
+    executionCapabilities: [
+      'workspace.read',
+      'workspace.write',
+      'terminal.execute',
+      'sandbox.bypass',
+    ],
     slashCommands: CLAUDE_SLASH_COMMANDS,
     taskRouting: {
       planning: 6,
@@ -353,6 +359,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Claude Code default permission mode: read freely and ask before edits or shell actions that need approval.',
         args: ['--permission-mode', 'default'],
+        posture: 'workspace-write',
       },
       {
         id: 'acceptEdits',
@@ -361,6 +368,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Claude Code acceptEdits permission mode: allow file edits and common filesystem commands while still surfacing important risks.',
         args: ['--permission-mode', 'acceptEdits'],
+        posture: 'workspace-write',
       },
       {
         id: 'plan',
@@ -369,6 +377,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Claude Code plan permission mode: inspect and propose a plan. Do not edit files unless the user explicitly approves execution.',
         args: ['--permission-mode', 'plan'],
+        posture: 'read-only',
       },
       {
         id: 'auto',
@@ -377,6 +386,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Claude Code auto permission mode: proceed autonomously within Claude Code safety checks and summarize verification clearly.',
         args: ['--permission-mode', 'auto'],
+        posture: 'workspace-write',
       },
       {
         id: 'dontAsk',
@@ -385,6 +395,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Claude Code dontAsk permission mode: stay within pre-approved tools and explain blockers instead of requesting broad permissions.',
         args: ['--permission-mode', 'dontAsk'],
+        posture: 'workspace-write',
       },
       {
         id: 'bypassPermissions',
@@ -394,6 +405,7 @@ export const CLI_PROFILES: CliProfile[] = [
           'Claude Code bypassPermissions permission mode: act carefully, keep edits scoped, and call out risky operations explicitly.',
         args: ['--permission-mode', 'bypassPermissions'],
         dangerous: true,
+        posture: 'unrestricted',
       },
     ],
     installHint: 'npm install -g @anthropic-ai/claude-code',
@@ -420,6 +432,7 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#4285f4',
     icon: 'G',
     capabilities: ['chat', 'analysis', 'workspace'],
+    executionCapabilities: ['workspace.read', 'workspace.write', 'terminal.execute'],
     taskRouting: {
       planning: 4,
       implementation: 2,
@@ -471,6 +484,12 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#10a37f',
     icon: 'C',
     capabilities: ['agent', 'patches', 'review'],
+    executionCapabilities: [
+      'workspace.read',
+      'workspace.write',
+      'terminal.execute',
+      'sandbox.bypass',
+    ],
     taskRouting: {
       planning: 5,
       implementation: 6,
@@ -563,6 +582,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Codex read-only permission: inspect the workspace and propose concrete changes without editing files or running write commands.',
         args: ['--sandbox', 'read-only'],
+        posture: 'read-only',
       },
       {
         id: 'workspaceWrite',
@@ -571,6 +591,7 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Codex workspace permission: make scoped workspace edits when requested, then report verification clearly.',
         args: ['--sandbox', 'workspace-write'],
+        posture: 'workspace-write',
       },
       {
         id: 'fullAuto',
@@ -579,15 +600,18 @@ export const CLI_PROFILES: CliProfile[] = [
         instruction:
           'Codex full-auto permission: work autonomously in the sandbox, keep changes scoped, and summarize commands, edits, and verification.',
         args: ['--full-auto'],
+        posture: 'workspace-write',
       },
       {
         id: 'danger',
         label: 'Danger',
-        description: 'Bypass Codex approvals and sandbox. Use only in externally sandboxed environments.',
+        description:
+          'Bypass Codex approvals and sandbox. Use only in externally sandboxed environments.',
         instruction:
           'Codex danger permission: approvals and sandbox are bypassed. Keep edits scoped and call out risky operations explicitly.',
         args: ['--dangerously-bypass-approvals-and-sandbox'],
         dangerous: true,
+        posture: 'unrestricted',
       },
     ],
     defaultAgentMode: 'build',
@@ -643,6 +667,12 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#a855f7',
     icon: 'O',
     capabilities: ['agent', 'terminal', 'workspace'],
+    executionCapabilities: [
+      'workspace.read',
+      'workspace.write',
+      'terminal.execute',
+      'session.resume',
+    ],
     slashCommands: OPENCODE_SLASH_COMMANDS,
     taskRouting: {
       planning: 2,
@@ -659,7 +689,8 @@ export const CLI_PROFILES: CliProfile[] = [
         id: 'configured',
         label: 'Configured',
         summaryLabel: 'Configured',
-        description: 'Use the concrete model configured in OpenCode when model discovery is unavailable.',
+        description:
+          'Use the concrete model configured in OpenCode when model discovery is unavailable.',
       },
       {
         id: 'custom',
@@ -714,6 +745,7 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#f97316',
     icon: '⌂',
     capabilities: ['agent', 'automation', 'tools'],
+    executionCapabilities: ['workspace.read', 'workspace.write', 'terminal.execute'],
     taskRouting: {
       planning: 2,
       implementation: 3,
@@ -739,10 +771,13 @@ export const CLI_PROFILES: CliProfile[] = [
           'Goose plan mode: inspect and outline a plan before automation or file changes.',
       },
     ],
-    installHint: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
+    installHint:
+      'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
     installHints: {
-      darwin: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
-      linux: 'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
+      darwin:
+        'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
+      linux:
+        'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash',
       win32:
         'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/block/goose/releases/download/stable/download_cli.ps1 | iex"',
     },
@@ -758,6 +793,7 @@ export const CLI_PROFILES: CliProfile[] = [
     accent: '#22c55e',
     icon: 'A',
     capabilities: ['patches', 'git', 'tests'],
+    executionCapabilities: ['workspace.read', 'workspace.write', 'terminal.execute'],
     taskRouting: {
       planning: 1,
       implementation: 4,
@@ -823,8 +859,7 @@ export function getCliModelOption(profile: CliProfile, modelId?: string): CliMod
   return (
     options.find((option) => option.id === modelId) ??
     options.find((option) => option.id === profile.defaultModel) ??
-    options[0] ??
-    { id: 'default', label: 'Default', description: 'Use provider default model.' }
+    options[0] ?? { id: 'default', label: 'Default', description: 'Use provider default model.' }
   );
 }
 
@@ -835,8 +870,7 @@ export function getCliRuntimeMode(profile: CliProfile, runtimeId?: string): CliR
     selectableModes.find((mode) => mode.id === runtimeId) ??
     selectableModes.find((mode) => mode.id === profile.defaultRuntime) ??
     selectableModes[0] ??
-    modes[0] ??
-    { id: 'default', label: 'Default', description: 'Use provider default runtime.' }
+    modes[0] ?? { id: 'default', label: 'Default', description: 'Use provider default runtime.' }
   );
 }
 
@@ -852,8 +886,12 @@ export function getCliPermissionMode(
   return (
     modes.find((mode) => mode.id === permissionModeId) ??
     modes.find((mode) => mode.id === profile.defaultPermissionMode) ??
-    modes[0] ??
-    { id: 'default', label: 'Default', description: 'Use provider default permissions.' }
+    modes[0] ?? {
+      id: 'default',
+      label: 'Default',
+      description: 'Use provider default permissions.',
+      posture: 'workspace-write',
+    }
   );
 }
 
@@ -868,13 +906,9 @@ export function buildCliOptionArgs(
   const modelArgs =
     model.custom && customModel && profile.customModelArgPrefix
       ? [...profile.customModelArgPrefix, customModel]
-      : model.args ?? [];
+      : (model.args ?? []);
 
-  return [
-    ...(runtime.args ?? []),
-    ...modelArgs,
-    ...(permission.args ?? []),
-  ];
+  return [...(runtime.args ?? []), ...modelArgs, ...(permission.args ?? [])];
 }
 
 const OPENAI_CONTEXT_WINDOW_TOKENS: Record<string, number> = {

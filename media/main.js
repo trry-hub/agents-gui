@@ -16,6 +16,7 @@
   const composerState = window.AgentsGuiComposerState;
   const providerOptions = window.AgentsGuiProviderOptions;
   const stateManager = window.AgentsGuiStateManager;
+  const pacedReveal = window.AgentsGuiPacedReveal;
   const normalizeMessageText = messageText.normalizeMessageText;
   const stripInlineMarkdown = messageText.stripInlineMarkdown;
   const appendInlineMarkdown = inlineMarkdown.appendInlineMarkdown;
@@ -168,6 +169,10 @@
   // Session history panel width (px), persisted across sessions via webview state.
   let sessionHistoryWidth = clampSessionHistoryWidth(saved.sessionHistoryWidth);
   let streamTargets = {};
+  // Paced reveal controllers per session — throttle how fast streamed text
+  // is shown to avoid layout thrash on large token bursts.
+  const textPacedReveals = {};
+  const thinkingPacedReveals = {};
   let taskBySessionId = {};
   const stoppedSessionIds = new Set();
   const dismissedClaudeApprovalKeys = new Set();
@@ -6936,7 +6941,7 @@
     const buffered = mergeStreamText(target.buffer || item.text || '', message.text);
     const filtered = filterInternalPromptEcho(buffered);
     target.buffer = filtered.pending ? buffered : filtered.text;
-    item.text = filtered.text;
+    const fullText = filtered.text;
     if (normalizeMessageText(message.text).trim()) {
       delete item.runningNotice;
     }
@@ -6945,11 +6950,51 @@
       updateTaskStatus(taskBySessionId[message.sessionId], { status: 'failed' });
     }
     persist();
-    if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
-      if (!renderActiveStreamMessage(target)) {
-        renderMessages();
-      }
+    revealStreamText(target, item, fullText);
+  }
+
+  /**
+   * Reveal streamed text via paced throttle to avoid layout thrash.
+   * Small deltas (≤ 512 chars) render immediately; large bursts are throttled
+   * with an adaptive step that snaps to word boundaries.
+   */
+  function revealStreamText(target, item, fullText) {
+    if (target.cliId !== activeId || target.threadId !== activeThreadId(activeId)) {
+      // Inactive thread: set immediately, no animation needed.
+      item.text = fullText;
+      return;
     }
+
+    if (!pacedReveal) {
+      item.text = fullText;
+      renderStreamTarget(target);
+      return;
+    }
+
+    let controller = textPacedReveals[getSessionKey(target)];
+    if (!controller) {
+      controller = pacedReveal.createPacedReveal({
+        onReveal(visibleText) {
+          item.text = visibleText;
+          renderStreamTarget(target);
+        },
+      });
+      textPacedReveals[getSessionKey(target)] = controller;
+    }
+    controller.update(fullText);
+  }
+
+  function renderStreamTarget(target) {
+    if (target.cliId !== activeId || target.threadId !== activeThreadId(activeId)) {
+      return;
+    }
+    if (!renderActiveStreamMessage(target)) {
+      renderMessages();
+    }
+  }
+
+  function getSessionKey(target) {
+    return `${target.cliId}:${target.threadId}:${target.index}`;
   }
 
   function updateStreamThinking(message) {
@@ -6963,16 +7008,33 @@
     const existingThinking = target.thinkingBuffer ?? item.thinking ?? '';
     target.thinkingBuffer = mergeStreamText(existingThinking, message.thinking);
     const filtered = filterInternalPromptEcho(target.thinkingBuffer);
-    item.thinking = filtered.pending ? '' : sanitizeThinkingText(filtered.text);
+    const fullThinking = filtered.pending ? '' : sanitizeThinkingText(filtered.text);
     if (!filtered.pending) {
-      target.thinkingBuffer = item.thinking;
+      target.thinkingBuffer = fullThinking;
     }
     persist();
-    if (target.cliId === activeId && target.threadId === activeThreadId(activeId)) {
-      if (!renderActiveStreamMessage(target)) {
-        renderMessages();
-      }
+
+    if (target.cliId !== activeId || target.threadId !== activeThreadId(activeId)) {
+      item.thinking = fullThinking;
+      return;
     }
+    if (!pacedReveal) {
+      item.thinking = fullThinking;
+      renderStreamTarget(target);
+      return;
+    }
+    const key = getSessionKey(target);
+    let controller = thinkingPacedReveals[key];
+    if (!controller) {
+      controller = pacedReveal.createPacedReveal({
+        onReveal(visible) {
+          item.thinking = visible;
+          renderStreamTarget(target);
+        },
+      });
+      thinkingPacedReveals[key] = controller;
+    }
+    controller.update(fullThinking);
   }
 
   function updateStreamActivity(message) {
@@ -7040,9 +7102,30 @@
         }
       }
       delete streamTargets[message.sessionId];
+      disposePacedReveals(target);
     }
 
     return target;
+  }
+
+  /**
+   * Flush and dispose paced reveal controllers for a stream target.
+   * Called when a session ends or is stopped so no pending timers remain.
+   */
+  function disposePacedReveals(target) {
+    const key = getSessionKey(target);
+    const textController = textPacedReveals[key];
+    if (textController) {
+      textController.finish();
+      textController.dispose();
+      delete textPacedReveals[key];
+    }
+    const thinkingController = thinkingPacedReveals[key];
+    if (thinkingController) {
+      thinkingController.finish();
+      thinkingController.dispose();
+      delete thinkingPacedReveals[key];
+    }
   }
 
   function finalStreamTargetText(target, item) {

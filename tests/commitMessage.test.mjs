@@ -267,67 +267,30 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /repository\.state\.workingTreeChanges\?\./);
   assert.match(source, /repository\.diff\(true\)/);
   assert.match(source, /handleNoStagedChanges\(repository, locale\)/);
-  assert.match(source, /void vscode\.window\.showInformationMessage\(\s*this\.t\(locale, 'noStagedChanges'\),\s*openSourceControl\s*\)\.then\(async \(choice\) =>/s);
+  assert.match(source, /void vscode\.window\s*\.showInformationMessage\(this\.t\(locale, 'noStagedChanges'\), openSourceControl\)\s*\.then\(async \(choice\) =>/s);
   assert.match(source, /executeCommand\('git\.stageAll'\)/);
   assert.match(source, /executeCommand\('workbench\.view\.scm'\)/);
-  assert.match(source, /const streamCommitMessage = \(output: string\) =>/);
+  assert.match(source, /const streamCommitMessage = \(message: string\) =>/);
   assert.match(source, /repository\.inputBox\.value = '';/);
-  assert.match(source, /repository\.inputBox\.value = partialMessage;/);
+  assert.match(source, /repository\.inputBox\.value = message;/);
   assert.match(source, /repository\.inputBox\.value = result\.message/);
   assert.match(source, /const inputMessage = repository\.inputBox\.value\.trim\(\)/);
   assert.match(source, /buildCommitMessagePrompt\(\{ diff, language, truncated, inputMessage \}\)/);
-  assert.match(source, /cleanCommitMessageOutput\(output, language, diff, inputMessage, true\)/);
-  assert.doesNotMatch(source, /const profiles = await this\.resolveGenerationProfiles\(primaryProfile\);/);
-  assert.match(source, /generateCommitMessageWithFallback\(\s*primaryProfile,\s*\(\) => this\.resolveFallbackGenerationProfiles\(primaryProfile\),\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s);
+  assert.doesNotMatch(source, /this\.cleanCommitMessageOutput\(/);
+  assert.match(source, /generateCommitMessageWithCancellation\(\s*primaryProfile,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s);
   assert.match(source, /repository\.inputBox\.value = '';\s*\},\s*inputMessage,/s);
-  assert.match(source, /cleanGeneratedCommitMessage\(output, \{ language, diff, inputMessage \}\)/);
   assert.match(source, /getRepository\(rootUri\)/);
   assert.match(source, /generateCommitMessageWithCancellation/);
-  assert.match(source, /generateCommitMessageWithFallback/);
-  assert.match(source, /session\.onEvent\.event\(\(event\) =>/);
-  assert.match(source, /event\.type === 'output' && event\.stream === 'stdout'/);
-  assert.match(source, /event\.type === 'output' && event\.stream === 'stderr'/);
-  assert.match(source, /event\.type === 'error'/);
-  assert.match(source, /event\.type !== 'end'/);
-  assert.doesNotMatch(source, /session\.onOutput\.event/);
-  assert.doesNotMatch(source, /session\.onStderr\.event/);
-  assert.doesNotMatch(source, /session\.onError\.event/);
-  assert.doesNotMatch(source, /session\.onEnd\.event/);
-  assert.match(source, /profile\.id === 'opencode'/);
-  assert.doesNotMatch(source, /openCodeModelId/);
-  assert.doesNotMatch(source, /OPENCODE_COMMIT_MESSAGE_MODEL_PREFERENCES/);
-  assert.doesNotMatch(source, /getOpenCodeModelOptions\(repositoryRoot\)/);
-  assert.match(source, /OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS = \['run', '--format', 'json'\]/);
-  assert.doesNotMatch(source, /OPENCODE_COMMIT_MESSAGE_OPENAI_VARIANT_ARGS/);
-  assert.doesNotMatch(source, /buildCliOptionArgs\(profile/);
-  assert.match(source, /const optionArgs = \[\s*\.\.\.\(runtimeMode\.args \?\? \[\]\),\s*\.\.\.\(permissionMode\.args \?\? \[\]\),\s*\];/s);
-  assert.match(source, /\[\.\.\.optionArgs,\s*\.\.\.\(agentMode\.args \?\? \[\]\)\]/);
-  assert.match(
-    source,
-    /const startOptions = profile\.id === 'opencode'\s*\?\s*\{\s*promptArgs: OPENCODE_COMMIT_MESSAGE_PROMPT_ARGS,\s*attachBackgroundServer: false,\s*\}\s*:\s*\{\};/s
-  );
-  assert.match(source, /'configured',\s*runtimeMode\.id,/s);
-  assert.match(source, /const session = await this\.cliManager\.startPrompt\(/);
-  assert.match(source, /apiProviderRuntime\.env,\s*startOptions\s*\)/s);
-  assert.doesNotMatch(source, /runOpenCodePromptViaServer\(/);
-  assert.doesNotMatch(source, /getOpenCodeCommitMessageModelId/);
-  assert.doesNotMatch(source, /getOpenCodeCommitMessageArgs/);
-  assert.match(source, /private cleanCommitMessageOutput\(\s*output: string,\s*language: CommitMessageLanguage,\s*diff: string/s);
-  assert.doesNotMatch(source, /resolveInputValue/);
-  assert.doesNotMatch(source, /existingMessage/);
-  assert.doesNotMatch(source, /\['--pure', \.\.\.args\]/);
-  assert.match(source, /isProviderErrorOutput\(output\)/);
+  assert.match(source, /this\.commitMessageUseCase\.execute\(\{/);
+  assert.match(source, /resolveFallbackProviderIds:/);
+  assert.match(source, /onPartial: \(message\) => onPartial\(message\)/);
   assert.match(source, /getConfiguredProvider\(\)/);
   assert.match(source, /ASK_COMMIT_MESSAGE_PROVIDER = 'ask'/);
   assert.match(source, /usesAskCommitMessageProvider\(\)/);
   assert.match(source, /chooseCommitCli/);
   assert.match(source, /useOnceForCommitMessage/);
   assert.match(source, /resolveReadyProfile\(locale\)/);
-  assert.match(source, /resolveFallbackGenerationProfiles\(primaryProfile: CliProfile\)/);
-  assert.match(source, /profiles = \[primaryProfile\]/);
-  assert.match(source, /profiles\.push\(\.\.\.await resolveFallbackProfiles\(\)\)/);
-  assert.match(source, /if \(index >= profiles\.length - 1\)/);
-  assert.match(source, /fallbackFrom: primaryProfile/);
+  assert.match(source, /resolveFallbackGenerationProfiles\(/);
   assert.match(source, /generatedWithFallback/);
   assert.match(source, /getInstalledProfiles\(\)/);
   assert.match(source, /const installedProfiles = await this\.getInstalledProfiles\(\);/);
@@ -341,7 +304,7 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /persistSelection \? 'useProviderForCommitMessage' : 'useOnceForCommitMessage'/);
   assert.match(source, /installedProfiles: CliProfile\[\]/);
   assert.match(source, /showQuickPick\(providerItems/);
-  assert.match(source, /commitMessage'\)\.update\(\s*'provider'/);
+  assert.match(source, /commitMessage'\)\s*\.update\('provider'/);
   assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);
   assert.doesNotMatch(source, /FOLLOW_DEFAULT_COMMIT_MESSAGE_PROVIDER/);
   assert.match(source, /DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default'/);
@@ -372,9 +335,26 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /cancel\(rootUri\?: vscode\.Uri \| \{ readonly rootUri\?: vscode\.Uri \}\): void/);
   assert.match(source, /this\.cancellationsByRoot\.get\(rootKey\)\?\.cancel\(\)/);
   assert.match(source, /for \(const cancellation of this\.cancellationsByRoot\.values\(\)\)/);
-  assert.match(source, /isLikelyCliError\(normalizedStderr\)/);
   assert.doesNotMatch(source, /diff\(false\)/);
   assert.doesNotMatch(source, /usesDefaultCommitMessageProvider\(\)/);
+});
+
+test('commit message command depends on the text-generation use case instead of CliManager', () => {
+  const source = readFileSync(new URL('../src/commitMessageCommand.ts', import.meta.url), 'utf8');
+
+  assert.match(
+    source,
+    /import \{[\s\S]*GenerateCommitMessageUseCase[\s\S]*TextGenerationProviderRegistry[\s\S]*\} from '\.\/textGeneration';/
+  );
+  assert.doesNotMatch(source, /import \{ CliManager, Session \} from '\.\/cliManager';/);
+  assert.doesNotMatch(source, /resolveApiProviderRuntime/);
+  assert.doesNotMatch(source, /normalizeCliOutputChunk/);
+  assert.doesNotMatch(source, /this\.cliManager\./);
+  assert.doesNotMatch(source, /startPrompt\(/);
+  assert.match(source, /this\.commitMessageUseCase\.execute\(\{/);
+  assert.match(source, /repositoryRoot: repositoryRoot/);
+  assert.match(source, /primaryProviderId: primaryProfile\.id/);
+  assert.match(source, /resolveFallbackProviderIds:/);
 });
 
 test('OpenCode server commit generation waits for completed text parts only', () => {
@@ -424,7 +404,7 @@ test('extension registers SCM title generation and cancel commands', () => {
   assert.match(source, /setContext', 'agents-gui\.commitMessageGenerating', false/);
   assert.match(source, /setContext', 'agents-gui\.commitMessageGeneratingRoots', \[\]/);
   assert.match(source, /setContext', 'agents-gui\.commitMessageStagedRoots', \[\]/);
-  assert.match(source, /registerCommand\('agents-gui\.generateCommitMessage', \(rootUri, _resourceGroups, token\) =>/);
+  assert.match(source, /registerCommand\(\s*'agents-gui\.generateCommitMessage',/s);
   assert.match(source, /return commitMessageCommand\.run\(rootUri, token\)/);
   assert.match(source, /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(rootUri\) =>/);
   assert.match(source, /commitMessageCommand\.cancel\(rootUri\)/);

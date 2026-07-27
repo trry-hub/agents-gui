@@ -173,7 +173,7 @@ function normalizeClaudeJsonChunk(text: string): NormalizedCliOutputChunk | unde
   }
 
   const lines = text.split('\n');
-  const buffer = text.endsWith('\n') ? '' : lines.pop() ?? '';
+  const buffer = text.endsWith('\n') ? '' : (lines.pop() ?? '');
   const rendered: string[] = [];
   let parsedAny = false;
   let status: NormalizedCliOutputChunk['status'];
@@ -332,7 +332,7 @@ function normalizeOpenCodeJsonChunk(text: string): NormalizedCliOutputChunk | un
   }
 
   const lines = text.split('\n');
-  const buffer = text.endsWith('\n') ? '' : lines.pop() ?? '';
+  const buffer = text.endsWith('\n') ? '' : (lines.pop() ?? '');
   const rendered: string[] = [];
   const renderedThinking: string[] = [];
   const renderedActivities: NormalizedCliActivity[] = [];
@@ -507,7 +507,9 @@ function openCodeErrorMessage(errorOwner: Record<string, unknown>): string | und
   const error = firstObject(errorOwner.error, errorOwner);
   const data = firstObject(error.data);
   const message = pickString(data.message, error.message);
-  const responseMessage = openCodeResponseBodyMessage(pickString(data.responseBody, error.responseBody));
+  const responseMessage = openCodeResponseBodyMessage(
+    pickString(data.responseBody, error.responseBody)
+  );
   if (responseMessage && (!message || isGenericOpenCodeServerError(message))) {
     return responseMessage;
   }
@@ -523,7 +525,14 @@ function openCodeResponseBodyMessage(responseBody: string | undefined): string |
 
   const error = firstObject(record.error, record);
   const data = firstObject(error.data);
-  return pickString(data.message, error.message, record.message, data.code, error.code, record.code);
+  return pickString(
+    data.message,
+    error.message,
+    record.message,
+    data.code,
+    error.code,
+    record.code
+  );
 }
 
 function isGenericOpenCodeServerError(message: string): boolean {
@@ -639,7 +648,9 @@ function openCodeToolActivity(
   }
 
   return {
-    ...(pickString(part.id, data.partID, event.partID, event.id) ? { id: pickString(part.id, data.partID, event.partID, event.id) } : {}),
+    ...(pickString(part.id, data.partID, event.partID, event.id)
+      ? { id: pickString(part.id, data.partID, event.partID, event.id) }
+      : {}),
     kind: classifyOpenCodeToolActivity(name, target, command, path, query),
     ...(name ? { name } : {}),
     ...(target ? { target } : {}),
@@ -653,9 +664,7 @@ function normalizeActivityDetail(value: string | undefined): string | undefined 
     return undefined;
   }
 
-  return normalized.length > 6000
-    ? `${normalized.slice(0, 6000)}\n...`
-    : normalized;
+  return normalized.length > 6000 ? `${normalized.slice(0, 6000)}\n...` : normalized;
 }
 
 function classifyOpenCodeToolActivity(
@@ -666,7 +675,10 @@ function classifyOpenCodeToolActivity(
   query: string | undefined
 ): NormalizedCliActivity['kind'] {
   const normalizedName = String(name || '').toLowerCase();
-  if (command || /(?:^|[_.-])(?:bash|shell|terminal|exec|run|command)(?:$|[_.-])/.test(normalizedName)) {
+  if (
+    command ||
+    /(?:^|[_.-])(?:bash|shell|terminal|exec|run|command)(?:$|[_.-])/.test(normalizedName)
+  ) {
     return 'command';
   }
 
@@ -674,7 +686,10 @@ function classifyOpenCodeToolActivity(
     return 'search';
   }
 
-  if (path || /(?:^|[_.-])(?:read|view|open|edit|write|patch|file|multiedit)(?:$|[_.-])/.test(normalizedName)) {
+  if (
+    path ||
+    /(?:^|[_.-])(?:read|view|open|edit|write|patch|file|multiedit)(?:$|[_.-])/.test(normalizedName)
+  ) {
     return 'file';
   }
 
@@ -698,7 +713,8 @@ function extractOpenCodeReadableError(text: string): string | undefined {
     return 'OpenCode provider rejected the tool schema. Use a no-tool OpenCode agent or switch to a provider with tool-calling support.';
   }
 
-  const unsupportedFormatMatch = /(?:^|\n)(?:Error:\s*)?Model\s+([^\s]+)\s+not supported for format\s+([^\s\n]+)/i.exec(text);
+  const unsupportedFormatMatch =
+    /(?:^|\n)(?:Error:\s*)?Model\s+([^\s]+)\s+not supported for format\s+([^\s\n]+)/i.exec(text);
   if (unsupportedFormatMatch) {
     return `Model ${unsupportedFormatMatch[1]} is not supported for format ${unsupportedFormatMatch[2]}. Switch to another OpenCode model/provider and retry.`;
   }
@@ -886,7 +902,9 @@ function isIncompleteInternalPromptEcho(candidate: string, providerId?: string):
 
   return (
     candidate.includes('Reply in Chinese (简体中文). Do not mix languages.') ||
-    candidate.includes('Keep the answer concise. Do not inspect the project unless the request needs it.') ||
+    candidate.includes(
+      'Keep the answer concise. Do not inspect the project unless the request needs it.'
+    ) ||
     candidate.includes('IDE context, use only if relevant:') ||
     candidate.includes('Response requirements:')
   );
@@ -894,8 +912,10 @@ function isIncompleteInternalPromptEcho(candidate: string, providerId?: string):
 
 function startsWithInternalPromptEcho(text: string, firstContentIndex: number): boolean {
   const candidate = text.slice(firstContentIndex);
-  return INTERNAL_PROMPT_START_MARKERS.some((marker) => candidate.startsWith(marker)) ||
-    isOpenCodeRuntimePromptEcho(candidate);
+  return (
+    INTERNAL_PROMPT_START_MARKERS.some((marker) => candidate.startsWith(marker)) ||
+    isOpenCodeRuntimePromptEcho(candidate)
+  );
 }
 
 function isOpenCodeRuntimePromptEcho(candidate: string): boolean {

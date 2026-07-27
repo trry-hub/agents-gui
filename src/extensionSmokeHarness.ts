@@ -50,7 +50,10 @@ export async function runExtensionSmokeProbe(
       new vscode.CancellationTokenSource().token
     );
     await webview.receive({ command: 'checkProfiles' });
-    await waitFor(() => postedMessages.some((message) => message.command === 'profiles'), 'profiles');
+    await waitFor(
+      () => postedMessages.some((message) => message.command === 'profiles'),
+      'profiles'
+    );
 
     await webview.receive({ command: 'checkProfiles' });
     await webview.receive({
@@ -74,12 +77,23 @@ export async function runExtensionSmokeProbe(
 
     runtime.emitOutput(sessionId, openCodeTextDelta('smoke reply'));
     await waitFor(
-      () => postedMessages.some((message) => message.command === 'output' && message.text.includes('smoke reply')),
+      () =>
+        postedMessages.some(
+          (message) => message.command === 'output' && message.text.includes('smoke reply')
+        ),
       'streamed output'
     );
 
-    await webview.receive({ command: 'sendSessionInput', cliId: 'opencode', text: 'smoke follow-up' });
-    await webview.receive({ command: 'openCodeNativeCommand', nativeCommand: 'compact', openCodeSessionId: 'ses_smoke' });
+    await webview.receive({
+      command: 'sendSessionInput',
+      cliId: 'opencode',
+      text: 'smoke follow-up',
+    });
+    await webview.receive({
+      command: 'openCodeNativeCommand',
+      nativeCommand: 'compact',
+      openCodeSessionId: 'ses_smoke',
+    });
     await webview.receive({ command: 'stop', cliId: 'opencode' });
     provider.stopAll();
   } finally {
@@ -88,7 +102,10 @@ export async function runExtensionSmokeProbe(
 
   const postedCommands: string[] = postedMessages.map((message) => message.command);
   const outputTexts = postedMessages
-    .filter((message): message is Extract<HostToWebviewMessage, { command: 'output' }> => message.command === 'output')
+    .filter(
+      (message): message is Extract<HostToWebviewMessage, { command: 'output' }> =>
+        message.command === 'output'
+    )
     .map((message) => message.text);
   const requiredCommands: string[] = [
     'profiles',
@@ -335,7 +352,7 @@ class SmokeMemento {
   private readonly values = new Map<string, unknown>();
 
   get<T>(key: string, defaultValue?: T): T | undefined {
-    return this.values.has(key) ? this.values.get(key) as T : defaultValue;
+    return this.values.has(key) ? (this.values.get(key) as T) : defaultValue;
   }
 
   async update(key: string, value: unknown): Promise<void> {

@@ -2,11 +2,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ApiProviderClient } from './apiProviderClient';
 import {
-  ApiProviderSettings,
   sanitizeApiProviderSettings,
   resolveApiProviderRuntime,
   type ApiProviderProtocol,
-  type CustomApiProviderConfig,
   type ApiProviderRuntimeConfig,
 } from './apiProviders';
 import {
@@ -21,7 +19,14 @@ import {
 } from './assistantTypes';
 import { ImageAttachmentStore } from './attachmentStore';
 import { actionRequiresActiveFile, actionRequiresSelection } from './actionGuards';
+import {
+  AgentCapabilityRegistry,
+  AgentCapabilityResolutionError,
+  resolveAgentCapabilityPolicy,
+  resolveAgentTaskIntent,
+} from './agentCapabilities';
 import type { AgentProfileStatusOptions, AgentRuntime } from './agentRuntime';
+import { createCliAgentCapabilityRegistry } from './cliAgentCapabilities';
 import {
   buildCliOptionArgs,
   CLI_PROFILES,
@@ -50,7 +55,12 @@ import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
 import { OpenCodeLocalState } from './openCodeLocalState';
 import { OpenCodeConfigSync } from './openCodeConfigSync';
 import { getProviderExtensionBridge } from './providerExtensions';
-import type { HostToWebviewMessage, SetupCliProfile, WebviewToHostMessage } from './webviewProtocol';
+import { SettingsManager } from './settingsManager';
+import type {
+  HostToWebviewMessage,
+  SetupCliProfile,
+  WebviewToHostMessage,
+} from './webviewProtocol';
 import { renderWebviewHtml } from './webviewHtmlRenderer';
 import {
   AGENT_MODE_STATE_KEY,
@@ -70,8 +80,14 @@ const PROVIDER_ICON_PATHS = {
   claude: { light: 'media/provider-icons/claude.svg', dark: 'media/provider-icons/claude.svg' },
   gemini: { light: 'media/provider-icons/gemini.png', dark: 'media/provider-icons/gemini.png' },
   codex: { light: 'media/provider-icons/codex.png', dark: 'media/provider-icons/codex.png' },
-  opencode: { light: 'media/provider-icons/opencode.png', dark: 'media/provider-icons/opencode.png' },
-  goose: { light: 'media/provider-icons/goose-light.png', dark: 'media/provider-icons/goose-dark.png' },
+  opencode: {
+    light: 'media/provider-icons/opencode.png',
+    dark: 'media/provider-icons/opencode.png',
+  },
+  goose: {
+    light: 'media/provider-icons/goose-light.png',
+    dark: 'media/provider-icons/goose-dark.png',
+  },
   aider: { light: 'media/provider-icons/aider.png', dark: 'media/provider-icons/aider.png' },
 } as const;
 
@@ -83,19 +99,9 @@ interface SidebarProviderOptions {
   openCodeLocalState?: OpenCodeLocalState;
   openCodeConfigSync?: OpenCodeConfigSync;
   openCodeCapability?: OpenCodeAgentCapability;
+  agentCapabilityRegistry?: AgentCapabilityRegistry;
   state?: vscode.Memento;
   storageUri?: vscode.Uri;
-}
-
-interface HomeAgentSettings {
-  visibleAgentIds: string[];
-  agentOrder: string[];
-}
-
-interface CommitMessageSettings {
-  provider: string;
-  language: 'auto' | 'en' | 'zh-CN';
-  maxDiffChars: number;
 }
 
 interface ProviderClientTerminalState {
@@ -103,11 +109,6 @@ interface ProviderClientTerminalState {
   started: boolean;
 }
 
-const DEFAULT_CLI_ID = 'opencode';
-const DEFAULT_COMMIT_MESSAGE_PROVIDER = 'default';
-const ASK_COMMIT_MESSAGE_PROVIDER = 'ask';
-const DEFAULT_COMMIT_MESSAGE_LANGUAGE: CommitMessageSettings['language'] = 'auto';
-const DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS = 60_000;
 const OPENCODE_STATUS_REFRESH_DELAYS_MS = [1_500, 3_000, 6_000, 10_000, 15_000];
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'agents-gui.sidebar';
@@ -130,9 +131,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly openCodeConfigSync: OpenCodeConfigSync;
   private readonly attachmentStore: ImageAttachmentStore;
   private readonly apiProviderClient: ApiProviderClient;
+  private readonly agentCapabilityRegistry: AgentCapabilityRegistry;
   private readonly cliSetup: CliSetupController;
   private readonly mcpManager: McpManager;
   private readonly sessionController: AgentSessionController;
+  private readonly settingsManager: SettingsManager;
   private readonly state?: vscode.Memento;
 
   constructor(
@@ -140,10 +143,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private readonly agentRuntime: AgentRuntime,
     options: SidebarProviderOptions = {}
   ) {
+    this.settingsManager = new SettingsManager(options.state);
+    this.agentCapabilityRegistry =
+      options.agentCapabilityRegistry ?? createCliAgentCapabilityRegistry(CLI_PROFILES);
+    this.state = options.state;
     this.apiProviderClient = options.apiProviderClient ?? new ApiProviderClient();
-    this.cliSetup = new CliSetupController(this.locale, (cliId) => (
-      this.profilesById.get(cliId) ?? getCliProfile(cliId)
-    ));
+    this.cliSetup = new CliSetupController(
+      this.locale,
+      (cliId) => this.profilesById.get(cliId) ?? getCliProfile(cliId)
+    );
     this.mcpManager = new McpManager({
       openCodeStatusProvider: async () => this.openCodeCapability?.getStatus(),
     });
@@ -152,10 +160,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openCodeCapability = options.openCodeCapability;
     this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
     this.openCodeConfigSync = options.openCodeConfigSync ?? new OpenCodeConfigSync();
-    this.state = options.state;
-    this.attachmentStore = options.attachmentStore ?? new ImageAttachmentStore({
-      storageUri: options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui'),
-    });
+    this.attachmentStore =
+      options.attachmentStore ??
+      new ImageAttachmentStore({
+        storageUri: options.storageUri ?? vscode.Uri.joinPath(this.extensionUri, '.agents-gui'),
+      });
     this.sessionController = new AgentSessionController({
       agentRuntime: this.agentRuntime,
       locale: this.locale,
@@ -191,11 +200,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     void this.sendHomeAgentSettings();
     void this.sendApiProviderSettings();
     void this.sendCommitMessageSettings();
-    // Sync API provider config into opencode.json on webview init so OpenCode
-    // reads the right provider even if the user edited settings.json directly.
-    // This runs before checkProfiles so the background server picks up the
-    // new config when it starts.
-    void this.syncOpenCodeConfig().then(() => this.flushPendingRequests());
+    // Sync API provider config into opencode.json in the background. It skips
+    // when the config is already correct, so it won't slow down startup.
+    void this.syncOpenCodeConfig();
+    void this.flushPendingRequests();
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewToHostMessage) => {
       switch (message.command) {
@@ -207,13 +215,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.openProviderSettings(message.section);
           break;
         case 'saveHomeAgentSettings':
-          await this.saveSettingsWithResult('agents', () => this.saveHomeAgentSettings(message.settings));
+          await this.saveSettingsWithResult('agents', () =>
+            this.saveHomeAgentSettings(message.settings)
+          );
           break;
         case 'saveApiProviderSettings':
-          await this.saveSettingsWithResult('apiProviders', () => this.saveApiProviderSettings(message.settings));
+          await this.saveSettingsWithResult('apiProviders', () =>
+            this.saveApiProviderSettings(message.settings)
+          );
           break;
         case 'saveCommitMessageSettings':
-          await this.saveSettingsWithResult('commitMessage', () => this.saveCommitMessageSettings(message.settings));
+          await this.saveSettingsWithResult('commitMessage', () =>
+            this.saveCommitMessageSettings(message.settings)
+          );
           break;
         case 'loadMcpServers':
           await this.handleLoadMcpServers(message);
@@ -234,7 +248,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.fetchApiProviderModels(message);
           break;
         case 'stop':
-          this.handleStop(this.resolveCliId(message));
+          this.handleStop(this.settingsManager.resolveCliId(message));
           break;
         case 'sendSessionInput':
           await this.handleSessionInput(message);
@@ -243,7 +257,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.sendProfiles({ force: Boolean(message.force) });
           break;
         case 'refreshContext':
-          await this.sendContextSummary(message.contextOptions, this.resolveCliId(message), message.modelId);
+          await this.sendContextSummary(
+            message.contextOptions,
+            this.settingsManager.resolveCliId(message),
+            message.modelId
+          );
           break;
         case 'openCodeNativeCommand':
           await this.handleOpenCodeNativeCommand(message);
@@ -255,10 +273,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await vscode.commands.executeCommand('workbench.action.quickOpen');
           break;
         case 'openProviderExtension':
-          await this.openProviderExtension(this.resolveCliId(message));
+          await this.openProviderExtension(this.settingsManager.resolveCliId(message));
           break;
         case 'runCliAuthAction':
-          await this.cliSetup.runCliAuthAction(this.resolveCliId(message), message.action);
+          await this.cliSetup.runCliAuthAction(
+            this.settingsManager.resolveCliId(message),
+            message.action
+          );
           break;
         case 'copyInstallCommand':
           await this.cliSetup.copyInstallCommand(message.installCommand);
@@ -287,14 +308,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async runEditorAction(action: AssistantActionId): Promise<void> {
-    const cliId = this.getDefaultCliId();
+    const cliId = this.settingsManager.getDefaultCliId();
     const profile = getCliProfile(cliId);
     const request: AssistantWebviewRequest = {
       cliId,
       action,
       mode: 'agent',
       agentMode: action === 'explainSelection' ? preferredReadOnlyMode(profile) : undefined,
-      permissionMode: action === 'explainSelection' ? preferredReadOnlyPermission(profile) : undefined,
+      permissionMode:
+        action === 'explainSelection' ? preferredReadOnlyPermission(profile) : undefined,
       text: runtimeDefaultActionText(this.locale, action),
       contextOptions: {
         includeWorkspace: true,
@@ -322,19 +344,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const result: AssistantOpenCodeNativeCommandResult = this.openCodeCapability
-      ? await this.openCodeCapability.executeNativeCommand(
-        nativeCommand,
-        message.openCodeSessionId
-      ).catch((error) => ({
-        command: nativeCommand,
-        ok: false,
-        message: error instanceof Error ? error.message : String(error),
-      }))
+      ? await this.openCodeCapability
+          .executeNativeCommand(nativeCommand, message.openCodeSessionId)
+          .catch((error) => ({
+            command: nativeCommand,
+            ok: false,
+            message: error instanceof Error ? error.message : String(error),
+          }))
       : {
-        command: nativeCommand,
-        ok: false,
-        message: 'OpenCode capability is not available.',
-      };
+          command: nativeCommand,
+          ok: false,
+          message: 'OpenCode capability is not available.',
+        };
     await this.postToWebview({
       command: 'openCodeNativeCommandResult',
       nativeCommand: result.command,
@@ -402,7 +423,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
     await this.sendCommitMessageSettings();
-    await this.handleLoadMcpServers({ cliId: this.getDefaultCliId() });
+    await this.handleLoadMcpServers({ cliId: this.settingsManager.getDefaultCliId() });
     await this.postToWebview({ command: 'openProviderSettings', section });
   }
 
@@ -428,20 +449,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendProfiles(options: AgentProfileStatusOptions = {}): Promise<void> {
-    // Wait for any pending OpenCode config sync so the background server reads
-    // the up-to-date opencode.json when it starts.
-    await this.openCodeConfigSyncPromise;
+    // Note: we don't await openCodeConfigSyncPromise here. The sync now skips
+    // when the config is already correct (hasSyncedProvider check), so the
+    // common path is a no-op. When a real write is needed, it runs in the
+    // background — the background server picks it up on next attach.
     const profiles = await this.agentRuntime.getProfilesWithStatus(options);
     const installedProfiles = profiles.filter((profile) => profile.installed);
     this.profilesById.clear();
     installedProfiles.forEach((profile) => {
       this.profilesById.set(profile.id, profile);
     });
-    const configuredDefaultProviderId = this.getDefaultCliId();
-    const defaultProviderId = installedProfiles.some((profile) => profile.id === configuredDefaultProviderId)
+    const configuredDefaultProviderId = this.settingsManager.getDefaultCliId();
+    const defaultProviderId = installedProfiles.some(
+      (profile) => profile.id === configuredDefaultProviderId
+    )
       ? configuredDefaultProviderId
       : installedProfiles[0]?.id || '';
-    const storedProviderId = this.getStoredProviderId(installedProfiles);
+    const storedProviderId = this.settingsManager.getStoredProviderId(installedProfiles);
     await this.updateProviderTitleContexts(profiles, storedProviderId ?? defaultProviderId);
     this.postToWebview({
       command: 'profiles',
@@ -453,15 +477,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       setupProfiles: profiles.map((profile) => this.toSetupProfile(profile)),
       defaultProviderId,
       activeProviderId: storedProviderId,
-      activeAgentModeByProvider: this.getStoredAgentModeState(),
-      recentModelByProvider: this.getStoredStringRecord(RECENT_MODEL_STATE_KEY),
-      favoriteModelByProvider: this.getStoredStringRecord(FAVORITE_MODEL_STATE_KEY),
-      disabledMcpByProvider: this.getStoredStringArrayRecord(DISABLED_MCP_STATE_KEY),
-      customModelByProvider: this.getStoredStringRecord(CUSTOM_MODEL_STATE_KEY),
-      activeRuntimeByProvider: this.getStoredStringRecord(RUNTIME_STATE_KEY),
-      activePermissionByProvider: this.getStoredStringRecord(PERMISSION_STATE_KEY),
-      contextOptions: this.getStoredContextOptions(),
-      claudeTerminalBannerDismissed: this.state?.get<boolean>(CLAUDE_TERMINAL_BANNER_STATE_KEY, false),
+      activeAgentModeByProvider: this.settingsManager.getStoredAgentModeState(this.profilesById),
+      recentModelByProvider: this.settingsManager.getStoredStringRecord(RECENT_MODEL_STATE_KEY),
+      favoriteModelByProvider: this.settingsManager.getStoredStringRecord(FAVORITE_MODEL_STATE_KEY),
+      disabledMcpByProvider:
+        this.settingsManager.getStoredStringArrayRecord(DISABLED_MCP_STATE_KEY),
+      customModelByProvider: this.settingsManager.getStoredStringRecord(CUSTOM_MODEL_STATE_KEY),
+      activeRuntimeByProvider: this.settingsManager.getStoredStringRecord(RUNTIME_STATE_KEY),
+      activePermissionByProvider: this.settingsManager.getStoredStringRecord(PERMISSION_STATE_KEY),
+      contextOptions: this.settingsManager.getStoredContextOptions(),
+      claudeTerminalBannerDismissed: this.state?.get<boolean>(
+        CLAUDE_TERMINAL_BANNER_STATE_KEY,
+        false
+      ),
       taskBoardDismissed: this.state?.get<boolean>(TASK_BOARD_DISMISSED_STATE_KEY, false),
     });
   }
@@ -490,9 +518,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private syncOpenCodeConfig(): Promise<void> {
     const run = async () => {
       try {
-        const settings = this.filterApiProviderSettingsForInstalledAgents(
-          this.getApiProviderSettings()
-        );
+        const settings = this.settingsManager.getApiProviderSettings(this.profilesById);
         await this.openCodeConfigSync.sync(settings);
       } catch (error) {
         console.warn('[agents-gui] Failed to sync OpenCode config on init:', error);
@@ -503,7 +529,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendApiProviderSettings(): Promise<void> {
-    const settings = this.getApiProviderSettings();
+    const settings = this.settingsManager.getApiProviderSettings(this.profilesById);
     const envStatusByProviderId = Object.fromEntries(
       settings.customProviders.map((provider) => [
         provider.id,
@@ -524,14 +550,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private async sendHomeAgentSettings(): Promise<void> {
     this.postToWebview({
       command: 'homeAgentSettings',
-      settings: this.getHomeAgentSettings(),
+      settings: this.settingsManager.getHomeAgentSettings(),
     });
   }
 
   private async sendCommitMessageSettings(): Promise<void> {
     this.postToWebview({
       command: 'commitMessageSettings',
-      settings: this.getCommitMessageSettings(),
+      settings: this.settingsManager.getCommitMessageSettings(),
     });
   }
 
@@ -557,26 +583,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async saveHomeAgentSettings(rawSettings: unknown): Promise<void> {
-    const settings = this.normalizeHomeAgentSettings(rawSettings);
+    const settings = this.settingsManager.normalizeHomeAgentSettings(rawSettings);
     const config = vscode.workspace.getConfiguration('agents-gui.home');
-    await config.update('visibleAgentIds', settings.visibleAgentIds, vscode.ConfigurationTarget.Global);
+    await config.update(
+      'visibleAgentIds',
+      settings.visibleAgentIds,
+      vscode.ConfigurationTarget.Global
+    );
     await config.update('agentOrder', settings.agentOrder, vscode.ConfigurationTarget.Global);
     await this.sendHomeAgentSettings();
     await this.sendProfiles();
   }
 
   private async saveApiProviderSettings(rawSettings: unknown): Promise<void> {
-    const settings = this.filterApiProviderSettingsForInstalledAgents(
-      sanitizeApiProviderSettings(rawSettings)
-    );
+    const sanitized = sanitizeApiProviderSettings(rawSettings);
     const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
 
     await Promise.all([
-      config.update('customProviders', settings.customProviders, vscode.ConfigurationTarget.Global),
-      config.update('defaultProviderId', settings.defaultProviderId, vscode.ConfigurationTarget.Global),
+      config.update(
+        'customProviders',
+        sanitized.customProviders,
+        vscode.ConfigurationTarget.Global
+      ),
+      config.update(
+        'defaultProviderId',
+        sanitized.defaultProviderId,
+        vscode.ConfigurationTarget.Global
+      ),
       config.update(
         'agentProviderByCliId',
-        settings.agentProviderByCliId,
+        sanitized.agentProviderByCliId,
         vscode.ConfigurationTarget.Global
       ),
     ]);
@@ -600,15 +636,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }): Promise<void> {
     const requestId = typeof message.requestId === 'number' ? message.requestId : 0;
     try {
-      const provider = message.provider && typeof message.provider === 'object'
-        ? message.provider
-        : {};
-      const protocol: ApiProviderProtocol = provider.protocol === 'anthropic' ? 'anthropic' : 'openai';
+      const provider =
+        message.provider && typeof message.provider === 'object' ? message.provider : {};
+      const protocol: ApiProviderProtocol =
+        provider.protocol === 'anthropic' ? 'anthropic' : 'openai';
       const baseUrl = typeof provider.baseUrl === 'string' ? provider.baseUrl.trim() : '';
       const explicitApiKey = typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '';
-      const apiKeyEnv = typeof provider.apiKeyEnv === 'string'
-        ? provider.apiKeyEnv.trim().replace(/[^A-Za-z0-9_]/g, '')
-        : '';
+      const apiKeyEnv =
+        typeof provider.apiKeyEnv === 'string'
+          ? provider.apiKeyEnv.trim().replace(/[^A-Za-z0-9_]/g, '')
+          : '';
       const apiKey = explicitApiKey || (apiKeyEnv ? process.env[apiKeyEnv] || '' : '');
       if (!baseUrl) {
         throw new Error('Base URL is required');
@@ -632,7 +669,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
-    const settings = this.normalizeCommitMessageSettings(rawSettings);
+    const settings = this.settingsManager.normalizeCommitMessageSettings(rawSettings);
     const config = vscode.workspace.getConfiguration('agents-gui.commitMessage');
 
     await Promise.all([
@@ -645,7 +682,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleLoadMcpServers(message: { cliId?: string }): Promise<void> {
-    const cliId = message.cliId || this.getDefaultCliId();
+    const cliId = message.cliId || this.settingsManager.getDefaultCliId();
     try {
       const snapshot = await this.mcpManager.snapshot(cliId);
       this.postToWebview({
@@ -668,8 +705,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleSaveMcpServer(message: { cliId?: string; server?: unknown }): Promise<void> {
-    const cliId = message.cliId || this.getDefaultCliId();
-    const result = await this.mcpManager.upsert(cliId, (message.server ?? {}) as Record<string, unknown>);
+    const cliId = message.cliId || this.settingsManager.getDefaultCliId();
+    const result = await this.mcpManager.upsert(
+      cliId,
+      (message.server ?? {}) as Record<string, unknown>
+    );
     await this.postToWebview({
       command: 'mcpServerSaved',
       cliId,
@@ -684,7 +724,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleDeleteMcpServer(message: { cliId?: string; name?: string }): Promise<void> {
-    const cliId = message.cliId || this.getDefaultCliId();
+    const cliId = message.cliId || this.settingsManager.getDefaultCliId();
     const name = String(message.name || '').trim();
     if (!name) {
       return;
@@ -712,9 +752,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleToggleMcpServer(message: { cliId?: string; name?: string; enabled?: boolean }): Promise<void> {
-    const cliId = message.cliId || this.getDefaultCliId();
-    const result = await this.mcpManager.setEnabled(cliId, String(message.name || ''), message.enabled !== false);
+  private async handleToggleMcpServer(message: {
+    cliId?: string;
+    name?: string;
+    enabled?: boolean;
+  }): Promise<void> {
+    const cliId = message.cliId || this.settingsManager.getDefaultCliId();
+    const result = await this.mcpManager.setEnabled(
+      cliId,
+      String(message.name || ''),
+      message.enabled !== false
+    );
     await this.postToWebview({
       command: 'mcpServerSaved',
       cliId,
@@ -728,102 +776,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private getApiProviderSettings(): ApiProviderSettings {
-    const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
-    return this.filterApiProviderSettingsForInstalledAgents(
-      sanitizeApiProviderSettings({
-        customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
-        defaultProviderId: config.get<string>('defaultProviderId', ''),
-        agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
-      })
-    );
-  }
-
-  private filterApiProviderSettingsForInstalledAgents(
-    settings: ApiProviderSettings
-  ): ApiProviderSettings {
-    if (this.profilesById.size === 0) {
-      return settings;
-    }
-
-    return {
-      ...settings,
-      agentProviderByCliId: Object.fromEntries(
-        Object.entries(settings.agentProviderByCliId).filter(([cliId]) => (
-          this.profilesById.has(cliId)
-        ))
-      ),
-    };
-  }
-
-  private getHomeAgentSettings(): HomeAgentSettings {
-    const config = vscode.workspace.getConfiguration('agents-gui.home');
-    return this.normalizeHomeAgentSettings({
-      visibleAgentIds: config.get<string[]>('visibleAgentIds', []),
-      agentOrder: config.get<string[]>('agentOrder', []),
-    });
-  }
-
-  private getCommitMessageSettings(): CommitMessageSettings {
-    const config = vscode.workspace.getConfiguration('agents-gui.commitMessage');
-    return this.normalizeCommitMessageSettings({
-      provider: config.get<string>('provider', DEFAULT_COMMIT_MESSAGE_PROVIDER),
-      language: config.get<string>('language', DEFAULT_COMMIT_MESSAGE_LANGUAGE),
-      maxDiffChars: config.get<number>('maxDiffChars', DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS),
-    });
-  }
-
-  private normalizeCommitMessageSettings(rawSettings: unknown): CommitMessageSettings {
-    const record = rawSettings && typeof rawSettings === 'object'
-      ? rawSettings as { provider?: unknown; language?: unknown; maxDiffChars?: unknown }
-      : {};
-    const knownProviderIds = new Set([
-      DEFAULT_COMMIT_MESSAGE_PROVIDER,
-      ASK_COMMIT_MESSAGE_PROVIDER,
-      ...CLI_PROFILES.map((profile) => profile.id),
-    ]);
-    const provider = typeof record.provider === 'string' && knownProviderIds.has(record.provider)
-      ? record.provider
-      : DEFAULT_COMMIT_MESSAGE_PROVIDER;
-    const language = record.language === 'en' || record.language === 'zh-CN'
-      ? record.language
-      : DEFAULT_COMMIT_MESSAGE_LANGUAGE;
-    const maxDiffChars = Number(record.maxDiffChars);
-
-    return {
-      provider,
-      language,
-      maxDiffChars: Number.isFinite(maxDiffChars)
-        ? Math.max(1000, Math.round(maxDiffChars))
-        : DEFAULT_COMMIT_MESSAGE_MAX_DIFF_CHARS,
-    };
-  }
-
-  private normalizeHomeAgentSettings(rawSettings: unknown): HomeAgentSettings {
-    const knownIds = new Set(CLI_PROFILES.map((profile) => profile.id));
-    const record = rawSettings && typeof rawSettings === 'object'
-      ? rawSettings as { visibleAgentIds?: unknown; agentOrder?: unknown }
-      : {};
-    const visibleAgentIds = this.normalizeHomeAgentIds(record.visibleAgentIds, knownIds);
-    const agentOrder = this.normalizeHomeAgentIds(record.agentOrder, knownIds);
-    return { visibleAgentIds, agentOrder };
-  }
-
-  private normalizeHomeAgentIds(value: unknown, knownIds: Set<string>): string[] {
-    const seen = new Set<string>();
-    return Array.isArray(value)
-      ? value
-          .map((id) => String(id || '').trim())
-          .filter((id) => {
-            if (!knownIds.has(id) || seen.has(id)) {
-              return false;
-            }
-            seen.add(id);
-            return true;
-          })
-      : [];
-  }
-
   private async updateProviderTitleContexts(
     profiles: CliProfile[],
     activeProviderId: string
@@ -834,26 +786,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     await Promise.all([
       vscode.commands.executeCommand('setContext', 'agents-gui.activeProvider', activeProviderId),
-      ...CLI_PROFILES.map((profile) => (
+      ...CLI_PROFILES.map((profile) =>
         vscode.commands.executeCommand(
           'setContext',
           `agents-gui.provider.${profile.id}.installed`,
           installedProviderIds.has(profile.id)
         )
-      )),
+      ),
     ]);
-  }
-
-  private getStoredProviderId(profiles: CliProfile[]): string | undefined {
-    const providerId = this.state?.get<string>(LAST_PROVIDER_STATE_KEY);
-    if (providerId && profiles.some((profile) => profile.id === providerId && profile.installed)) {
-      return providerId;
-    }
-    return undefined;
-  }
-
-  private getStoredAgentModeState(): Record<string, string> {
-    return this.normalizeAgentModeState(this.state?.get(AGENT_MODE_STATE_KEY));
   }
 
   private getProviderExtensionStatus(providerId: string) {
@@ -871,16 +811,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private async sendContextSummary(
     contextOptions: Partial<AssistantContextOptions> = {},
-    cliId = this.getDefaultCliId(),
+    cliId = this.settingsManager.getDefaultCliId(),
     modelId?: string
   ): Promise<void> {
-    const options = this.resolveContextOptions(contextOptions);
-    const snapshot = await this.contextCollector.collect(options, this.getContextLimits());
-    const profile = getCliProfile(cliId) ?? getCliProfile(this.getDefaultCliId());
+    const options = this.settingsManager.resolveContextOptions(contextOptions);
+    const snapshot = await this.contextCollector.collect(
+      options,
+      this.settingsManager.getContextLimits()
+    );
+    const profile = getCliProfile(cliId) ?? getCliProfile(this.settingsManager.getDefaultCliId());
     const baseSummary = this.contextCollector.summarize(snapshot);
-    const openCodeStatus = profile?.id === 'opencode'
-      ? await this.openCodeCapability?.getStatus()
-      : undefined;
+    const openCodeStatus =
+      profile?.id === 'opencode' ? await this.openCodeCapability?.getStatus() : undefined;
     const mcpStatusPending = this.shouldRetryOpenCodeStatus(profile?.id, openCodeStatus);
     const workspaceBranch = await this.getWorkspaceBranch(
       openCodeStatus?.project?.worktree ?? baseSummary.workspacePath
@@ -917,7 +859,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (Array.isArray(status?.mcpServers) && status.mcpServers.length > 0) {
       return false;
     }
-    return (this.openCodeStatusRefreshAttempts.get('opencode') ?? 0) < OPENCODE_STATUS_REFRESH_DELAYS_MS.length;
+    return (
+      (this.openCodeStatusRefreshAttempts.get('opencode') ?? 0) <
+      OPENCODE_STATUS_REFRESH_DELAYS_MS.length
+    );
   }
 
   private scheduleOpenCodeStatusRefresh(
@@ -938,7 +883,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const attempts = this.openCodeStatusRefreshAttempts.get(key) ?? 0;
-    if (attempts >= OPENCODE_STATUS_REFRESH_DELAYS_MS.length || this.openCodeStatusRefreshTimers.has(key)) {
+    if (
+      attempts >= OPENCODE_STATUS_REFRESH_DELAYS_MS.length ||
+      this.openCodeStatusRefreshTimers.has(key)
+    ) {
       return;
     }
 
@@ -962,15 +910,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return undefined;
       }
 
-      const gitExports = gitExtension.isActive ? gitExtension.exports : await gitExtension.activate();
+      const gitExports = gitExtension.isActive
+        ? gitExtension.exports
+        : await gitExtension.activate();
       const gitApi = gitExports?.getAPI?.(1);
       const repositories = Array.isArray(gitApi?.repositories)
-        ? gitApi.repositories as Array<{
+        ? (gitApi.repositories as Array<{
             rootUri?: vscode.Uri;
             state?: { HEAD?: { name?: string } };
-          }>
+          }>)
         : [];
-      const repository = repositories.find((item) => item.rootUri?.fsPath === workspacePath) ??
+      const repository =
+        repositories.find((item) => item.rootUri?.fsPath === workspacePath) ??
         repositories.find((item) => {
           const rootPath = item.rootUri?.fsPath;
           return Boolean(rootPath && workspacePath.startsWith(`${rootPath}${path.sep}`));
@@ -990,7 +941,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
    * - Errors from previous requests are reported but don't block subsequent requests
    */
   private async handleAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
-    const cliId = this.resolveCliId(message);
+    const cliId = this.settingsManager.resolveCliId(message);
     const previous = this.requestChainByCli.get(cliId) ?? Promise.resolve();
     const chained = previous.then(
       () => this.executeAssistantRequest(message),
@@ -1013,7 +964,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async executeAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
-    const cliId = this.resolveCliId(message);
+    const cliId = this.settingsManager.resolveCliId(message);
     const profile = this.profilesById.get(cliId) ?? getCliProfile(cliId);
     if (!profile) {
       this.postError(cliId, runtimeT(this.locale, 'error.unknownProvider', { provider: cliId }));
@@ -1026,9 +977,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const modelOption = getCliModelOption(profile, message.model);
     const runtimeMode = getCliRuntimeMode(profile, message.runtime);
     const permissionMode = getCliPermissionMode(profile, message.permissionMode);
-    const effectiveModel = effectiveCliModelSelection(modelOption, message.customModel, message.modelVariant);
+    const effectiveModel = effectiveCliModelSelection(
+      modelOption,
+      message.customModel,
+      message.modelVariant
+    );
     const apiProviderRuntime = resolveApiProviderRuntime(
-      this.getApiProviderSettings(),
+      this.settingsManager.getApiProviderSettings(this.profilesById),
       cliId,
       process.env
     );
@@ -1046,11 +1001,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       permissionMode.id,
       apiProviderRuntime.selectionKey,
     ].join('|');
-    const userText =
-      (message.text ?? '').trim() || runtimeDefaultActionText(this.locale, action);
+    let session = this.sessionController.active(cliId);
+    const canReuseSession = this.sessionController.canReuse(session, agentMode.id, optionKey);
+    const continueSessionId =
+      !canReuseSession && cliId === 'opencode'
+        ? this.sessionController.getContinueSessionId(cliId, optionKey)
+        : undefined;
+    const capabilityPolicy = resolveAgentCapabilityPolicy({
+      intent: resolveAgentTaskIntent(action, agentMode.id),
+      permissionPosture: permissionMode.posture,
+      resumeSession: Boolean(continueSessionId),
+    });
+
+    try {
+      const capabilityResolution = this.agentCapabilityRegistry.resolve(cliId, capabilityPolicy);
+      if (capabilityResolution.transport !== 'cli') {
+        throw new AgentCapabilityResolutionError(
+          'transport-not-supported',
+          cliId,
+          [],
+          capabilityResolution.transport
+        );
+      }
+    } catch (error) {
+      this.postError(
+        cliId,
+        error instanceof AgentCapabilityResolutionError
+          ? error.message
+          : runtimeT(this.locale, 'error.startFailed', { provider: profile.name })
+      );
+      return;
+    }
+
+    const userText = (message.text ?? '').trim() || runtimeDefaultActionText(this.locale, action);
     const contextOptions = this.resolveContextOptionsForAction(action, message.contextOptions);
 
-    const snapshot = await this.contextCollector.collect(contextOptions, this.getContextLimits());
+    const snapshot = await this.contextCollector.collect(
+      contextOptions,
+      this.settingsManager.getContextLimits()
+    );
     const baseContextSummary: AssistantContextSummary = this.contextCollector.summarize(snapshot);
     const contextSummary = {
       ...baseContextSummary,
@@ -1092,22 +1081,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       locale: this.locale,
     });
 
-    let session = this.sessionController.active(cliId);
-    const canReuseSession = this.sessionController.canReuse(session, agentMode.id, optionKey);
-
     if (!canReuseSession) {
       if (session) {
         this.sessionController.replace(cliId);
       }
 
-      const agentArgs = [
-        ...(agentMode.args ?? []),
-        ...optionArgs,
-      ];
+      const agentArgs = [...(agentMode.args ?? []), ...optionArgs];
 
-      const continueSessionId = cliId === 'opencode'
-        ? this.sessionController.getContinueSessionId(cliId, optionKey)
-        : undefined;
       const newSession = await this.agentRuntime.startPrompt(
         cliId,
         profile.inputMode === 'argument' ? prompt : undefined,
@@ -1170,11 +1150,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.sessionController.stop(cliId);
   }
 
-  private async handleSessionInput(message: {
-    cliId?: string;
-    text?: string;
-  }): Promise<void> {
-    const cliId = this.resolveCliId(message);
+  private async handleSessionInput(message: { cliId?: string; text?: string }): Promise<void> {
+    const cliId = this.settingsManager.resolveCliId(message);
     const text = String(message.text || '').trim();
     const result = this.sessionController.sendInput(cliId, text);
 
@@ -1213,7 +1190,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         await this.openProviderCliTerminal(profile);
         return;
       }
-      vscode.window.showInformationMessage(runtimeT(this.locale, 'providerExtension.notConfigured', { provider: cliId }));
+      vscode.window.showInformationMessage(
+        runtimeT(this.locale, 'providerExtension.notConfigured', { provider: cliId })
+      );
       return;
     }
 
@@ -1236,11 +1215,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     vscode.window.showWarningMessage(
-      runtimeT(this.locale, extension ? 'providerExtension.openFailed' : 'providerExtension.notInstalled', {
-        extension: bridge.displayName,
-      })
+      runtimeT(
+        this.locale,
+        extension ? 'providerExtension.openFailed' : 'providerExtension.notInstalled',
+        {
+          extension: bridge.displayName,
+        }
+      )
     );
-    await vscode.commands.executeCommand('workbench.extensions.search', `@id:${bridge.extensionId}`);
+    await vscode.commands.executeCommand(
+      'workbench.extensions.search',
+      `@id:${bridge.extensionId}`
+    );
   }
 
   private async openProviderCliTerminal(profile: CliProfile): Promise<void> {
@@ -1266,11 +1252,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const cleanModelId = typeof modelId === 'string' ? modelId.trim() : '';
     const cleanVariant = typeof variant === 'string' ? variant.trim() : '';
     if (
-      !cleanModelId
-      || !cleanModelId.includes('/')
-      || /[\r\n]/.test(cleanModelId)
-      || !cleanVariant
-      || !/^[A-Za-z0-9_.-]+$/.test(cleanVariant)
+      !cleanModelId ||
+      !cleanModelId.includes('/') ||
+      /[\r\n]/.test(cleanModelId) ||
+      !cleanVariant ||
+      !/^[A-Za-z0-9_.-]+$/.test(cleanVariant)
     ) {
       return;
     }
@@ -1313,101 +1299,56 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     await this.state.update(
       AGENT_MODE_STATE_KEY,
-      this.normalizeAgentModeState(payload.activeAgentModeByProvider)
+      this.settingsManager.normalizeAgentModeState(
+        payload.activeAgentModeByProvider,
+        this.profilesById
+      )
     );
-    await this.state.update(RECENT_MODEL_STATE_KEY, normalizeStringRecord(payload.recentModelByProvider));
-    await this.state.update(FAVORITE_MODEL_STATE_KEY, normalizeStringRecord(payload.favoriteModelByProvider));
-    await this.state.update(DISABLED_MCP_STATE_KEY, normalizeStringArrayRecord(payload.disabledMcpByProvider));
-    await this.state.update(CUSTOM_MODEL_STATE_KEY, normalizeStringRecord(payload.customModelByProvider));
-    await this.state.update(RUNTIME_STATE_KEY, normalizeStringRecord(payload.activeRuntimeByProvider));
-    await this.state.update(PERMISSION_STATE_KEY, normalizeStringRecord(payload.activePermissionByProvider));
-    await this.state.update(CONTEXT_OPTIONS_STATE_KEY, normalizeContextOptions(payload.contextOptions));
-    await this.state.update(CLAUDE_TERMINAL_BANNER_STATE_KEY, payload.claudeTerminalBannerDismissed === true);
+    await this.state.update(
+      RECENT_MODEL_STATE_KEY,
+      normalizeStringRecord(payload.recentModelByProvider)
+    );
+    await this.state.update(
+      FAVORITE_MODEL_STATE_KEY,
+      normalizeStringRecord(payload.favoriteModelByProvider)
+    );
+    await this.state.update(
+      DISABLED_MCP_STATE_KEY,
+      normalizeStringArrayRecord(payload.disabledMcpByProvider)
+    );
+    await this.state.update(
+      CUSTOM_MODEL_STATE_KEY,
+      normalizeStringRecord(payload.customModelByProvider)
+    );
+    await this.state.update(
+      RUNTIME_STATE_KEY,
+      normalizeStringRecord(payload.activeRuntimeByProvider)
+    );
+    await this.state.update(
+      PERMISSION_STATE_KEY,
+      normalizeStringRecord(payload.activePermissionByProvider)
+    );
+    await this.state.update(
+      CONTEXT_OPTIONS_STATE_KEY,
+      normalizeContextOptions(payload.contextOptions)
+    );
+    await this.state.update(
+      CLAUDE_TERMINAL_BANNER_STATE_KEY,
+      payload.claudeTerminalBannerDismissed === true
+    );
     await this.state.update(TASK_BOARD_DISMISSED_STATE_KEY, payload.taskBoardDismissed === true);
-  }
-
-  private normalizeAgentModeState(value: unknown): Record<string, string> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return {};
-    }
-
-    const result: Record<string, string> = {};
-    for (const [providerId, modeId] of Object.entries(value)) {
-      if (typeof providerId !== 'string' || typeof modeId !== 'string') {
-        continue;
-      }
-      if (usesProviderNativeAgentConfig(providerId)) {
-        continue;
-      }
-      const profile = this.profilesById.get(providerId) ?? getCliProfile(providerId);
-      const mode = profile?.agentModes.find((item) => item.id === modeId && !item.disabled);
-      if (mode) {
-        result[providerId] = modeId;
-      }
-    }
-    return result;
-  }
-
-  private getStoredStringRecord(key: string): Record<string, string> {
-    return normalizeStringRecord(this.state?.get<Record<string, string>>(key, {}));
-  }
-
-  private getStoredStringArrayRecord(key: string): Record<string, string[]> {
-    return normalizeStringArrayRecord(this.state?.get<Record<string, string[]>>(key, {}));
-  }
-
-  private getStoredContextOptions(): Partial<AssistantContextOptions> {
-    return normalizeContextOptions(this.state?.get<Partial<AssistantContextOptions>>(CONTEXT_OPTIONS_STATE_KEY, {}));
-  }
-
-  private resolveCliId(message: { cliId?: string; providerId?: string }): string {
-    return message.cliId ?? message.providerId ?? this.getDefaultCliId();
-  }
-
-  private getDefaultCliId(): string {
-    const configured = vscode.workspace
-      .getConfiguration('agents-gui')
-      .get<string>('defaultProvider', DEFAULT_CLI_ID);
-
-    if (configured && getCliProfile(configured)) {
-      return configured;
-    }
-
-    return getCliProfile(DEFAULT_CLI_ID)?.id ?? CLI_PROFILES[0]?.id ?? DEFAULT_CLI_ID;
-  }
-
-  private resolveContextOptions(
-    overrides: Partial<AssistantContextOptions> = {}
-  ): AssistantContextOptions {
-    const config = vscode.workspace.getConfiguration('agents-gui.context');
-    return {
-      includeWorkspace: config.get<boolean>('includeWorkspace', true),
-      includeCurrentFile: config.get<boolean>('includeCurrentFile', true),
-      includeSelection: config.get<boolean>('includeSelection', true),
-      includeDiagnostics: config.get<boolean>('includeDiagnostics', true),
-      ...overrides,
-    };
   }
 
   private resolveContextOptionsForAction(
     action: AssistantActionId,
     overrides: Partial<AssistantContextOptions> = {}
   ): AssistantContextOptions {
-    const options = this.resolveContextOptions(overrides);
+    const options = this.settingsManager.resolveContextOptions(overrides);
     if (actionRequiresActiveFile(action)) {
       options.includeCurrentFile = true;
     }
 
     return options;
-  }
-
-  private getContextLimits() {
-    const config = vscode.workspace.getConfiguration('agents-gui.context');
-    return {
-      maxFileChars: config.get<number>('maxFileChars', 12000),
-      maxSelectionChars: config.get<number>('maxSelectionChars', 8000),
-      maxDiagnostics: config.get<number>('maxDiagnostics', 12),
-    };
   }
 
   private postError(cliId: string, text: string): void {
@@ -1500,7 +1441,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
-function normalizeMode(mode?: AssistantMode): AssistantMode {
+function normalizeMode(_mode?: AssistantMode): AssistantMode {
   return 'agent';
 }
 
@@ -1522,8 +1463,9 @@ function preferredReadOnlyMode(profile?: CliProfile): string | undefined {
     return undefined;
   }
 
-  const mode = profile.agentModes.find((item) => item.id === 'plan')
-    ?? profile.agentModes.find((item) => item.id === 'suggest');
+  const mode =
+    profile.agentModes.find((item) => item.id === 'plan') ??
+    profile.agentModes.find((item) => item.id === 'suggest');
   return mode?.id;
 }
 
@@ -1532,8 +1474,9 @@ function preferredReadOnlyPermission(profile?: CliProfile): string | undefined {
     return undefined;
   }
 
-  const mode = profile.permissionModes?.find((item) => item.id === 'readOnly')
-    ?? profile.permissionModes?.find((item) => item.id === 'plan');
+  const mode =
+    profile.permissionModes?.find((item) => item.id === 'readOnly') ??
+    profile.permissionModes?.find((item) => item.id === 'plan');
   return mode?.id;
 }
 
@@ -1545,12 +1488,9 @@ function effectiveCliModelSelection(
   const customId = model.custom ? String(customModel || '').trim() : '';
   const id = customId || model.configuredModelId || model.id;
   const variant = sanitizeModelVariant(modelVariant) ?? sanitizeModelVariant(model.variant);
-  const baseLabel = model.custom && customId
-    ? customId
-    : model.summaryLabel || model.label || id;
-  const label = variant && !baseLabel.includes(`· ${variant}`)
-    ? `${baseLabel} · ${variant}`
-    : baseLabel;
+  const baseLabel = model.custom && customId ? customId : model.summaryLabel || model.label || id;
+  const label =
+    variant && !baseLabel.includes(`· ${variant}`) ? `${baseLabel} · ${variant}` : baseLabel;
   return { id, label, ...(variant ? { variant } : {}) };
 }
 
@@ -1594,14 +1534,15 @@ function normalizeContextOptions(value: unknown): Partial<AssistantContextOption
 
   const record = value as Record<string, unknown>;
   const result: Partial<AssistantContextOptions> = {};
-  for (const key of ['includeWorkspace', 'includeCurrentFile', 'includeSelection', 'includeDiagnostics'] as const) {
+  for (const key of [
+    'includeWorkspace',
+    'includeCurrentFile',
+    'includeSelection',
+    'includeDiagnostics',
+  ] as const) {
     if (typeof record[key] === 'boolean') {
       result[key] = record[key];
     }
   }
   return result;
-}
-
-function usesProviderNativeAgentConfig(providerId: string): boolean {
-  return providerId === 'opencode';
 }
