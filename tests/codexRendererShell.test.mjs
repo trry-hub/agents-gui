@@ -40,7 +40,7 @@ test('webview injects the renderer flag and loads the React bundle before the co
     html,
     /__CODEX_RENDERER_JS_URI__[\s\S]*__MAIN_JS_URI__/
   );
-  assert.match(renderer, /\['__CODEX_RENDERER_JS_URI__', \['media', 'codex-renderer\.js'\]\]/);
+  assert.match(renderer, /readWebviewAssetManifest\(options\.extensionUri\)/);
   assert.match(renderer, /codexRendererEnabled: boolean/);
   assert.match(renderer, /__CODEX_RENDERER_ENABLED__/);
   assert.match(sidebar, /this\.extensionMode === vscode\.ExtensionMode\.Development/);
@@ -90,4 +90,3 @@ test('renderer failure can disable the experiment without taking down the shell'
   assert.match(css, /\.conversation-virtual-spacer\s*\{/);
   assert.match(css, /\.conversation-scroll-bottom\s*\{/);
 });
-

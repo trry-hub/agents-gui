@@ -59,9 +59,7 @@ export function createDeltaScheduler(options: DeltaSchedulerOptions): DeltaSched
         return;
       }
       if (!isDelta(envelope)) {
-        if (isCompletion(envelope)) {
-          flush();
-        }
+        flush();
         options.dispatch(envelope);
         return;
       }
@@ -76,6 +74,10 @@ export function createDeltaScheduler(options: DeltaSchedulerOptions): DeltaSched
       if (existing && isDelta(existing)) {
         pending.set(key, {
           ...envelope,
+          coalescedSequences: [
+            ...(existing.coalescedSequences ?? [existing.sequence]),
+            ...(envelope.coalescedSequences ?? [envelope.sequence]),
+          ],
           event: {
             ...envelope.event,
             delta: `${existing.event.delta}${envelope.event.delta}`,
@@ -120,13 +122,6 @@ function isDelta(
   );
 }
 
-function isCompletion(envelope: ThreadEventEnvelope): boolean {
-  return (
-    envelope.event.type === 'item/completed' ||
-    envelope.event.type === 'turn/completed'
-  );
-}
-
 function deltaKey(envelope: ThreadEventEnvelope & { event: { turnId: string; itemId: string } }): string {
   return [
     envelope.providerId,
@@ -136,4 +131,3 @@ function deltaKey(envelope: ThreadEventEnvelope & { event: { turnId: string; ite
     envelope.event.type,
   ].join(':');
 }
-

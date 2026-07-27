@@ -62,7 +62,11 @@ import type {
   SetupCliProfile,
   WebviewToHostMessage,
 } from './webviewProtocol';
-import { renderWebviewHtml } from './webviewHtmlRenderer';
+import {
+  providerIconPaths,
+  renderWebviewHtml,
+  webviewAssetPaths,
+} from './webviewHtmlRenderer';
 import {
   AGENT_MODE_STATE_KEY,
   CLAUDE_TERMINAL_BANNER_STATE_KEY,
@@ -76,21 +80,6 @@ import {
   RUNTIME_STATE_KEY,
   TASK_BOARD_DISMISSED_STATE_KEY,
 } from './syncedState';
-
-const PROVIDER_ICON_PATHS = {
-  claude: { light: 'media/provider-icons/claude.svg', dark: 'media/provider-icons/claude.svg' },
-  gemini: { light: 'media/provider-icons/gemini.png', dark: 'media/provider-icons/gemini.png' },
-  codex: { light: 'media/provider-icons/codex.png', dark: 'media/provider-icons/codex.png' },
-  opencode: {
-    light: 'media/provider-icons/opencode.png',
-    dark: 'media/provider-icons/opencode.png',
-  },
-  goose: {
-    light: 'media/provider-icons/goose-light.png',
-    dark: 'media/provider-icons/goose-dark.png',
-  },
-  aider: { light: 'media/provider-icons/aider.png', dark: 'media/provider-icons/aider.png' },
-} as const;
 
 interface SidebarProviderOptions {
   apiProviderClient?: ApiProviderClient;
@@ -1380,9 +1369,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const assets = webviewAssetPaths(this.extensionUri);
     const pattern = new vscode.RelativePattern(
       this.extensionUri,
-      'media/{main.html,main.css,main.js,i18n.js,messageText.js,messageChoices.js,providerRunState.js,providerCapabilities.js,conversationStore.js,sessionHistory.js,slashCommands.js,openCodeDialogState.js,claudeActions.js,inlineMarkdown.js,workbenchLayout.js,taskBoardState.js,composerState.js,providerOptions.js}'
+      `media/{${assets.join(',')}}`
     );
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
@@ -1424,14 +1414,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getProviderIconUris(providerId: string) {
-    const iconPaths = PROVIDER_ICON_PATHS[providerId as keyof typeof PROVIDER_ICON_PATHS];
+    const iconPaths = providerIconPaths(this.extensionUri, providerId);
     if (!iconPaths || !this.view) {
       return undefined;
     }
 
     return {
-      light: this.getWebviewUri(this.view.webview, ...iconPaths.light.split('/')),
-      dark: this.getWebviewUri(this.view.webview, ...iconPaths.dark.split('/')),
+      light: this.getWebviewUri(this.view.webview, 'media', ...iconPaths.light.split('/')),
+      dark: this.getWebviewUri(this.view.webview, 'media', ...iconPaths.dark.split('/')),
     };
   }
 

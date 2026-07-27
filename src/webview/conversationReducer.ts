@@ -29,6 +29,7 @@ export interface ConversationSnapshot {
   threadsById: Record<string, ThreadState>;
   threadOrderByProvider: Record<string, string[]>;
   activeThreadByProvider: Record<string, string>;
+  appliedEnvelopeKeys?: string[];
 }
 
 export interface LegacyMessage {
@@ -452,4 +453,3 @@ function finiteNumber(value: unknown): number | undefined {
 function clean(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
-

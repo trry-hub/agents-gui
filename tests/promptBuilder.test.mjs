@@ -1185,7 +1185,8 @@ test('development mode watches webview assets for live reload', () => {
   assert.match(extensionSource, /extensionMode:\s*context\.extensionMode/);
   assert.match(sidebarSource, /vscode\.ExtensionMode\.Development/);
   assert.match(sidebarSource, /createFileSystemWatcher/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js,workbenchLayout\.js,taskBoardState\.js,composerState\.js,providerOptions\.js\}/);
+  assert.match(sidebarSource, /const assets = webviewAssetPaths\(this\.extensionUri\);/);
+  assert.match(sidebarSource, /`media\/\{\$\{assets\.join\(','\)\}\}`/);
   assert.match(sidebarSource, /webviewAssetVersion/);
   assert.match(sidebarSource, /reloadWebviewForDevelopment/);
 });
@@ -1962,15 +1963,11 @@ test('webview renders installed provider logo tabs in the header', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const webviewAssets = JSON.parse(
+    readFileSync(new URL('../media/webview-assets.json', import.meta.url), 'utf8')
+  );
   const providers = ['claude', 'gemini', 'codex', 'opencode', 'goose', 'aider'];
-  const providerIcons = {
-    claude: { light: 'media/provider-icons/claude.svg', dark: 'media/provider-icons/claude.svg' },
-    gemini: { light: 'media/provider-icons/gemini.png', dark: 'media/provider-icons/gemini.png' },
-    codex: { light: 'media/provider-icons/codex.png', dark: 'media/provider-icons/codex.png' },
-    opencode: { light: 'media/provider-icons/opencode.png', dark: 'media/provider-icons/opencode.png' },
-    goose: { light: 'media/provider-icons/goose-light.png', dark: 'media/provider-icons/goose-dark.png' },
-    aider: { light: 'media/provider-icons/aider.png', dark: 'media/provider-icons/aider.png' },
-  };
+  const providerIcons = webviewAssets.providerIcons;
   const commands = manifest.contributes.commands;
   const titleActions = manifest.contributes.menus['view/title'] || [];
 
@@ -2030,7 +2027,7 @@ test('webview renders installed provider logo tabs in the header', () => {
 
   for (const provider of providers) {
     for (const iconPath of new Set(Object.values(providerIcons[provider]))) {
-      const icon = readFileSync(new URL(`../${iconPath}`, import.meta.url));
+      const icon = readFileSync(new URL(`../media/${iconPath}`, import.meta.url));
       assert.ok(icon.length > 0, `missing provider icon asset for ${provider}`);
       if (iconPath.endsWith('.svg')) {
         assert.match(icon.toString('utf8'), /<svg/);
@@ -2038,10 +2035,10 @@ test('webview renders installed provider logo tabs in the header', () => {
         assert.equal(icon.subarray(1, 4).toString('ascii'), 'PNG');
       }
     }
-    assert.match(sidebarSource, new RegExp(`${provider}:\\s*\\{\\s*light: '${providerIcons[provider].light}'`));
   }
 
   assert.match(sidebarSource, /private getProviderIconUris\(providerId: string\)/);
+  assert.match(sidebarSource, /providerIconPaths\(this\.extensionUri, providerId\)/);
 });
 
 test('webview keeps provider switching in the header and out of the conversation toolbar', () => {
@@ -3484,7 +3481,7 @@ test('webview architecture keeps pure rules in focused browser modules', () => {
   const providerOptionsSource = readFileSync(new URL('../media/providerOptions.js', import.meta.url), 'utf8');
 
   assert.match(html, /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__WORKBENCH_LAYOUT_JS_URI__[\s\S]*__TASK_BOARD_STATE_JS_URI__[\s\S]*__COMPOSER_STATE_JS_URI__[\s\S]*__PROVIDER_OPTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/);
-  assert.match(sidebarSource, /media\/\{main\.html,main\.css,main\.js,i18n\.js,messageText\.js,messageChoices\.js,providerRunState\.js,providerCapabilities\.js,conversationStore\.js,sessionHistory\.js,slashCommands\.js,openCodeDialogState\.js,claudeActions\.js,inlineMarkdown\.js,workbenchLayout\.js,taskBoardState\.js,composerState\.js,providerOptions\.js\}/);
+  assert.match(sidebarSource, /webviewAssetPaths\(this\.extensionUri\)/);
 
   assert.doesNotMatch(script, /function serializeThreadsForState\(source\)/);
   assert.match(conversationSource, /function serializeThreadsForState\(source\)/);
@@ -4084,30 +4081,10 @@ test('webview uses a ring spinner for running message status', () => {
 test('preview webview streams markdown with real line breaks', () => {
   const script = readFileSync(new URL('../scripts/preview-webview.mjs', import.meta.url), 'utf8');
 
-  for (const file of [
-    'messageText.js',
-    'messageChoices.js',
-    'providerRunState.js',
-    'providerCapabilities.js',
-    'conversationStore.js',
-    'sessionHistory.js',
-    'slashCommands.js',
-    'openCodeDialogState.js',
-    'claudeActions.js',
-    'inlineMarkdown.js',
-  ]) {
-    assert.match(script, new RegExp(`'${file}'`));
-  }
-  assert.match(script, /__MESSAGE_TEXT_JS_URI__/);
-  assert.match(script, /__MESSAGE_CHOICES_JS_URI__/);
-  assert.match(script, /__PROVIDER_RUN_STATE_JS_URI__/);
-  assert.match(script, /__PROVIDER_CAPABILITIES_JS_URI__/);
-  assert.match(script, /__CONVERSATION_STORE_JS_URI__/);
-  assert.match(script, /__SESSION_HISTORY_JS_URI__/);
-  assert.match(script, /__SLASH_COMMANDS_JS_URI__/);
-  assert.match(script, /__OPEN_CODE_DIALOG_STATE_JS_URI__/);
-  assert.match(script, /__INLINE_MARKDOWN_JS_URI__/);
-  assert.match(script, /__CLAUDE_ACTIONS_JS_URI__/);
+  assert.match(script, /media', 'webview-assets\.json'/);
+  assert.match(script, /manifest\.assets\.map\(\(asset\) => asset\.path\)/);
+  assert.match(script, /assetUriByPlaceholder/);
+  assert.match(script, /for \(const \[placeholder, uri\] of Object\.entries\(assetUriByPlaceholder\)\)/);
   assert.match(script, /unresolved VS Code placeholders/);
   assert.match(script, /\.join\('\\\\n'\)/);
   assert.doesNotMatch(script, /\.join\('\\\\\\\\n'\)/);

@@ -1,0 +1,52 @@
+{
+  "html": "main.html",
+  "assets": [
+    { "placeholder": "__MAIN_CSS_URI__", "path": "main.css" },
+    { "placeholder": "__I18N_JS_URI__", "path": "i18n.js" },
+    { "placeholder": "__MESSAGE_TEXT_JS_URI__", "path": "messageText.js" },
+    { "placeholder": "__MESSAGE_CHOICES_JS_URI__", "path": "messageChoices.js" },
+    { "placeholder": "__PROVIDER_RUN_STATE_JS_URI__", "path": "providerRunState.js" },
+    { "placeholder": "__PROVIDER_CAPABILITIES_JS_URI__", "path": "providerCapabilities.js" },
+    { "placeholder": "__CONVERSATION_STORE_JS_URI__", "path": "conversationStore.js" },
+    { "placeholder": "__SESSION_HISTORY_JS_URI__", "path": "sessionHistory.js" },
+    { "placeholder": "__SLASH_COMMANDS_JS_URI__", "path": "slashCommands.js" },
+    { "placeholder": "__OPEN_CODE_DIALOG_STATE_JS_URI__", "path": "openCodeDialogState.js" },
+    { "placeholder": "__CLAUDE_ACTIONS_JS_URI__", "path": "claudeActions.js" },
+    { "placeholder": "__INLINE_MARKDOWN_JS_URI__", "path": "inlineMarkdown.js" },
+    { "placeholder": "__WORKBENCH_LAYOUT_JS_URI__", "path": "workbenchLayout.js" },
+    { "placeholder": "__TASK_BOARD_STATE_JS_URI__", "path": "taskBoardState.js" },
+    { "placeholder": "__COMPOSER_STATE_JS_URI__", "path": "composerState.js" },
+    { "placeholder": "__PROVIDER_OPTIONS_JS_URI__", "path": "providerOptions.js" },
+    { "placeholder": "__STATE_MANAGER_JS_URI__", "path": "stateManager.js" },
+    { "placeholder": "__PACED_REVEAL_JS_URI__", "path": "pacedReveal.js" },
+    { "placeholder": "__CODEX_RENDERER_JS_URI__", "path": "codex-renderer.js" },
+    { "placeholder": "__MAIN_JS_URI__", "path": "main.js" }
+  ],
+  "providerIcons": {
+    "claude": {
+      "light": "provider-icons/claude.svg",
+      "dark": "provider-icons/claude.svg"
+    },
+    "gemini": {
+      "light": "provider-icons/gemini.png",
+      "dark": "provider-icons/gemini.png"
+    },
+    "codex": {
+      "light": "provider-icons/codex.png",
+      "dark": "provider-icons/codex.png"
+    },
+    "opencode": {
+      "light": "provider-icons/opencode.png",
+      "dark": "provider-icons/opencode.png"
+    },
+    "goose": {
+      "light": "provider-icons/goose-light.png",
+      "dark": "provider-icons/goose-dark.png"
+    },
+    "aider": {
+      "light": "provider-icons/aider.png",
+      "dark": "provider-icons/aider.png"
+    }
+  },
+  "static": []
+}

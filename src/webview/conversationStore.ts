@@ -39,8 +39,9 @@ export function createConversationStore(
 ): ConversationStore {
   let snapshot = initialSnapshot;
   const listeners = new Set<() => void>();
-  const seen = new Set<string>();
-  const seenOrder: string[] = [];
+  const initialSeen = normalizeSeenKeys(initialSnapshot.appliedEnvelopeKeys);
+  const seen = new Set<string>(initialSeen);
+  const seenOrder: string[] = [...initialSeen];
 
   function notify(): void {
     for (const listener of listeners) {
@@ -52,6 +53,10 @@ export function createConversationStore(
     snapshot = next?.version === 2 ? next : createEmptyConversationSnapshot();
     seen.clear();
     seenOrder.length = 0;
+    for (const key of normalizeSeenKeys(snapshot.appliedEnvelopeKeys)) {
+      seen.add(key);
+      seenOrder.push(key);
+    }
     notify();
   }
 
@@ -69,12 +74,24 @@ export function createConversationStore(
       if (seen.has(key)) {
         return false;
       }
-      seen.add(key);
-      seenOrder.push(key);
-      if (seenOrder.length > MAX_SEEN_ENVELOPES) {
-        const oldest = seenOrder.shift();
-        if (oldest) {
-          seen.delete(oldest);
+      const sequenceKeys = [
+        ...(envelope.coalescedSequences ?? []),
+        envelope.sequence,
+      ].map(
+        (sequence) =>
+          `${envelope.providerId}:${envelope.threadId}:${sequence}`
+      );
+      for (const sequenceKey of sequenceKeys) {
+        if (seen.has(sequenceKey)) {
+          continue;
+        }
+        seen.add(sequenceKey);
+        seenOrder.push(sequenceKey);
+        if (seenOrder.length > MAX_SEEN_ENVELOPES) {
+          const oldest = seenOrder.shift();
+          if (oldest) {
+            seen.delete(oldest);
+          }
         }
       }
 
@@ -82,7 +99,10 @@ export function createConversationStore(
       if (next === snapshot) {
         return false;
       }
-      snapshot = next;
+      snapshot = {
+        ...next,
+        appliedEnvelopeKeys: [...seenOrder],
+      };
       notify();
       return true;
     },
@@ -174,4 +194,13 @@ export function createConversationStore(
       return projectThreadSummaries(snapshot);
     },
   };
+}
+
+function normalizeSeenKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((key): key is string => typeof key === 'string' && Boolean(key))
+    .slice(-MAX_SEEN_ENVELOPES);
 }

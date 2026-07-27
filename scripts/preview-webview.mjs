@@ -4,45 +4,30 @@ import path from 'node:path';
 const root = process.cwd();
 const previewRoot = '/tmp/agents-gui-preview';
 const outputPath = path.join(previewRoot, 'agents-gui-preview.html');
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(root, 'media', 'webview-assets.json'), 'utf8')
+);
 
-let html = fs.readFileSync(path.join(root, 'media/main.html'), 'utf8');
+let html = fs.readFileSync(path.join(root, 'media', manifest.html), 'utf8');
 
 fs.mkdirSync(previewRoot, { recursive: true });
 const webviewAssets = [
-  'main.css',
-  'i18n.js',
-  'messageText.js',
-  'messageChoices.js',
-  'providerRunState.js',
-  'providerCapabilities.js',
-  'conversationStore.js',
-  'sessionHistory.js',
-  'slashCommands.js',
-  'openCodeDialogState.js',
-  'claudeActions.js',
-  'inlineMarkdown.js',
-  'main.js',
+  manifest.html,
+  ...manifest.assets.map((asset) => asset.path),
+  ...Object.values(manifest.providerIcons).flatMap((icon) => [
+    icon.light,
+    icon.dark,
+  ]),
+  ...manifest.static,
 ];
 for (const file of webviewAssets) {
+  fs.mkdirSync(path.dirname(path.join(previewRoot, file)), { recursive: true });
   fs.copyFileSync(path.join(root, 'media', file), path.join(previewRoot, file));
 }
-fs.cpSync(path.join(root, 'media', 'provider-icons'), path.join(previewRoot, 'provider-icons'), {
-  recursive: true,
-});
-
-const i18nUri = './i18n.js';
-const messageTextUri = './messageText.js';
-const messageChoicesUri = './messageChoices.js';
-const providerRunStateUri = './providerRunState.js';
-const providerCapabilitiesUri = './providerCapabilities.js';
-const conversationStoreUri = './conversationStore.js';
-const sessionHistoryUri = './sessionHistory.js';
-const slashCommandsUri = './slashCommands.js';
-const openCodeDialogStateUri = './openCodeDialogState.js';
-const claudeActionsUri = './claudeActions.js';
-const inlineMarkdownUri = './inlineMarkdown.js';
-const mainJsUri = './main.js';
-const cssUri = './main.css';
+const assetUriByPlaceholder = Object.fromEntries(
+  manifest.assets.map((asset) => [asset.placeholder, `./${asset.path}`])
+);
+const i18nUri = assetUriByPlaceholder.__I18N_JS_URI__;
 
 const codexModes = [
   { id: 'build', label: 'Build', description: 'Codex implementation workflow', instruction: 'Implement scoped changes.' },
@@ -96,14 +81,12 @@ const opencodeModels = [
   { id: 'opencode/big-pickle', label: 'opencode/big-pickle', summaryLabel: 'big-pickle', description: 'OpenCode hosted model.', args: ['--model', 'opencode/big-pickle'] },
   { id: 'custom', label: 'Custom', description: 'Enter a provider/model string accepted by OpenCode.', custom: true },
 ];
-const providerIcons = {
-  claude: { light: './provider-icons/claude.svg', dark: './provider-icons/claude.svg' },
-  gemini: { light: './provider-icons/gemini.png', dark: './provider-icons/gemini.png' },
-  codex: { light: './provider-icons/codex.png', dark: './provider-icons/codex.png' },
-  opencode: { light: './provider-icons/opencode.png', dark: './provider-icons/opencode.png' },
-  goose: { light: './provider-icons/goose-light.png', dark: './provider-icons/goose-dark.png' },
-  aider: { light: './provider-icons/aider.png', dark: './provider-icons/aider.png' },
-};
+const providerIcons = Object.fromEntries(
+  Object.entries(manifest.providerIcons).map(([providerId, icon]) => [
+    providerId,
+    { light: `./${icon.light}`, dark: `./${icon.dark}` },
+  ])
+);
 
 const vscodeStub = `
 <script>
@@ -117,9 +100,33 @@ const geminiModes = ${JSON.stringify(geminiModes)};
 const opencodeModes = ${JSON.stringify(opencodeModes)};
 const opencodeModels = ${JSON.stringify(opencodeModels)};
 window.__messages = [];
+const previewStateKey = 'agents-gui-preview-state-v2';
+let previewThreadSequence = 0;
+function emitPreviewMessage(data, delay) {
+  setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data })), delay);
+}
+function emitThreadEvent(providerId, threadId, event, delay) {
+  previewThreadSequence += 1;
+  emitPreviewMessage({
+    command: 'threadEvent',
+    providerId,
+    threadId,
+    sequence: previewThreadSequence,
+    event,
+  }, delay);
+}
 window.acquireVsCodeApi = () => ({
-  getState() { return window.__state || {}; },
-  setState(state) { window.__state = state; },
+  getState() {
+    try {
+      return JSON.parse(localStorage.getItem(previewStateKey) || '{}');
+    } catch {
+      return {};
+    }
+  },
+  setState(state) {
+    window.__state = state;
+    localStorage.setItem(previewStateKey, JSON.stringify(state));
+  },
   postMessage(message) {
     window.__messages.push(message);
     if (message.command === 'checkProfiles') {
@@ -159,9 +166,52 @@ window.acquireVsCodeApi = () => ({
     }
     if (message.command === 'send' || message.command === 'quickAction') {
       const sessionId = 'preview-' + Date.now();
+      const threadId = message.threadId || message.cliId + '-preview-thread';
+      const startedAt = Date.now();
+      const turnId = sessionId + ':turn:1';
+      const assistantItemId = turnId + ':assistant';
+      const reasoningItemId = turnId + ':reasoning';
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'thread/started',
+        thread: {
+          id: threadId,
+          providerId: message.cliId,
+          title: message.text || 'Preview session',
+          status: 'running',
+          updatedAt: startedAt,
+        },
+      }, 10);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'turn/started',
+        turn: { id: turnId, status: 'running', startedAt },
+      }, 10);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'item/started',
+        item: {
+          id: turnId + ':user',
+          turnId,
+          type: 'user-message',
+          status: 'completed',
+          content: message.text,
+          startedAt,
+          completedAt: startedAt,
+        },
+      }, 10);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'item/started',
+        item: {
+          id: assistantItemId,
+          turnId,
+          type: 'assistant-message',
+          status: 'running',
+          content: '',
+          startedAt,
+        },
+      }, 10);
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
         command: 'requestStarted',
         cliId: message.cliId,
+        threadId,
         sessionId,
         text: message.text,
         mode: message.mode,
@@ -170,6 +220,51 @@ window.acquireVsCodeApi = () => ({
         actionLabel: message.action === 'freeform' ? '自由提问' : message.action,
         contextSummary: { workspace: 'agents-gui', activeFile: 'src/extension.ts', diagnostics: 2 },
       }})), 10);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'item/reasoning/delta',
+        turnId,
+        itemId: reasoningItemId,
+        delta: 'Inspecting the active thread and renderer state.',
+      }, 30);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'item/assistantMessage/delta',
+        turnId,
+        itemId: assistantItemId,
+        delta: '## 能力\\n- **代码修改**：支持 \`TypeScript\`。\\n',
+      }, 36);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'item/activity/updated',
+        turnId,
+        itemId: turnId + ':activity:preview-command',
+        item: {
+          id: turnId + ':activity:preview-command',
+          turnId,
+          type: 'command-execution',
+          status: 'completed',
+          label: 'npm test',
+          content: 'Focused renderer replay',
+          activity: {
+            id: 'preview-command',
+            kind: 'command',
+            name: 'npm test',
+            detail: 'Focused renderer replay',
+          },
+          startedAt: startedAt + 1,
+          completedAt: startedAt + 2,
+        },
+        activity: {
+          id: 'preview-command',
+          kind: 'command',
+          name: 'npm test',
+          detail: 'Focused renderer replay',
+        },
+      }, 42);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'item/assistantMessage/delta',
+        turnId,
+        itemId: assistantItemId,
+        delta: '- **项目理解**：读取当前上下文。\\n\\n完成。',
+      }, 58);
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
         command: 'output',
         cliId: message.cliId,
@@ -192,6 +287,16 @@ window.acquireVsCodeApi = () => ({
           '\`\`\`',
         ].join('\\n'),
       }})), 40);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'turn/completed',
+        turnId,
+        status: 'completed',
+        completedAt: startedAt + 120,
+      }, 120);
+      emitThreadEvent(message.cliId, threadId, {
+        type: 'thread/status/changed',
+        status: 'completed',
+      }, 120);
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
         command: 'sessionEnd',
         cliId: message.cliId,
@@ -205,22 +310,17 @@ window.acquireVsCodeApi = () => ({
 
 html = html
   .replace('<meta http-equiv="Content-Security-Policy" content="__CSP__">', '')
-  .replace('__MAIN_CSS_URI__', cssUri)
-  .replace('__I18N_JS_URI__', i18nUri)
-  .replace('__MESSAGE_TEXT_JS_URI__', messageTextUri)
-  .replace('__MESSAGE_CHOICES_JS_URI__', messageChoicesUri)
-  .replace('__PROVIDER_RUN_STATE_JS_URI__', providerRunStateUri)
-  .replace('__PROVIDER_CAPABILITIES_JS_URI__', providerCapabilitiesUri)
-  .replace('__CONVERSATION_STORE_JS_URI__', conversationStoreUri)
-  .replace('__SESSION_HISTORY_JS_URI__', sessionHistoryUri)
-  .replace('__SLASH_COMMANDS_JS_URI__', slashCommandsUri)
-  .replace('__OPEN_CODE_DIALOG_STATE_JS_URI__', openCodeDialogStateUri)
-  .replace('__CLAUDE_ACTIONS_JS_URI__', claudeActionsUri)
-  .replace('__INLINE_MARKDOWN_JS_URI__', inlineMarkdownUri)
-  .replace('__MAIN_JS_URI__', mainJsUri)
   .replace(/__NONCE__/g, 'preview')
   .replace(/__LOCALE__/g, 'zh-CN')
-  .replace(`<script nonce="preview" src="${i18nUri}"></script>`, `${vscodeStub}\n  <script nonce="preview" src="${i18nUri}"></script>`);
+  .replace(/__CODEX_RENDERER_ENABLED__/g, 'true');
+
+for (const [placeholder, uri] of Object.entries(assetUriByPlaceholder)) {
+  html = html.replace(new RegExp(placeholder, 'g'), uri);
+}
+html = html.replace(
+  `<script nonce="preview" src="${i18nUri}"></script>`,
+  `${vscodeStub}\n  <script nonce="preview" src="${i18nUri}"></script>`
+);
 
 if (/__[A-Z0-9_]+__/.test(html)) {
   throw new Error('Preview webview still contains unresolved VS Code placeholders.');

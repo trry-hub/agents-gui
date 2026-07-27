@@ -88,5 +88,6 @@ export interface ThreadEventEnvelope {
   providerId: string;
   threadId: string;
   sequence: number;
+  coalescedSequences?: number[];
   event: ThreadEvent;
 }

@@ -173,19 +173,20 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(sidebarSource, /private postToWebview\(message: HostToWebviewMessage\)/);
   assert.match(sidebarSource, /this\.postToWebview\(\{/);
   assert.doesNotMatch(sidebarSource, /this\.view\?\.webview\.postMessage\(\{/);
-  assert.match(sidebarSource, /import \{ renderWebviewHtml \} from '\.\/webviewHtmlRenderer';/);
+  assert.match(
+    sidebarSource,
+    /import \{[\s\S]*renderWebviewHtml,[\s\S]*webviewAssetPaths,[\s\S]*\} from '\.\/webviewHtmlRenderer';/
+  );
   assert.match(
     sidebarSource,
     /return renderWebviewHtml\(\{[\s\S]*extensionUri: this\.extensionUri,[\s\S]*webview,[\s\S]*locale: this\.locale,[\s\S]*codexRendererEnabled: this\.isCodexRendererEnabled\(\),[\s\S]*\}\)/
   );
   assert.doesNotMatch(sidebarSource, /fs\.readFileSync\(htmlPath/);
   assert.match(webviewHtmlRendererSource, /export function renderWebviewHtml/);
-  assert.match(webviewHtmlRendererSource, /const WEBVIEW_ASSETS = \[/);
-  assert.match(webviewHtmlRendererSource, /'__WORKBENCH_LAYOUT_JS_URI__'/);
-  assert.match(webviewHtmlRendererSource, /'__TASK_BOARD_STATE_JS_URI__'/);
-  assert.match(webviewHtmlRendererSource, /'__COMPOSER_STATE_JS_URI__'/);
-  assert.match(webviewHtmlRendererSource, /'__PROVIDER_OPTIONS_JS_URI__'/);
-  assert.match(webviewHtmlRendererSource, /getWebviewUri\(options\.extensionUri, options\.webview/);
+  assert.match(webviewHtmlRendererSource, /export function readWebviewAssetManifest/);
+  assert.match(webviewHtmlRendererSource, /'webview-assets\.json'/);
+  assert.match(sidebarSource, /webviewAssetPaths\(this\.extensionUri\)/);
+  assert.match(webviewHtmlRendererSource, /getWebviewUri\([\s\S]*options\.extensionUri,[\s\S]*options\.webview/);
   assert.match(agentRuntimeSource, /export interface AgentRuntime/);
   assert.match(agentRuntimeSource, /export class CliAgentRuntime implements AgentRuntime/);
   assert.doesNotMatch(agentRuntimeSource, /OpenCodeAgentCapability/);
