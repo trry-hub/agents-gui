@@ -1,0 +1,164 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+import adapterModule from '../.test-dist/threadEventAdapter.js';
+
+const { ThreadEventAdapter } = adapterModule;
+
+function eventsOfType(envelopes, type) {
+  return envelopes.filter((envelope) => envelope.event.type === type);
+}
+
+test('request start creates a unique turn for each request even when the runtime session is reused', () => {
+  const adapter = new ThreadEventAdapter({ now: () => 1_700_000_000_000 });
+
+  const first = adapter.accept({
+    command: 'requestStarted',
+    cliId: 'codex',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'first',
+  });
+  adapter.accept({
+    command: 'sessionEnd',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    exitCode: 0,
+  });
+  const second = adapter.accept({
+    command: 'requestStarted',
+    cliId: 'codex',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'second',
+  });
+
+  const firstTurn = eventsOfType(first, 'turn/started')[0].event.turn;
+  const secondTurn = eventsOfType(second, 'turn/started')[0].event.turn;
+  const firstUser = eventsOfType(first, 'item/started').find(
+    ({ event }) => event.item.type === 'user-message'
+  ).event.item;
+
+  assert.notEqual(firstTurn.id, secondTurn.id);
+  assert.equal(firstUser.id, `${firstTurn.id}:user`);
+  assert.equal(firstUser.content, 'first');
+});
+
+test('stream output targets deterministic assistant and reasoning items', () => {
+  const adapter = new ThreadEventAdapter({ now: () => 42 });
+  const started = adapter.accept({
+    command: 'requestStarted',
+    cliId: 'opencode',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'inspect',
+  });
+  const turnId = eventsOfType(started, 'turn/started')[0].event.turn.id;
+
+  const output = adapter.accept({
+    command: 'output',
+    cliId: 'opencode',
+    sessionId: 'runtime-1',
+    text: 'answer',
+    thinking: 'reason',
+  });
+
+  assert.deepEqual(
+    output.map(({ event }) => [event.type, event.itemId, event.delta]),
+    [
+      ['item/assistantMessage/delta', `${turnId}:assistant`, 'answer'],
+      ['item/reasoning/delta', `${turnId}:reasoning`, 'reason'],
+    ]
+  );
+});
+
+test('provider activities become stable typed thread items', () => {
+  const adapter = new ThreadEventAdapter({ now: () => 42 });
+  const started = adapter.accept({
+    command: 'requestStarted',
+    cliId: 'opencode',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'inspect',
+  });
+  const turnId = eventsOfType(started, 'turn/started')[0].event.turn.id;
+
+  const first = adapter.accept({
+    command: 'output',
+    cliId: 'opencode',
+    sessionId: 'runtime-1',
+    text: '',
+    activities: [{ id: 'tool-7', kind: 'command', name: 'npm test', detail: 'running' }],
+  });
+  const second = adapter.accept({
+    command: 'output',
+    cliId: 'opencode',
+    sessionId: 'runtime-1',
+    text: '',
+    activities: [{ id: 'tool-7', kind: 'command', name: 'npm test', detail: 'passed' }],
+  });
+
+  const firstEvent = eventsOfType(first, 'item/activity/updated')[0].event;
+  const secondEvent = eventsOfType(second, 'item/activity/updated')[0].event;
+  assert.equal(firstEvent.itemId, `${turnId}:activity:tool-7`);
+  assert.equal(firstEvent.item.type, 'command-execution');
+  assert.equal(secondEvent.itemId, firstEvent.itemId);
+  assert.equal(secondEvent.activity.detail, 'passed');
+});
+
+test('sequences increase per thread and completion clears the runtime binding', () => {
+  const adapter = new ThreadEventAdapter({ now: () => 42 });
+  const started = adapter.accept({
+    command: 'requestStarted',
+    cliId: 'codex',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'build',
+  });
+  const ended = adapter.accept({
+    command: 'sessionEnd',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    exitCode: 0,
+  });
+  const lateOutput = adapter.accept({
+    command: 'output',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    text: 'late',
+  });
+
+  const sequences = [...started, ...ended].map((envelope) => envelope.sequence);
+  assert.deepEqual(
+    sequences,
+    Array.from({ length: sequences.length }, (_, index) => index + 1)
+  );
+  assert.equal(eventsOfType(ended, 'turn/completed')[0].event.status, 'completed');
+  assert.deepEqual(lateOutput, []);
+});
+
+test('sidebar dual-delivers canonical envelopes and preserves the legacy lifecycle message', () => {
+  const assistantTypes = readFileSync(
+    new URL('../src/assistantTypes.ts', import.meta.url),
+    'utf8'
+  );
+  const protocol = readFileSync(
+    new URL('../src/webviewProtocol.ts', import.meta.url),
+    'utf8'
+  );
+  const sidebar = readFileSync(
+    new URL('../src/sidebarProvider.ts', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(assistantTypes, /threadId\?: string;/);
+  assert.match(protocol, /ThreadEventEnvelope/);
+  assert.match(protocol, /command: 'requestStarted';[\s\S]*threadId: string;/);
+  assert.match(sidebar, /private readonly threadEventAdapter = new ThreadEventAdapter\(\);/);
+  assert.match(sidebar, /threadId: message\.threadId/);
+  assert.match(
+    sidebar,
+    /const envelopes = this\.threadEventAdapter\.accept\(message\);[\s\S]*webview\.postMessage\(envelope\)[\s\S]*webview\.postMessage\(message\)/
+  );
+});

@@ -45,6 +45,7 @@ import { McpManager } from './mcpManager';
 import { buildAssistantPrompt } from './promptBuilder';
 import { countContextTokens } from './tokenCounter';
 import { AgentSessionController } from './agentSessionController';
+import { ThreadEventAdapter } from './threadEventAdapter';
 import {
   resolveRuntimeLocale,
   runtimeActionLabel,
@@ -136,6 +137,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly mcpManager: McpManager;
   private readonly sessionController: AgentSessionController;
   private readonly settingsManager: SettingsManager;
+  private readonly threadEventAdapter = new ThreadEventAdapter();
   private readonly state?: vscode.Memento;
 
   constructor(
@@ -432,7 +434,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private postToWebview(message: HostToWebviewMessage): Thenable<boolean> | undefined {
-    return this.view?.webview.postMessage(message);
+    const webview = this.view?.webview;
+    if (!webview) {
+      return undefined;
+    }
+
+    const envelopes = this.threadEventAdapter.accept(message);
+    for (const envelope of envelopes) {
+      void webview.postMessage(envelope);
+    }
+    return webview.postMessage(message);
   }
 
   stopAll(): void {
@@ -1118,6 +1129,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.postToWebview({
       command: 'requestStarted',
       cliId,
+      threadId: message.threadId ?? `${cliId}-unscoped`,
       sessionId: session.id,
       text: userText,
       mode,

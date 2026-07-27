@@ -7,6 +7,7 @@ import type {
 } from './assistantTypes';
 import type { ApiProviderSettings } from './apiProviders';
 import type { CliAuthAction, CliProfile } from './cliProfiles';
+import type { ThreadEventEnvelope } from './threadProtocol';
 
 export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | 'mcp' | string;
 
@@ -72,6 +73,7 @@ export type WebviewToHostMessage =
   | { command: 'reloadWindow' };
 
 export type HostToWebviewMessage =
+  | ThreadEventEnvelope
   | ({
       command: 'profiles';
       profiles: CliProfile[];
@@ -119,6 +121,7 @@ export type HostToWebviewMessage =
   | ({
       command: 'requestStarted';
       cliId: string;
+      threadId: string;
       sessionId: string;
       text: string;
       contextSummary: AssistantContextSummary;

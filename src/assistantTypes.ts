@@ -111,6 +111,7 @@ export interface AssistantRuntimeSelection {
 export interface AssistantWebviewRequest {
   cliId?: string;
   providerId?: string;
+  threadId?: string;
   text?: string;
   mode?: AssistantMode;
   agentMode?: string;
