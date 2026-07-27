@@ -3,6 +3,10 @@ import {
   type ErrorInfo,
   type ReactNode,
   useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,6 +26,14 @@ import {
   TurnView,
   type MarkdownRenderer,
 } from './threadItems';
+import {
+  compensateScrollOffset,
+  computeVirtualRange,
+  DEFAULT_TURN_HEIGHT,
+  distanceFromBottom,
+  isBottomPinned,
+  updateMeasuredHeight,
+} from './turnVirtualizer';
 
 const EMPTY_TURN_IDS: string[] = [];
 
@@ -59,6 +71,7 @@ export interface ConversationRootProps {
   providerId: string;
   threadId: string;
   renderMarkdown?: MarkdownRenderer | false;
+  scrollRoot?: HTMLElement;
 }
 
 export function createCodexRendererController(
@@ -113,6 +126,7 @@ export function ConversationRoot({
   providerId,
   threadId,
   renderMarkdown,
+  scrollRoot,
 }: ConversationRootProps) {
   const turnIds = useStoreSelection(
     store,
@@ -131,15 +145,234 @@ export function ConversationRoot({
       data-provider-id={providerId}
       data-thread-id={threadId}
     >
-      {turnIds.map((turnId) => (
-        <TurnSubscriber
-          key={turnId}
-          store={store}
-          threadId={threadId}
-          turnId={turnId}
-          renderMarkdown={renderMarkdown}
+      <VirtualTurnList
+        store={store}
+        threadId={threadId}
+        turnIds={turnIds}
+        renderMarkdown={renderMarkdown}
+        scrollRoot={scrollRoot}
+      />
+    </div>
+  );
+}
+
+export function VirtualTurnList({
+  store,
+  threadId,
+  turnIds,
+  renderMarkdown,
+  scrollRoot,
+}: {
+  store: ConversationStore;
+  threadId: string;
+  turnIds: string[];
+  renderMarkdown?: MarkdownRenderer | false;
+  scrollRoot?: HTMLElement;
+}) {
+  const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({});
+  const measuredHeightsRef = useRef(measuredHeights);
+  const [viewportHeight, setViewportHeight] = useState(
+    () => scrollRoot?.clientHeight ?? Number.POSITIVE_INFINITY
+  );
+  const [scrollOffset, setScrollOffset] = useState(() => scrollRoot?.scrollTop ?? 0);
+  const [pinned, setPinned] = useState(() =>
+    scrollRoot
+      ? isBottomPinned(
+          distanceFromBottom({
+            scrollHeight: scrollRoot.scrollHeight,
+            scrollTop: scrollRoot.scrollTop,
+            clientHeight: scrollRoot.clientHeight,
+          })
+        )
+      : true
+  );
+  const pinnedRef = useRef(pinned);
+  const bottomDistanceByThread = useRef(new Map<string, number>());
+
+  useEffect(() => {
+    measuredHeightsRef.current = measuredHeights;
+  }, [measuredHeights]);
+
+  useEffect(() => {
+    if (!scrollRoot) {
+      return;
+    }
+    const syncViewport = () => {
+      const distance = distanceFromBottom({
+        scrollHeight: scrollRoot.scrollHeight,
+        scrollTop: scrollRoot.scrollTop,
+        clientHeight: scrollRoot.clientHeight,
+      });
+      const nextPinned = isBottomPinned(distance);
+      pinnedRef.current = nextPinned;
+      setPinned(nextPinned);
+      setScrollOffset(scrollRoot.scrollTop);
+      setViewportHeight(scrollRoot.clientHeight);
+      bottomDistanceByThread.current.set(threadId, distance);
+    };
+    syncViewport();
+    scrollRoot.addEventListener('scroll', syncViewport, { passive: true });
+    const observer =
+      typeof ResizeObserver === 'function'
+        ? new ResizeObserver(syncViewport)
+        : undefined;
+    observer?.observe(scrollRoot);
+    return () => {
+      scrollRoot.removeEventListener('scroll', syncViewport);
+      observer?.disconnect();
+    };
+  }, [scrollRoot, threadId]);
+
+  useEffect(() => {
+    if (!scrollRoot) {
+      return;
+    }
+    const savedDistance = bottomDistanceByThread.current.get(threadId) ?? 0;
+    const frame = window.requestAnimationFrame(() => {
+      scrollRoot.scrollTop = Math.max(
+        0,
+        scrollRoot.scrollHeight - scrollRoot.clientHeight - savedDistance
+      );
+    });
+    return () => {
+      bottomDistanceByThread.current.set(
+        threadId,
+        distanceFromBottom({
+          scrollHeight: scrollRoot.scrollHeight,
+          scrollTop: scrollRoot.scrollTop,
+          clientHeight: scrollRoot.clientHeight,
+        })
+      );
+      window.cancelAnimationFrame(frame);
+    };
+  }, [scrollRoot, threadId]);
+
+  const range = useMemo(
+    () =>
+      computeVirtualRange({
+        turnIds,
+        measuredHeights,
+        viewportHeight,
+        scrollOffset,
+      }),
+    [measuredHeights, scrollOffset, turnIds, viewportHeight]
+  );
+
+  const measureTurn = useCallback(
+    (turnId: string, turnIndex: number, nextHeight: number) => {
+      const currentHeights = measuredHeightsRef.current;
+      const previousHeight = currentHeights[turnId] ?? DEFAULT_TURN_HEIGHT;
+      const nextHeights = updateMeasuredHeight(currentHeights, turnId, nextHeight);
+      if (nextHeights === currentHeights) {
+        return;
+      }
+      measuredHeightsRef.current = nextHeights;
+      setMeasuredHeights(nextHeights);
+
+      if (!scrollRoot) {
+        return;
+      }
+      if (pinnedRef.current) {
+        window.requestAnimationFrame(() => {
+          scrollRoot.scrollTop = scrollRoot.scrollHeight;
+        });
+        return;
+      }
+      scrollRoot.scrollTop = compensateScrollOffset({
+        scrollTop: scrollRoot.scrollTop,
+        anchorIndex: range.start,
+        changedIndex: turnIndex,
+        previousHeight,
+        nextHeight,
+      });
+    },
+    [range.start, scrollRoot]
+  );
+
+  const visibleTurnIds =
+    range.end >= range.start ? turnIds.slice(range.start, range.end + 1) : [];
+
+  return (
+    <>
+      {range.before > 0 ? (
+        <div
+          className="conversation-virtual-spacer is-before"
+          style={{ height: range.before }}
+          aria-hidden="true"
         />
-      ))}
+      ) : null}
+      {visibleTurnIds.map((turnId, visibleIndex) => {
+        const turnIndex = range.start + visibleIndex;
+        return (
+          <MeasuredTurn
+            key={turnId}
+            turnId={turnId}
+            turnIndex={turnIndex}
+            onMeasure={measureTurn}
+          >
+            <TurnSubscriber
+              store={store}
+              threadId={threadId}
+              turnId={turnId}
+              renderMarkdown={renderMarkdown}
+            />
+          </MeasuredTurn>
+        );
+      })}
+      {range.after > 0 ? (
+        <div
+          className="conversation-virtual-spacer is-after"
+          style={{ height: range.after }}
+          aria-hidden="true"
+        />
+      ) : null}
+      {!pinned && scrollRoot ? (
+        <button
+          type="button"
+          className="conversation-scroll-bottom"
+          aria-label="Scroll to bottom"
+          onClick={() => {
+            scrollRoot.scrollTop = scrollRoot.scrollHeight;
+          }}
+        >
+          ↓
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function MeasuredTurn({
+  turnId,
+  turnIndex,
+  onMeasure,
+  children,
+}: {
+  turnId: string;
+  turnIndex: number;
+  onMeasure(turnId: string, turnIndex: number, height: number): void;
+  children: ReactNode;
+}) {
+  const elementRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) {
+      return;
+    }
+    const measure = () => onMeasure(turnId, turnIndex, element.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver !== 'function') {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onMeasure, turnId, turnIndex]);
+
+  return (
+    <div className="conversation-turn-measure" data-virtual-turn-id={turnId} ref={elementRef}>
+      {children}
     </div>
   );
 }
@@ -322,6 +555,7 @@ function renderMountedRenderer(): void {
         providerId={options.providerId}
         threadId={options.threadId}
         renderMarkdown={options.renderMarkdown}
+        scrollRoot={options.container}
       />
     </RendererErrorBoundary>
   );
@@ -334,4 +568,3 @@ if (typeof window !== 'undefined') {
     }
   ).AgentsGuiCodexRenderer = codexRendererApi;
 }
-

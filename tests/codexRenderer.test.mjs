@@ -208,3 +208,94 @@ test('build config emits the browser renderer bundle with locked React dependenc
   assert.match(buildSource, /platform: 'browser'/);
   assert.equal(existsSync(new URL('../media/codex-renderer.js', import.meta.url)), true);
 });
+
+test('conversation root virtualizes long threads by turn with spacer geometry', () => {
+  const controller = createCodexRendererController({
+    requestFrame: () => 1,
+    cancelFrame: () => {},
+    isHidden: () => true,
+    persist: () => {},
+  });
+  let sequence = 1;
+  controller.dispatch({
+    command: 'threadEvent',
+    providerId: 'codex',
+    threadId: 'thread-long',
+    sequence: sequence++,
+    event: {
+      type: 'thread/started',
+      thread: {
+        id: 'thread-long',
+        providerId: 'codex',
+        title: 'Long',
+        status: 'running',
+        updatedAt: 10,
+      },
+    },
+  });
+  for (let index = 0; index < 40; index += 1) {
+    const turnId = `turn-${index}`;
+    controller.dispatch({
+      command: 'threadEvent',
+      providerId: 'codex',
+      threadId: 'thread-long',
+      sequence: sequence++,
+      event: {
+        type: 'turn/started',
+        turn: { id: turnId, status: 'running', startedAt: index },
+      },
+    });
+    controller.dispatch({
+      command: 'threadEvent',
+      providerId: 'codex',
+      threadId: 'thread-long',
+      sequence: sequence++,
+      event: {
+        type: 'item/started',
+        item: {
+          id: `${turnId}:user`,
+          turnId,
+          type: 'user-message',
+          status: 'completed',
+          content: `${index}`,
+          startedAt: index,
+          completedAt: index,
+        },
+      },
+    });
+    controller.dispatch({
+      command: 'threadEvent',
+      providerId: 'codex',
+      threadId: 'thread-long',
+      sequence: sequence++,
+      event: {
+        type: 'turn/completed',
+        turnId,
+        status: 'completed',
+        completedAt: index,
+      },
+    });
+  }
+
+  const scrollRoot = {
+    clientHeight: 560,
+    scrollTop: 2800,
+    scrollHeight: 11200,
+  };
+  const markup = renderToStaticMarkup(
+    React.createElement(ConversationRoot, {
+      store: controller.store,
+      providerId: 'codex',
+      threadId: 'thread-long',
+      renderMarkdown: false,
+      scrollRoot,
+    })
+  );
+
+  assert.match(markup, /class="conversation-virtual-spacer is-before"/);
+  assert.match(markup, /height:1120px/);
+  assert.doesNotMatch(markup, /data-turn-id="turn-0"/);
+  assert.match(markup, /data-turn-id="turn-4"/);
+  assert.match(markup, /data-turn-id="turn-17"/);
+  assert.doesNotMatch(markup, /data-turn-id="turn-18"/);
+});
