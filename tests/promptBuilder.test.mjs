@@ -2491,7 +2491,7 @@ test('webview refreshes context after a concrete provider is active', () => {
   assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
   assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
-  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*renderAll\(\);/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*mountCodexRenderer\(\);[\s\S]*renderAll\(\);/);
 });
 
 test('webview empty state is visible in large blank panels', () => {
@@ -3069,7 +3069,7 @@ test('webview does not persist transient running message state', () => {
   assert.match(conversationSource, /const safeDurationMs = normalizeDurationMs\(durationMs\);/);
   assert.match(script, /normalizeAssistantText: \(text\) => filterInternalPromptEcho\(text\)\.text/);
   assert.match(conversationSource, /running: false,\s*text: normalizeAssistantText\(message\.text\)/s);
-  assert.match(script, /case 'sessionNotice':\s*updateSessionNotice\(message\);/);
+  assert.match(script, /case 'sessionNotice':\s*if \(!codexRendererEnabled\) \{\s*updateSessionNotice\(message\);\s*\}/);
   assert.match(script, /case 'sessionInputResult':/);
   assert.match(script, /i18n\.t\('claude\.approval\.unavailable'\)/);
   assert.match(script, /item\.runningNotice = normalizeMessageText\(message\.text\);/);

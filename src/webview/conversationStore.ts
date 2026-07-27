@@ -20,6 +20,14 @@ export interface ConversationStore {
     threadsByProvider: Record<string, LegacyThread[]> | undefined,
     activeThreadByProvider?: Record<string, string>
   ): void;
+  ensureThread(
+    providerId: string,
+    threadId: string,
+    title?: string,
+    updatedAt?: number
+  ): void;
+  setActiveThread(providerId: string, threadId: string): boolean;
+  deleteThread(providerId: string, threadId: string): boolean;
   getConversationHistory(providerId: string, threadId: string): ReturnType<
     typeof projectConversationHistory
   >;
@@ -82,6 +90,83 @@ export function createConversationStore(
     hydrateLegacy(threadsByProvider, activeThreadByProvider) {
       hydrate(migrateLegacyConversations(threadsByProvider, activeThreadByProvider));
     },
+    ensureThread(providerId, threadId, title = 'New session', updatedAt = Date.now()) {
+      if (!providerId || !threadId || snapshot.threadsById[threadId]) {
+        return;
+      }
+      const order = snapshot.threadOrderByProvider[providerId] ?? [];
+      snapshot = {
+        ...snapshot,
+        threadsById: {
+          ...snapshot.threadsById,
+          [threadId]: {
+            id: threadId,
+            providerId,
+            title,
+            status: 'idle',
+            turnOrder: [],
+            turnsById: {},
+            updatedAt,
+          },
+        },
+        threadOrderByProvider: {
+          ...snapshot.threadOrderByProvider,
+          [providerId]: [...order, threadId],
+        },
+        activeThreadByProvider: snapshot.activeThreadByProvider[providerId]
+          ? snapshot.activeThreadByProvider
+          : { ...snapshot.activeThreadByProvider, [providerId]: threadId },
+      };
+      notify();
+    },
+    setActiveThread(providerId, threadId) {
+      const thread = snapshot.threadsById[threadId];
+      if (!thread || thread.providerId !== providerId) {
+        return false;
+      }
+      if (snapshot.activeThreadByProvider[providerId] === threadId) {
+        return true;
+      }
+      snapshot = {
+        ...snapshot,
+        activeThreadByProvider: {
+          ...snapshot.activeThreadByProvider,
+          [providerId]: threadId,
+        },
+      };
+      notify();
+      return true;
+    },
+    deleteThread(providerId, threadId) {
+      const thread = snapshot.threadsById[threadId];
+      if (!thread || thread.providerId !== providerId) {
+        return false;
+      }
+      const threadsById = { ...snapshot.threadsById };
+      delete threadsById[threadId];
+      const order = (snapshot.threadOrderByProvider[providerId] ?? []).filter(
+        (id) => id !== threadId
+      );
+      const activeThreadByProvider = { ...snapshot.activeThreadByProvider };
+      if (activeThreadByProvider[providerId] === threadId) {
+        if (order[0]) {
+          activeThreadByProvider[providerId] = order[0];
+        } else {
+          delete activeThreadByProvider[providerId];
+        }
+      }
+      snapshot = {
+        ...snapshot,
+        threadsById,
+        threadOrderByProvider: {
+          ...snapshot.threadOrderByProvider,
+          [providerId]: order,
+        },
+        activeThreadByProvider,
+      };
+      notify();
+      return true;
+    },
     getConversationHistory(providerId, threadId) {
       return projectConversationHistory(snapshot, providerId, threadId);
     },
@@ -90,4 +175,3 @@ export function createConversationStore(
     },
   };
 }
-

@@ -60,6 +60,14 @@ export interface CodexRendererController {
     threadId: string
   ): ReturnType<ConversationStore['getConversationHistory']>;
   getThreadSummaries(): ReturnType<ConversationStore['getThreadSummaries']>;
+  ensureThread(
+    providerId: string,
+    threadId: string,
+    title?: string,
+    updatedAt?: number
+  ): void;
+  setActiveThread(providerId: string, threadId: string): boolean;
+  deleteThread(providerId: string, threadId: string): boolean;
   serialize(): ConversationSnapshot;
   onThreadSwitch(): void;
   onHidden(): void;
@@ -111,6 +119,9 @@ export function createCodexRendererController(
     hydrateLegacy: store.hydrateLegacy,
     getConversationHistory: store.getConversationHistory,
     getThreadSummaries: store.getThreadSummaries,
+    ensureThread: store.ensureThread,
+    setActiveThread: store.setActiveThread,
+    deleteThread: store.deleteThread,
     serialize: store.getSnapshot,
     onThreadSwitch: persistence.onThreadSwitch,
     onHidden: persistence.onHidden,
@@ -477,6 +488,14 @@ export interface CodexRendererGlobalApi {
     ConversationStore['getConversationHistory']
   >;
   getThreadSummaries(): ReturnType<ConversationStore['getThreadSummaries']>;
+  ensureThread(
+    providerId: string,
+    threadId: string,
+    title?: string,
+    updatedAt?: number
+  ): void;
+  setActiveThread(providerId: string, threadId: string): boolean;
+  deleteThread(providerId: string, threadId: string): boolean;
   serialize(): ConversationSnapshot | undefined;
   onHidden(): void;
   dispose(): void;
@@ -517,6 +536,12 @@ export const codexRendererApi: CodexRendererGlobalApi = {
     if (!mountedRenderer) {
       return;
     }
+    if (
+      mountedRenderer.options.providerId === providerId &&
+      mountedRenderer.options.threadId === threadId
+    ) {
+      return;
+    }
     mountedRenderer.options.providerId = providerId;
     mountedRenderer.options.threadId = threadId;
     mountedRenderer.controller.onThreadSwitch();
@@ -529,6 +554,15 @@ export const codexRendererApi: CodexRendererGlobalApi = {
   },
   getThreadSummaries() {
     return mountedRenderer?.controller.getThreadSummaries() ?? [];
+  },
+  ensureThread(providerId, threadId, title, updatedAt) {
+    mountedRenderer?.controller.ensureThread(providerId, threadId, title, updatedAt);
+  },
+  setActiveThread(providerId, threadId) {
+    return mountedRenderer?.controller.setActiveThread(providerId, threadId) ?? false;
+  },
+  deleteThread(providerId, threadId) {
+    return mountedRenderer?.controller.deleteThread(providerId, threadId) ?? false;
   },
   serialize() {
     return mountedRenderer?.controller.serialize();

@@ -183,6 +183,11 @@
           "default": "opencode",
           "description": "%config.defaultProvider.description%"
         },
+        "agents-gui.experimental.codexRenderer": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.experimental.codexRenderer.description%"
+        },
         "agents-gui.context.includeWorkspace": {
           "type": "boolean",
           "default": true,

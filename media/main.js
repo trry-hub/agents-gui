@@ -17,6 +17,9 @@
   const providerOptions = window.AgentsGuiProviderOptions;
   const stateManager = window.AgentsGuiStateManager;
   const pacedReveal = window.AgentsGuiPacedReveal;
+  const codexRenderer = window.AgentsGuiCodexRenderer;
+  const codexRendererEnabled = document.body.dataset.codexRenderer === 'true'
+    && Boolean(codexRenderer);
   const normalizeMessageText = messageText.normalizeMessageText;
   const stripInlineMarkdown = messageText.stripInlineMarkdown;
   const appendInlineMarkdown = inlineMarkdown.appendInlineMarkdown;
@@ -387,6 +390,7 @@
       activePermissionByProvider,
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
+      conversationSnapshot: codexRendererEnabled ? codexRenderer.serialize() : undefined,
       threadsByProvider: conversationStore.serializeThreadsForState(threadsByProvider),
       tasks: serializeTasksForState(tasks),
       activeThreadByProvider,
@@ -838,16 +842,51 @@
     );
   }
 
+  function codexThreadSummaries(providerId) {
+    if (!codexRendererEnabled) {
+      return [];
+    }
+    return codexRenderer.getThreadSummaries()
+      .filter((thread) => !providerId || thread.providerId === providerId);
+  }
+
+  function codexThreadSummary(providerId, threadId) {
+    return codexThreadSummaries(providerId)
+      .find((thread) => thread.id === threadId);
+  }
+
   function setActiveThread(cliId, thread) {
-    return conversationStore.setActiveThread(threadsByProvider, activeThreadByProvider, cliId, thread);
+    const active = conversationStore.setActiveThread(
+      threadsByProvider,
+      activeThreadByProvider,
+      cliId,
+      thread
+    );
+    if (codexRendererEnabled && active) {
+      codexRenderer.ensureThread(cliId, thread.id, thread.title, thread.updatedAt);
+      codexRenderer.setActiveThread(cliId, thread.id);
+    }
+    return active;
   }
 
   function startNewThread(cliId = activeId) {
     const current = ensureActiveThread(cliId);
-    if (!current || current.messages.length > 0) {
+    const currentSummary = current
+      ? codexThreadSummary(cliId, current.id)
+      : undefined;
+    if (
+      !current ||
+      current.messages.length > 0 ||
+      Boolean(currentSummary?.turnCount)
+    ) {
       setActiveThread(cliId, createThread(cliId));
     } else {
       setActiveThread(cliId, current);
+    }
+    const thread = ensureActiveThread(cliId);
+    if (codexRendererEnabled && thread) {
+      codexRenderer.ensureThread(cliId, thread.id, thread.title, thread.updatedAt);
+      codexRenderer.setActiveThread(cliId, thread.id);
     }
     persist();
     renderAll();
@@ -867,8 +906,11 @@
       return false;
     }
 
-    return ensureThreadList(cliId).length > 1 ||
+    return (codexRendererEnabled
+      ? codexThreadSummaries(cliId).length
+      : ensureThreadList(cliId).length) > 1 ||
       thread.messages.length > 0 ||
+      Boolean(codexThreadSummary(cliId, thread.id)?.turnCount) ||
       Boolean(thread.openCodeSessionId);
   }
 
@@ -894,6 +936,9 @@
     }
 
     const deletedOpenCodeSessionId = cliId === 'opencode' ? thread.openCodeSessionId : '';
+    if (codexRendererEnabled) {
+      codexRenderer.deleteThread(cliId, thread.id);
+    }
     const threads = ensureThreadList(cliId);
     const remainingThreads = threads.filter((item) => item.id !== thread.id);
     const shouldDeleteRemoteOpenCodeSession =
@@ -1025,7 +1070,10 @@
   }
 
   function conversationHistoryForSend(cliId) {
-    return ensureConversation(cliId, activeThreadId(cliId))
+    const conversation = codexRendererEnabled
+      ? codexRenderer.getConversationHistory(cliId, activeThreadId(cliId))
+      : ensureConversation(cliId, activeThreadId(cliId));
+    return conversation
       .filter((message) => (
         message &&
         !message.running &&
@@ -2758,7 +2806,7 @@
       return;
     }
 
-    const threads = ensureThreadList(activeId)
+    const threads = threadsForShell(activeId)
       .slice()
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -2775,6 +2823,24 @@
     newChatBtn.disabled = !activeId;
   }
 
+  function threadsForShell(providerId) {
+    if (!codexRendererEnabled) {
+      return ensureThreadList(providerId);
+    }
+    return codexThreadSummaries(providerId).map((summary) => {
+      const legacy = findThread(providerId, summary.id);
+      return {
+        ...(legacy || {}),
+        id: summary.id,
+        title: summary.title,
+        updatedAt: summary.updatedAt,
+        messages: [],
+        rendererStatus: summary.status,
+        turnCount: summary.turnCount,
+      };
+    });
+  }
+
   function historyProviderIds() {
     const ids = new Set();
     profiles.forEach((profile) => {
@@ -2787,6 +2853,7 @@
         ids.add(providerId);
       }
     });
+    codexThreadSummaries().forEach((thread) => ids.add(thread.providerId));
     if (activeId) {
       ids.add(activeId);
     }
@@ -2798,6 +2865,12 @@
   }
 
   function historyStatusForThread(providerId, thread) {
+    if (codexRendererEnabled && thread?.rendererStatus) {
+      if (thread.rendererStatus === 'idle') {
+        return thread.turnCount > 0 ? 'answered' : 'empty';
+      }
+      return thread.rendererStatus;
+    }
     return sessionHistoryState.threadStatus(thread, {
       providerId,
       tasks,
@@ -2968,7 +3041,7 @@
     // separate group section.
     const allThreads = [];
     for (const providerId of historyProviderIds()) {
-      const threads = sessionHistoryState.sortedThreads(threadsByProvider[providerId] || []);
+      const threads = sessionHistoryState.sortedThreads(threadsForShell(providerId));
       threads.forEach((thread) => {
         allThreads.push({ providerId, thread });
       });
@@ -6746,6 +6819,50 @@
     codexTerminalBanner.hidden = activeId !== 'codex' || !codexRunning || taskBoardVisible;
   }
 
+  function mountCodexRenderer() {
+    if (!codexRendererEnabled || !messages) {
+      return;
+    }
+    const thread = activeId ? ensureActiveThread(activeId) : null;
+    codexRenderer.mount({
+      container: messages,
+      providerId: activeId,
+      threadId: thread?.id || '',
+      snapshot: saved.conversationSnapshot,
+      legacyThreads: threadsByProvider,
+      activeThreadByProvider,
+      persist: () => persist(),
+      renderMarkdown: (container, item) => {
+        renderMarkdownWithActivity(
+          container,
+          normalizeMessageText(item.content),
+          item.activity,
+          undefined,
+          item.status === 'running',
+          `${item.turnId}:${item.id}`
+        );
+      },
+      onDisable: () => vscode.postMessage({ command: 'disableCodexRenderer' }),
+    });
+    for (const [providerId, threads] of Object.entries(threadsByProvider)) {
+      for (const item of threads) {
+        codexRenderer.ensureThread(providerId, item.id, item.title, item.updatedAt);
+      }
+    }
+  }
+
+  function syncCodexRendererContext() {
+    if (!codexRendererEnabled || !activeId) {
+      return;
+    }
+    const thread = ensureActiveThread(activeId);
+    if (!thread) {
+      return;
+    }
+    codexRenderer.ensureThread(activeId, thread.id, thread.title, thread.updatedAt);
+    codexRenderer.setActiveContext(activeId, thread.id);
+  }
+
   /**
    * Main render function - called by stateManager on state changes
    * Also called directly for backward compatibility during migration
@@ -6768,7 +6885,11 @@
     renderContextBudget();
     renderOpenCodeSidebar();
     renderOpenCodeStatusDialog();
-    renderMessages();
+    if (codexRendererEnabled) {
+      syncCodexRendererContext();
+    } else {
+      renderMessages();
+    }
     renderAttachmentStrip();
     renderComposer();
     if (apiSettingsPage && !apiSettingsPage.hidden) {
@@ -6850,6 +6971,7 @@
       permissionMode: activePermissionId(providerId),
       action,
       attachments,
+      threadId: activeThreadId(providerId),
       conversationHistory: conversationHistoryForSend(providerId),
       contextOptions: defaultContextOptions(),
     });
@@ -7168,6 +7290,17 @@
         target?.threadId
       );
     }
+    persist();
+    renderAll();
+  }
+
+  function markCodexSessionEnded(message) {
+    const wasStopped = stoppedSessionIds.delete(message.sessionId);
+    updateTaskStatus(taskBySessionId[message.sessionId], {
+      status: wasStopped ? 'stopped' : (Number(message.exitCode) === 0 ? 'completed' : 'failed'),
+    });
+    delete taskBySessionId[message.sessionId];
+    providerRunState.clearProviderRunState(providerRunStore, message.cliId);
     persist();
     renderAll();
   }
@@ -10110,6 +10243,17 @@
       case 'openProviderSettings':
         openSettingsPage(message.section);
         break;
+      case 'threadEvent':
+        codexRenderer?.dispatch(message);
+        if (
+          codexRendererEnabled &&
+          message.event?.type !== 'item/assistantMessage/delta' &&
+          message.event?.type !== 'item/reasoning/delta'
+        ) {
+          renderThreadSelect();
+          renderSessionHistory();
+        }
+        break;
       case 'requestStarted':
         if (!activeId || !installedProfiles().some((profile) => profile.id === activeId)) {
           activeId = message.cliId;
@@ -10117,7 +10261,9 @@
         providerRunState.markProviderRunning(providerRunStore, message.cliId);
         activeAgentModeByProvider[message.cliId] = message.agentMode || activeAgentModeId(message.cliId);
         {
-          const threadId = providerRunState.pendingThreadId(providerRunStore, message.cliId) || activeThreadId(message.cliId);
+          const threadId = message.threadId ||
+            providerRunState.pendingThreadId(providerRunStore, message.cliId) ||
+            activeThreadId(message.cliId);
           const taskId = providerRunState.takePendingTaskId(providerRunStore, message.cliId) || createRunTask(
             message.cliId,
             message.action,
@@ -10132,41 +10278,47 @@
             agentMode: message.agentModeLabel || message.agentMode || '',
           });
           activeThreadByProvider[message.cliId] = threadId;
-          addMessage(
-            message.cliId,
-            'user',
-            normalizeMessageText(message.text),
-            `${message.actionLabel}${i18n.t('message.metaSeparator')}${agentModeLabel(message.agentMode)}`,
-            false,
-            threadId,
-            message.attachments
-          );
-          const assistant = addMessage(
-            message.cliId,
-            'assistant',
-            '',
-            mergeMessageMeta(
-              summarizeRuntimeSelection(message),
-              summarizeRequestContext(message.contextSummary)
-            ),
-            true,
-            threadId
-          );
-          streamTargets[message.sessionId] = {
-            cliId: message.cliId,
-            threadId,
-            index: assistant.index,
-            buffer: '',
-          };
-          if (message.apiProviderWarning) {
-            addMessage(message.cliId, 'system', normalizeMessageText(message.apiProviderWarning), undefined, false, threadId);
+          if (codexRendererEnabled) {
+            codexRenderer.setActiveContext(message.cliId, threadId);
+          } else {
+            addMessage(
+              message.cliId,
+              'user',
+              normalizeMessageText(message.text),
+              `${message.actionLabel}${i18n.t('message.metaSeparator')}${agentModeLabel(message.agentMode)}`,
+              false,
+              threadId,
+              message.attachments
+            );
+            const assistant = addMessage(
+              message.cliId,
+              'assistant',
+              '',
+              mergeMessageMeta(
+                summarizeRuntimeSelection(message),
+                summarizeRequestContext(message.contextSummary)
+              ),
+              true,
+              threadId
+            );
+            streamTargets[message.sessionId] = {
+              cliId: message.cliId,
+              threadId,
+              index: assistant.index,
+              buffer: '',
+            };
+            if (message.apiProviderWarning) {
+              addMessage(message.cliId, 'system', normalizeMessageText(message.apiProviderWarning), undefined, false, threadId);
+            }
           }
         }
         persist();
         renderAll();
         break;
       case 'output':
-        updateStream(message);
+        if (!codexRendererEnabled) {
+          updateStream(message);
+        }
         break;
       case 'openCodeNativeCommandResult':
         if (message.ok && message.nativeCommand === 'fork' && handleOpenCodeForkResult(message)) {
@@ -10183,7 +10335,9 @@
         renderAll();
         break;
       case 'sessionNotice':
-        updateSessionNotice(message);
+        if (!codexRendererEnabled) {
+          updateSessionNotice(message);
+        }
         break;
       case 'sessionInputResult':
         if (!message.ok) {
@@ -10199,16 +10353,22 @@
         }
         break;
       case 'sessionEnd':
-        markSessionEnded(message);
+        if (codexRendererEnabled) {
+          markCodexSessionEnded(message);
+        } else {
+          markSessionEnded(message);
+        }
         break;
       case 'stopped':
         providerRunState.clearProviderRunState(providerRunStore, message.cliId);
         {
           stoppedSessionIds.add(message.sessionId);
-          const target = finishStreamTarget(message);
           updateTaskStatus(taskBySessionId[message.sessionId], { status: 'stopped' });
           delete taskBySessionId[message.sessionId];
-          addMessage(message.cliId, 'system', i18n.t('message.runStopped'), undefined, false, target?.threadId);
+          if (!codexRendererEnabled) {
+            const target = finishStreamTarget(message);
+            addMessage(message.cliId, 'system', i18n.t('message.runStopped'), undefined, false, target?.threadId);
+          }
         }
         renderAll();
         break;
@@ -10216,11 +10376,13 @@
         providerRunState.clearProviderRunState(providerRunStore, message.cliId || activeId);
         updateTaskStatus(taskBySessionId[message.sessionId], { status: 'failed' });
         delete taskBySessionId[message.sessionId];
-        addMessage(
-          message.cliId || activeId,
-          'error',
-          normalizeMessageText(message.text) || i18n.t('message.unknownError')
-        );
+        if (!codexRendererEnabled) {
+          addMessage(
+            message.cliId || activeId,
+            'error',
+            normalizeMessageText(message.text) || i18n.t('message.unknownError')
+          );
+        }
         renderAll();
         break;
     }
@@ -10230,5 +10392,16 @@
   vscode.postMessage({ command: 'refreshApiProviderSettings' });
   applySessionHistoryWidth(sessionHistoryWidth);
   initSessionHistoryResizer();
+  mountCodexRenderer();
+  document.addEventListener('visibilitychange', () => {
+    if (codexRendererEnabled && document.hidden) {
+      codexRenderer.onHidden();
+    }
+  });
+  window.addEventListener('beforeunload', () => {
+    if (codexRendererEnabled) {
+      codexRenderer.dispose();
+    }
+  });
   renderAll();
 })();

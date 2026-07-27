@@ -17,6 +17,7 @@
   "command.setupCommitMessage.title": "Agents GUI：配置 Git 提交信息生成",
   "config.title": "Agents GUI",
   "config.defaultProvider.description": "编辑器命令默认使用的 AI 提供方。",
+  "config.experimental.codexRenderer.description": "启用实验性的 Codex 对齐 React 会话渲染器。",
   "config.includeWorkspace.description": "向助手请求附加工作区元数据。",
   "config.includeCurrentFile.description": "向助手请求附加当前活动文件。",
   "config.includeSelection.description": "向助手请求附加当前编辑器选区。",

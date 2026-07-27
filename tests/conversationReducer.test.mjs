@@ -264,3 +264,20 @@ test('empty snapshots have stable versioned shape', () => {
   });
 });
 
+test('store owns local thread creation, selection, and deletion for the legacy shell bridge', () => {
+  const store = createConversationStore();
+  store.ensureThread('codex', 'thread-1', 'First', 10);
+  store.ensureThread('codex', 'thread-2', 'Second', 20);
+  store.setActiveThread('codex', 'thread-2');
+
+  assert.equal(store.getSnapshot().activeThreadByProvider.codex, 'thread-2');
+  assert.deepEqual(store.getThreadSummaries().map(({ id }) => id), [
+    'thread-1',
+    'thread-2',
+  ]);
+
+  assert.equal(store.deleteThread('codex', 'thread-2'), true);
+  assert.equal(store.getSnapshot().threadsById['thread-2'], undefined);
+  assert.equal(store.getSnapshot().activeThreadByProvider.codex, 'thread-1');
+  assert.equal(store.deleteThread('codex', 'missing'), false);
+});

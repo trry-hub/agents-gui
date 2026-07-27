@@ -124,6 +124,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private profilesById = new Map<string, CliProfile>();
   private webviewAssetVersion = Date.now();
   private webviewReloadTimer?: ReturnType<typeof setTimeout>;
+  private codexRendererDisabledForSession = false;
   private readonly locale = resolveRuntimeLocale(vscode.env.language);
   private readonly contextCollector: AssistantContextCollector;
   private readonly extensionMode: vscode.ExtensionMode;
@@ -297,6 +298,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'saveSelectionState':
           await this.saveSelectionState(message);
+          break;
+        case 'disableCodexRenderer':
+          await this.disableCodexRenderer();
           break;
         case 'reloadWindow':
           await vscode.commands.executeCommand('agents-gui.reloadWindow');
@@ -1432,7 +1436,37 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getHtml(webview: vscode.Webview): string {
-    return renderWebviewHtml({ extensionUri: this.extensionUri, webview, locale: this.locale });
+    return renderWebviewHtml({
+      extensionUri: this.extensionUri,
+      webview,
+      locale: this.locale,
+      codexRendererEnabled: this.isCodexRendererEnabled(),
+    });
+  }
+
+  private isCodexRendererEnabled(): boolean {
+    if (this.codexRendererDisabledForSession) {
+      return false;
+    }
+    return (
+      this.extensionMode === vscode.ExtensionMode.Development ||
+      vscode.workspace
+        .getConfiguration('agents-gui')
+        .get<boolean>('experimental.codexRenderer', false)
+    );
+  }
+
+  private async disableCodexRenderer(): Promise<void> {
+    this.codexRendererDisabledForSession = true;
+    await vscode.workspace
+      .getConfiguration('agents-gui')
+      .update('experimental.codexRenderer', false, vscode.ConfigurationTarget.Global);
+    if (this.view) {
+      this.webviewAssetVersion = Date.now();
+      this.view.webview.html = this.getHtml(this.view.webview);
+      await this.sendProfiles();
+      await this.sendContextSummary();
+    }
   }
 
   dispose(options: { disposeContextCollector?: boolean } = {}): void {

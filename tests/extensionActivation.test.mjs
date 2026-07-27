@@ -176,7 +176,7 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(sidebarSource, /import \{ renderWebviewHtml \} from '\.\/webviewHtmlRenderer';/);
   assert.match(
     sidebarSource,
-    /return renderWebviewHtml\(\{ extensionUri: this\.extensionUri, webview, locale: this\.locale \}\)/
+    /return renderWebviewHtml\(\{[\s\S]*extensionUri: this\.extensionUri,[\s\S]*webview,[\s\S]*locale: this\.locale,[\s\S]*codexRendererEnabled: this\.isCodexRendererEnabled\(\),[\s\S]*\}\)/
   );
   assert.doesNotMatch(sidebarSource, /fs\.readFileSync\(htmlPath/);
   assert.match(webviewHtmlRendererSource, /export function renderWebviewHtml/);

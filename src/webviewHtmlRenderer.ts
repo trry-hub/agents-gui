@@ -22,6 +22,7 @@ const WEBVIEW_ASSETS = [
   ['__PROVIDER_OPTIONS_JS_URI__', ['media', 'providerOptions.js']],
   ['__STATE_MANAGER_JS_URI__', ['media', 'stateManager.js']],
   ['__PACED_REVEAL_JS_URI__', ['media', 'pacedReveal.js']],
+  ['__CODEX_RENDERER_JS_URI__', ['media', 'codex-renderer.js']],
   ['__MAIN_JS_URI__', ['media', 'main.js']],
 ] as const;
 
@@ -29,6 +30,7 @@ export function renderWebviewHtml(options: {
   extensionUri: vscode.Uri;
   webview: vscode.Webview;
   locale: RuntimeLocale;
+  codexRendererEnabled: boolean;
 }): string {
   const htmlPath = path.join(options.extensionUri.fsPath, 'media', 'main.html');
   let html = fs.readFileSync(htmlPath, 'utf8');
@@ -47,6 +49,10 @@ export function renderWebviewHtml(options: {
   html = html.replace('__CSP__', csp);
   html = html.replace(/__NONCE__/g, nonce);
   html = html.replace(/__LOCALE__/g, options.locale);
+  html = html.replace(
+    /__CODEX_RENDERER_ENABLED__/g,
+    String(options.codexRendererEnabled)
+  );
   for (const [placeholder, assetPath] of WEBVIEW_ASSETS) {
     html = html.replace(
       new RegExp(placeholder, 'g'),

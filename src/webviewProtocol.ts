@@ -70,6 +70,7 @@ export type WebviewToHostMessage =
   | { command: 'setOpenCodeModelVariant'; modelId?: string; variant?: string }
   | { command: 'copyMessageText'; text?: string }
   | { command: 'saveSelectionState'; state?: unknown }
+  | { command: 'disableCodexRenderer' }
   | { command: 'reloadWindow' };
 
 export type HostToWebviewMessage =
