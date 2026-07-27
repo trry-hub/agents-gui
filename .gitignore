@@ -4,6 +4,7 @@ dist/
 .vscode-test/
 .playwright-mcp/
 .tmp/
+.worktrees/
 *.vsix
 WCDB_Contact*.sqlite*
 .aider*

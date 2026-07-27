@@ -226,17 +226,20 @@ The reducer is tolerant of provider timing differences:
 | `stopped` | `turn/completed` with `stopped` |
 | `error` | `system-error` item followed by failed `turn/completed` |
 
-The host session ID is the turn ID. Initial user, assistant, and reasoning IDs
-are derived deterministically:
+The host runtime session ID remains the correlation key for provider output.
+It is not the turn ID because stdin-based providers may reuse one runtime
+session across multiple user requests. Each `requestStarted` creates a unique
+turn ID and binds the runtime session's subsequent output to that active turn.
+Initial user, assistant, and reasoning IDs are derived deterministically:
 
 ```text
-<sessionId>:user
-<sessionId>:assistant
-<sessionId>:reasoning
+<turnId>:user
+<turnId>:assistant
+<turnId>:reasoning
 ```
 
 Provider activity IDs are used when present. Otherwise the adapter derives an
-ID from the session ID, activity kind, and provider activity key.
+ID from the turn ID, activity kind, and provider activity key.
 
 ## State Ownership
 
