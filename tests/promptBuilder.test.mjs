@@ -687,6 +687,7 @@ test('cli manager warms and attaches background CLI servers when available', () 
   const openCodeClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
+  const openCodePathsSource = readFileSync(new URL('../src/openCodePaths.ts', import.meta.url), 'utf8');
   const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
 
   assert.match(source, /private readonly cliDiscovery = new CliDiscovery/);
@@ -720,11 +721,12 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(discoverySource, /this\.openCodeLocalState\.readModelMetadata\(\)/);
   assert.doesNotMatch(discoverySource, /\.local', 'state', 'opencode', 'model\.json'/);
   assert.doesNotMatch(discoverySource, /\.cache', 'opencode', 'models\.json'/);
-  assert.match(openCodeLocalStateSource, /modelStatePath: path\.join\(stateHome, 'opencode', 'model\.json'\)/);
-  assert.match(openCodeLocalStateSource, /modelMetadataPath: path\.join\(cacheHome, 'opencode', 'models\.json'\)/);
-  assert.match(openCodeLocalStateSource, /XDG_STATE_HOME/);
-  assert.match(openCodeLocalStateSource, /XDG_CACHE_HOME/);
-  assert.match(openCodeLocalStateSource, /LOCALAPPDATA/);
+  assert.match(openCodeLocalStateSource, /resolveOpenCodePaths\(\s*this\.options\s*\)/);
+  assert.match(openCodePathsSource, /modelStatePath: pathApi\.join\(stateHome, 'opencode', 'model\.json'\)/);
+  assert.match(openCodePathsSource, /modelMetadataPath: pathApi\.join\(cacheHome, 'opencode', 'models\.json'\)/);
+  assert.match(openCodePathsSource, /XDG_STATE_HOME/);
+  assert.match(openCodePathsSource, /XDG_CACHE_HOME/);
+  assert.match(openCodePathsSource, /LOCALAPPDATA/);
   assert.match(discoverySource, /discovery\.defaultModelId \?\? modelState\.currentModelId/);
   assert.match(discoverySource, /modelState\.variants/);
   assert.match(discoverySource, /modelMetadata/);
