@@ -991,6 +991,8 @@ test('CLI install hints resolve platform-specific setup commands', () => {
   const goose = getCliProfile('goose');
   const claude = getCliProfile('claude');
   const aider = getCliProfile('aider');
+  const gemini = getCliProfile('gemini');
+  const codex = getCliProfile('codex');
 
   assert.equal(resolveCliInstallHint(openCode, 'darwin'), 'brew install opencode-ai/tap/opencode');
   assert.equal(resolveCliInstallHint(openCode, 'linux'), 'curl -fsSL https://opencode.ai/install | bash');
@@ -1000,6 +1002,8 @@ test('CLI install hints resolve platform-specific setup commands', () => {
   assert.match(resolveCliInstallHint(aider, 'win32'), /^powershell -NoProfile -ExecutionPolicy Bypass -Command/);
   assert.doesNotMatch(resolveCliInstallHint(aider, 'win32'), /&&/);
   assert.equal(resolveCliInstallHint(claude, 'win32'), 'npm install -g @anthropic-ai/claude-code');
+  assert.equal(resolveCliInstallHint(gemini, 'win32'), 'npm install -g @google/gemini-cli');
+  assert.equal(resolveCliInstallHint(codex, 'win32'), 'npm install -g @openai/codex');
 });
 
 test('CLI lookup can use interactive login zsh so nvm-installed tools are visible', () => {

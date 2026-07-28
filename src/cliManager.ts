@@ -10,7 +10,7 @@ import type {
 } from './assistantTypes';
 import type { CliModelOption, CliProfile } from './cliProfiles';
 import { getCliProfile } from './cliProfiles';
-import { buildCliLookupPath, mergePathEntries } from './cliPathResolver';
+import { withCliLookupPath } from './cliPathResolver';
 import { CliDiscovery, stableHash } from './cliDiscovery';
 import { CliProcessRunner } from './cliProcessRunner';
 import { OpenCodeServerClient, type OpenCodeEventStream } from './openCodeServerClient';
@@ -129,13 +129,15 @@ export class CliManager {
     const sessionId = `${cliId}-${n}`;
     const command = (await this.resolveCommandPath(profile.command)) ?? profile.command;
     const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-    const env = {
-      ...process.env,
-      ...getSystemProxyEnv(process.env),
-      PATH: mergePathEntries([commandDir, buildCliLookupPath(process.env.PATH, process.env.HOME)]),
-      ...this.cliDiscovery.expandProfileEnv(profile.env, cwd),
-      ...envOverrides,
-    };
+    const env = withCliLookupPath(
+      {
+        ...process.env,
+        ...getSystemProxyEnv(process.env),
+        ...this.cliDiscovery.expandProfileEnv(profile.env, cwd),
+        ...envOverrides,
+      },
+      [commandDir]
+    );
     const backgroundAttachArgs =
       options.attachBackgroundServer === false
         ? []
@@ -368,12 +370,14 @@ export class CliManager {
     }
 
     const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-    const env = {
-      ...process.env,
-      ...getSystemProxyEnv(process.env),
-      PATH: mergePathEntries([commandDir, buildCliLookupPath(process.env.PATH, process.env.HOME)]),
-      ...this.cliDiscovery.expandProfileEnv(profile.env, cwd),
-    };
+    const env = withCliLookupPath(
+      {
+        ...process.env,
+        ...getSystemProxyEnv(process.env),
+        ...this.cliDiscovery.expandProfileEnv(profile.env, cwd),
+      },
+      [commandDir]
+    );
     const attachArgs = await this.getBackgroundAttachArgs(profile, command, cwd, env);
     const serverUrl = this.getOpenCodeEventStreamUrl(profile, attachArgs);
     if (!serverUrl) {

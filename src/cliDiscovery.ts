@@ -4,10 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { CliAgentMode, CliModelOption, CliProfile } from './cliProfiles';
 import {
-  buildCliLookupPath,
   getLoginShellLookupArgs,
-  mergePathEntries,
   normalizeCommandPathOutput,
+  withCliLookupPath,
 } from './cliPathResolver';
 import {
   OpenCodeAgentDiscovery,
@@ -248,10 +247,7 @@ export class CliDiscovery {
     return new Promise<string | undefined>((resolve) => {
       const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
       const proc = spawn(lookupCommand, [command], {
-        env: {
-          ...process.env,
-          PATH: buildCliLookupPath(process.env.PATH, process.env.HOME),
-        },
+        env: withCliLookupPath(process.env),
         stdio: ['ignore', 'pipe', 'ignore'],
       });
       let output = '';
@@ -259,7 +255,7 @@ export class CliDiscovery {
         output += data.toString();
       });
       proc.on('close', (code) => {
-        resolve(code === 0 ? normalizeCommandPathOutput(output) : undefined);
+        resolve(code === 0 ? normalizeCommandPathOutput(output, process.platform) : undefined);
       });
       proc.on('error', () => {
         resolve(undefined);
@@ -273,7 +269,7 @@ export class CliDiscovery {
   ): Promise<string | undefined> {
     return new Promise<string | undefined>((resolve) => {
       const proc = spawn(shellPath, getLoginShellLookupArgs(command, shellPath), {
-        env: process.env,
+        env: withCliLookupPath(process.env),
         stdio: ['ignore', 'pipe', 'ignore'],
       });
       let output = '';
@@ -281,7 +277,7 @@ export class CliDiscovery {
         output += data.toString();
       });
       proc.on('close', (code) => {
-        resolve(code === 0 ? normalizeCommandPathOutput(output) : undefined);
+        resolve(code === 0 ? normalizeCommandPathOutput(output, process.platform) : undefined);
       });
       proc.on('error', () => {
         resolve(undefined);
@@ -304,19 +300,18 @@ export class CliDiscovery {
   ): Promise<OpenCodeAgentDiscovery> {
     return new Promise<OpenCodeAgentDiscovery>((resolve) => {
       const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-      const env = {
+      const env = withCliLookupPath(
+        {
         ...process.env,
-        PATH: mergePathEntries([
-          commandDir,
-          buildCliLookupPath(process.env.PATH, process.env.HOME),
-        ]),
         OPENCODE_DB: path.join(
           os.tmpdir(),
           `agents-gui-opencode-debug-config-${stableHash(cwd).toString(16)}-${process.pid}.db`
         ),
         OMO_DISABLE_POSTHOG: '1',
         OMO_SEND_ANONYMOUS_TELEMETRY: '0',
-      };
+        },
+        [commandDir]
+      );
       const proc = spawn(command, ['debug', 'config'], {
         cwd,
         env,
@@ -380,19 +375,18 @@ export class CliDiscovery {
       // CLI fallback path
       const runCli = () => {
         const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-        const env = {
+        const env = withCliLookupPath(
+          {
           ...process.env,
-          PATH: mergePathEntries([
-            commandDir,
-            buildCliLookupPath(process.env.PATH, process.env.HOME),
-          ]),
           OPENCODE_DB: path.join(
             os.tmpdir(),
             `agents-gui-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
           ),
           OMO_DISABLE_POSTHOG: '1',
           OMO_SEND_ANONYMOUS_TELEMETRY: '0',
-        };
+          },
+          [commandDir]
+        );
         const proc = spawn(command, ['models'], {
           cwd,
           env,
@@ -468,14 +462,13 @@ export class CliDiscovery {
       return new Promise<string | undefined>((resolve) => {
         const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
         const proc = spawn(command, profile.versionArgs ?? ['--version'], {
-          env: {
+          env: withCliLookupPath(
+            {
             ...process.env,
-            PATH: mergePathEntries([
-              commandDir,
-              buildCliLookupPath(process.env.PATH, process.env.HOME),
-            ]),
             ...this.expandProfileEnv(profile.env, this.options.workspaceRoot()),
-          },
+            },
+            [commandDir]
+          ),
           stdio: ['ignore', 'pipe', 'pipe'],
         });
         let output = '';
