@@ -2,6 +2,12 @@
 
 ## v0.0.18 - 2026-07-27
 
+### Windows 兼容性
+
+- 修复 npm 安装的 OpenCode、Codex、Claude Code 与 Gemini `.cmd` shim 可发现但无法启动的问题，同时保持参数数组隔离，避免用户输入被解释为 shell 语法。
+- 补全 Windows 用户级 CLI 搜索路径、OpenCode APPDATA/LOCALAPPDATA 路径、系统代理读取与进程树终止验证。
+- 新增 Windows Node 20 CI，与 Ubuntu Node 18/20 一起执行完整质量检查。
+
 ### 新增
 
 - 新增与 Codex 对齐的规范化会话渲染链路，以 `thread → turn → typed item` 统一消息、推理、活动、审批、系统反馈与错误展示。
