@@ -181,8 +181,12 @@ export interface AssistantLspServerStatus {
 
 export type AssistantTokenPrecision = 'exact' | 'estimated' | 'unavailable';
 
+export type AssistantTokenScope = 'attached-context' | 'session-context';
+
 export interface AssistantTokenUsage {
   precision: AssistantTokenPrecision;
+  /** Omitted by older providers that did not report a usage scope. */
+  scope?: AssistantTokenScope;
   tokens?: number;
   tokenizer?: string;
   reason?: string;

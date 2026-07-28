@@ -18,8 +18,10 @@ const {
   getCliModelOption,
   getCliPermissionMode,
   getCliRuntimeMode,
+  resolveContextWindowTokens,
   resolveCliInstallHint,
 } = require('../.test-dist/cliProfiles.js');
+const { countContextTokens } = require('../.test-dist/tokenCounter.js');
 const {
   filterPromptEchoChunk,
   flushCliOutputBuffer,
@@ -1102,6 +1104,37 @@ test('context summary carries lightweight token usage estimates without bundled 
   assert.doesNotMatch(counterSource, /Math\.ceil\(characters \/ 4\)/);
   assert.ok(!('@anthropic-ai/tokenizer' in (manifest.dependencies ?? {})));
   assert.ok(!('js-tiktoken' in (manifest.dependencies ?? {})));
+});
+
+test('context token usage identifies attached context explicitly', () => {
+  const usage = countContextTokens(
+    {
+      activeFile: {
+        relativePath: 'src/example.ts',
+        languageId: 'typescript',
+        lineCount: 1,
+        text: 'export const answer = 42;',
+        truncated: false,
+      },
+      diagnostics: [],
+    },
+    {}
+  );
+
+  assert.equal(usage.scope, 'attached-context');
+});
+
+test('context token usage ignores the empty IDE context wrapper', () => {
+  const usage = countContextTokens({ diagnostics: [] }, {});
+
+  assert.equal(usage.tokens, 0);
+});
+
+test('context window resolution prefers a known model before the profile fallback', () => {
+  const profile = { contextWindowTokens: 128000 };
+
+  assert.equal(resolveContextWindowTokens(profile, 'openai/gpt-4.1'), 1048576);
+  assert.equal(resolveContextWindowTokens(profile, 'provider/unknown-model'), 128000);
 });
 
 test('extension contributes reload window command for debugging', () => {

@@ -8,10 +8,17 @@ export function countContextTokens(
   modelId?: string
 ): AssistantTokenUsage {
   const tokenizer = profile.tokenizer ?? inferTokenizerFromModelId(modelId);
-  const text = renderAssistantContext(snapshot);
+  const hasAttachedContext = Boolean(
+    snapshot.workspace ||
+    snapshot.activeFile ||
+    snapshot.selection ||
+    snapshot.diagnostics.length > 0
+  );
+  const text = hasAttachedContext ? renderAssistantContext(snapshot) : '';
 
   return {
     precision: 'estimated',
+    scope: 'attached-context',
     tokens: estimateTextTokens(text, tokenizer),
     tokenizer: tokenizer ? `${tokenizer.label} estimate` : 'Generic estimate',
   };

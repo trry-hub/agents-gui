@@ -971,12 +971,19 @@ export function inferContextWindowTokens(modelId: string | undefined): number | 
   const modelName = rest.join('/') || modelId;
 
   if (provider === 'openai' || provider === 'azure') {
-    return OPENAI_CONTEXT_WINDOW_TOKENS[modelName] ?? 128000;
+    return OPENAI_CONTEXT_WINDOW_TOKENS[modelName];
   }
 
   if (provider === 'anthropic') {
-    return ANTHROPIC_CONTEXT_WINDOW_TOKENS[modelName] ?? 200000;
+    return ANTHROPIC_CONTEXT_WINDOW_TOKENS[modelName];
   }
 
   return undefined;
+}
+
+export function resolveContextWindowTokens(
+  profile: Pick<CliProfile, 'contextWindowTokens'> | undefined,
+  modelId: string | undefined
+): number | undefined {
+  return inferContextWindowTokens(modelId) ?? profile?.contextWindowTokens;
 }

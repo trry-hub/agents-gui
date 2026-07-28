@@ -36,7 +36,7 @@ import {
   getCliPermissionMode,
   getCliProfile,
   getCliRuntimeMode,
-  inferContextWindowTokens,
+  resolveContextWindowTokens,
   type CliModelOption,
   type CliProfile,
 } from './cliProfiles';
@@ -855,7 +855,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           mcpStatusPending,
           lspServers: openCodeStatus?.lspServers,
           tokenUsage: countContextTokens(snapshot, profile, modelId),
-          contextWindowTokens: profile.contextWindowTokens ?? inferContextWindowTokens(modelId),
+          contextWindowTokens: resolveContextWindowTokens(profile, modelId),
         }
       : {
           ...baseSummary,
