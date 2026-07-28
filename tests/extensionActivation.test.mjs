@@ -31,6 +31,7 @@ const openCodeLocalStateSource = readFileSync(
   new URL('../src/openCodeLocalState.ts', import.meta.url),
   'utf8'
 );
+const openCodePathsSource = readFileSync(new URL('../src/openCodePaths.ts', import.meta.url), 'utf8');
 const openCodeServerClientSource = readFileSync(
   new URL('../src/openCodeServerClient.ts', import.meta.url),
   'utf8'
@@ -299,9 +300,11 @@ test('attachment persistence stays behind a dedicated store', () => {
 
 test('OpenCode local state paths stay behind a dedicated adapter', () => {
   assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
-  assert.match(openCodeLocalStateSource, /XDG_STATE_HOME/);
-  assert.match(openCodeLocalStateSource, /XDG_CACHE_HOME/);
-  assert.match(openCodeLocalStateSource, /LOCALAPPDATA/);
+  assert.match(openCodeLocalStateSource, /resolveOpenCodePaths/);
+  assert.match(openCodeLocalStateSource, /resolveOpenCodePaths\(\s*this\.options\s*\)/);
+  assert.match(openCodePathsSource, /XDG_STATE_HOME/);
+  assert.match(openCodePathsSource, /XDG_CACHE_HOME/);
+  assert.match(openCodePathsSource, /LOCALAPPDATA/);
   assert.match(cliDiscoverySource, /private readonly openCodeLocalState: OpenCodeLocalState/);
   assert.match(sidebarSource, /this\.openCodeLocalState\.updateModelVariant/);
   assert.doesNotMatch(cliDiscoverySource, /\.local', 'state', 'opencode'/);
