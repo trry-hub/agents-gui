@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -9,11 +9,15 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 
 const PREVIOUS_HOME = process.env.HOME;
+const PREVIOUS_USERPROFILE = process.env.USERPROFILE;
+const PREVIOUS_APPDATA = process.env.APPDATA;
 const PREVIOUS_XDG_CONFIG_HOME = process.env.XDG_CONFIG_HOME;
 const tempHome = mkdtempSync(join(tmpdir(), 'agents-gui-mcp-home-'));
 mkdirSync(join(tempHome, '.cc-switch'), { recursive: true });
 mkdirSync(join(tempHome, '.config', 'opencode'), { recursive: true });
 process.env.HOME = tempHome;
+process.env.USERPROFILE = tempHome;
+process.env.APPDATA = join(tempHome, '.config');
 process.env.XDG_CONFIG_HOME = join(tempHome, '.config');
 
 const dbPath = join(tempHome, '.cc-switch', 'cc-switch.db');
@@ -34,20 +38,28 @@ const {
 const { McpManager } = require('../.test-dist/mcpManager.js');
 const { resolveOpenCodePaths } = require('../.test-dist/openCodePaths.js');
 
+function runSqlite(sql, args = []) {
+  return execFileSync('sqlite3', [...args, dbPath, sql], { encoding: 'utf8' });
+}
+
 function initTestDb() {
   rmSync(dbPath, { force: true });
-  execSync(`sqlite3 "${dbPath}" "CREATE TABLE mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, server_config TEXT NOT NULL, description TEXT, homepage TEXT, docs TEXT, tags TEXT NOT NULL DEFAULT '[]', enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0, enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_opencode BOOLEAN NOT NULL DEFAULT 0)"`);
+  runSqlite(
+    "CREATE TABLE mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL, server_config TEXT NOT NULL, description TEXT, homepage TEXT, docs TEXT, tags TEXT NOT NULL DEFAULT '[]', enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0, enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_opencode BOOLEAN NOT NULL DEFAULT 0)"
+  );
 }
 
 function dumpRows() {
-  return execSync(`sqlite3 -json "${dbPath}" "SELECT id, name, server_config, description, homepage, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode FROM mcp_servers ORDER BY id"`, { encoding: 'utf8' });
+  return runSqlite(
+    'SELECT id, name, server_config, description, homepage, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode FROM mcp_servers ORDER BY id',
+    ['-json']
+  );
 }
 
 function readOpencodeConfig() {
-  if (!existsSync(opencodeConfigPath)) {
-    return null;
-  }
-  return JSON.parse(execSync(`cat "${opencodeConfigPath}"`, { encoding: 'utf8' }));
+  return existsSync(opencodeConfigPath)
+    ? JSON.parse(readFileSync(opencodeConfigPath, 'utf8'))
+    : null;
 }
 
 test('validateMcpServerName accepts simple names and rejects bad input', () => {
@@ -79,7 +91,10 @@ test('sanitizeMcpServerConfig normalizes local and remote servers', () => {
 });
 
 test('sanitizeMcpServerConfig rejects remote without http url', () => {
-  assert.equal(sanitizeMcpServerConfig({ name: 'bad', type: 'remote', url: 'ftp://nope' }), undefined);
+  assert.equal(
+    sanitizeMcpServerConfig({ name: 'bad', type: 'remote', url: 'ftp://nope' }),
+    undefined
+  );
 });
 
 test('sanitizeMcpServerConfig rejects local without command', () => {
@@ -95,8 +110,12 @@ test('CcSwitchMcpAdapter returns empty list when db is missing', async () => {
 
 test('CcSwitchMcpAdapter list reads stdio and http servers from db', async () => {
   initTestDb();
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('memory', 'memory', '{\\"type\\":\\"stdio\\",\\"command\\":\\"npx\\",\\"args\\":[\\"-y\\",\\"server-memory\\"]}', '[]', 1, 1, 0, 1)"`);
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('web', 'web', '{\\"type\\":\\"http\\",\\"url\\":\\"https://example.com/mcp\\"}', '[]', 0, 0, 0, 1)"`);
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('memory', 'memory', '{"type":"stdio","command":"npx","args":["-y","server-memory"]}', '[]', 1, 1, 0, 1)`
+  );
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('web', 'web', '{"type":"http","url":"https://example.com/mcp"}', '[]', 0, 0, 0, 1)`
+  );
 
   const adapter = new CcSwitchMcpAdapter();
   const servers = await adapter.list();
@@ -118,7 +137,11 @@ test('CcSwitchMcpAdapter upsert inserts a row and syncs opencode.json', async ()
   initTestDb();
   writeFileSync(
     opencodeConfigPath,
-    JSON.stringify({ mcp: { manual: { enabled: true, type: 'local', command: ['manual'] } } }, null, 2),
+    JSON.stringify(
+      { mcp: { manual: { enabled: true, type: 'local', command: ['manual'] } } },
+      null,
+      2
+    ),
     'utf8'
   );
   const adapter = new CcSwitchMcpAdapter();
@@ -146,7 +169,9 @@ test('CcSwitchMcpAdapter upsert inserts a row and syncs opencode.json', async ()
 
 test('CcSwitchMcpAdapter upsert updates existing row preserving metadata', async () => {
   initTestDb();
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, description, homepage, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('memory', 'memory', '{\\"type\\":\\"stdio\\",\\"command\\":\\"old\\"}', 'desc', 'https://before', '[]', 1, 1, 1, 1)"`);
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, description, homepage, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('memory', 'memory', '{"type":"stdio","command":"old"}', 'desc', 'https://before', '[]', 1, 1, 1, 1)`
+  );
 
   const adapter = new CcSwitchMcpAdapter();
   await adapter.upsert({
@@ -168,8 +193,12 @@ test('CcSwitchMcpAdapter upsert updates existing row preserving metadata', async
 
 test('CcSwitchMcpAdapter setEnabled toggles only enabled_opencode column', async () => {
   initTestDb();
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('a', 'a', '{\\"type\\":\\"stdio\\",\\"command\\":\\"x\\"}', '[]', 1, 1, 1, 1)"`);
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('b', 'b', '{\\"type\\":\\"stdio\\",\\"command\\":\\"y\\"}', '[]', 1, 1, 1, 1)"`);
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('a', 'a', '{"type":"stdio","command":"x"}', '[]', 1, 1, 1, 1)`
+  );
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('b', 'b', '{"type":"stdio","command":"y"}', '[]', 1, 1, 1, 1)`
+  );
 
   const adapter = new CcSwitchMcpAdapter();
   await adapter.setEnabled('b', false);
@@ -187,8 +216,12 @@ test('CcSwitchMcpAdapter setEnabled toggles only enabled_opencode column', async
 
 test('CcSwitchMcpAdapter remove deletes row and prunes opencode.json', async () => {
   initTestDb();
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('a', 'a', '{\\"type\\":\\"stdio\\",\\"command\\":\\"x\\"}', '[]', 1, 1, 1, 1)"`);
-  execSync(`sqlite3 "${dbPath}" "INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('b', 'b', '{\\"type\\":\\"stdio\\",\\"command\\":\\"y\\"}', '[]', 1, 1, 1, 1)"`);
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('a', 'a', '{"type":"stdio","command":"x"}', '[]', 1, 1, 1, 1)`
+  );
+  runSqlite(
+    `INSERT INTO mcp_servers (id, name, server_config, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode) VALUES ('b', 'b', '{"type":"stdio","command":"y"}', '[]', 1, 1, 1, 1)`
+  );
 
   const adapter = new CcSwitchMcpAdapter();
   await adapter.upsert({ name: 'a', type: 'local', command: ['x'], enabled: true });
@@ -239,7 +272,9 @@ test('UnsupportedMcpAdapter reports supported=false and refuses mutations', asyn
   const adapter = new UnsupportedMcpAdapter('claude', '', 'no config');
   assert.equal(adapter.supported, false);
   assert.deepEqual(await adapter.list(), []);
-  await assert.rejects(() => adapter.upsert({ name: 'x', type: 'local', command: ['npx'], enabled: true }));
+  await assert.rejects(() =>
+    adapter.upsert({ name: 'x', type: 'local', command: ['npx'], enabled: true })
+  );
 });
 
 test('getMcpAdapter returns CcSwitch adapter for opencode', () => {
@@ -270,12 +305,16 @@ test('openCodeConfigPath matches the shared resolver when environment variables 
 test('syncOpenCodeConfig preserves MCP entries it does not own', async () => {
   writeFileSync(
     opencodeConfigPath,
-    JSON.stringify({
-      mcp: {
-        manual: { enabled: true, type: 'local', command: ['manual'] },
-        stale: { enabled: true, type: 'local', command: ['stale'] },
+    JSON.stringify(
+      {
+        mcp: {
+          manual: { enabled: true, type: 'local', command: ['manual'] },
+          stale: { enabled: true, type: 'local', command: ['stale'] },
+        },
       },
-    }, null, 2),
+      null,
+      2
+    ),
     'utf8'
   );
 
@@ -300,7 +339,11 @@ test('McpManager reports OpenCode MCP management unavailable when cc-switch db i
   assert.equal(snapshot.supported, false);
   assert.match(snapshot.reason, /cc-switch SQLite database/);
 
-  const result = await manager.upsert('opencode', { name: 'memory', type: 'local', command: ['npx'] });
+  const result = await manager.upsert('opencode', {
+    name: 'memory',
+    type: 'local',
+    command: ['npx'],
+  });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'mcp_unavailable');
 });
@@ -313,6 +356,16 @@ test('ccSwitchDbPath resolves under HOME', () => {
 
 test.after(async () => {
   process.env.HOME = PREVIOUS_HOME;
+  if (PREVIOUS_USERPROFILE === undefined) {
+    delete process.env.USERPROFILE;
+  } else {
+    process.env.USERPROFILE = PREVIOUS_USERPROFILE;
+  }
+  if (PREVIOUS_APPDATA === undefined) {
+    delete process.env.APPDATA;
+  } else {
+    process.env.APPDATA = PREVIOUS_APPDATA;
+  }
   if (PREVIOUS_XDG_CONFIG_HOME === undefined) {
     delete process.env.XDG_CONFIG_HOME;
   } else {

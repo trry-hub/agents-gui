@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -13,6 +17,55 @@ function fakeChild() {
   child.signalCode = null;
   child.kill = () => true;
   return child;
+}
+
+function waitForProcess(child) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+function waitForFirstJsonLine(child) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    child.once('error', reject);
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+      const newline = stdout.indexOf('\n');
+      if (newline >= 0) {
+        resolve(JSON.parse(stdout.slice(0, newline)));
+      }
+    });
+  });
+}
+
+async function waitForWindowsPidToExit(pid, timeoutMs = 5000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    let output = '';
+    try {
+      output = execFileSync('tasklist.exe', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+    } catch {
+      return;
+    }
+    if (!new RegExp(`"${pid}"(?:,|$)`).test(output)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail(`child PID ${pid} survived CliProcessRunner.terminate()`);
 }
 
 test('CliProcessRunner preserves argument arrays and disables shell execution', () => {
@@ -56,3 +109,71 @@ test('CliProcessRunner exposes a non-detached probe process', () => {
   assert.equal(calls[0].options.detached, false);
   assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
 });
+
+test(
+  'CliProcessRunner executes npm-style Windows shims without interpreting arguments',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agents gui 中文 '));
+    const fixturePath = join(root, 'fixture.mjs');
+    const shimPath = join(root, 'opencode.cmd');
+    writeFileSync(
+      fixturePath,
+      [
+        "import { spawn } from 'node:child_process';",
+        'const args = process.argv.slice(2);',
+        "if (args[0] === 'spawn-child') {",
+        "  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {",
+        "    stdio: 'ignore',",
+        '    windowsHide: true,',
+        '  });',
+        '  process.stdout.write(`${JSON.stringify({ args, childPid: child.pid })}\\n`);',
+        '  setInterval(() => {}, 1000);',
+        '} else {',
+        '  process.stdout.write(`${JSON.stringify(args)}\\n`);',
+        "  process.stderr.write('fixture-stderr\\n');",
+        '}',
+      ].join('\n'),
+      'utf8'
+    );
+    writeFileSync(
+      shimPath,
+      [
+        '@ECHO off',
+        'SETLOCAL',
+        'SET "_prog=%~dp0node.exe"',
+        'IF NOT EXIST "%_prog%" SET "_prog=node"',
+        '"%_prog%" "%~dp0fixture.mjs" %*',
+      ].join('\r\n'),
+      'utf8'
+    );
+
+    const runner = new CliProcessRunner();
+    const env = { ...process.env, Path: process.env.Path || process.env.PATH };
+    const run = async (args) => {
+      const child = runner.spawnPromptProcess(shimPath, args, root, env, 'ignore');
+      const result = await waitForProcess(child);
+      assert.equal(result.code, 0);
+      assert.equal(result.stderr.trim(), 'fixture-stderr');
+      assert.deepEqual(JSON.parse(result.stdout.trim()), args);
+    };
+
+    try {
+      await run([
+        'run',
+        '--attach',
+        'http://127.0.0.1:4096',
+        '中文 multiline\nsecond line "quoted" & | ^ % !',
+      ]);
+      await run(['serve', '--hostname', '127.0.0.1', '--port', '4096']);
+
+      const child = runner.spawnPromptProcess(shimPath, ['spawn-child'], root, env, 'ignore');
+      const firstLine = await waitForFirstJsonLine(child);
+      assert.ok(Number.isInteger(firstLine.childPid));
+      runner.terminate(child);
+      await waitForWindowsPidToExit(firstLine.childPid);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
