@@ -15,6 +15,22 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+test('OpenCodeConfigSync resolves Windows config paths through APPDATA', () => {
+  const sync = new OpenCodeConfigSync({
+    platform: 'win32',
+    homeDir: 'C:\\Users\\Agent',
+    env: {
+      APPDATA: 'C:\\Users\\Agent\\AppData\\Roaming',
+      LOCALAPPDATA: 'C:\\Users\\Agent\\AppData\\Local',
+    },
+    exists: () => false,
+  });
+  assert.equal(
+    sync.getConfigPath(),
+    'C:\\Users\\Agent\\AppData\\Roaming\\opencode\\opencode.json'
+  );
+});
+
 test('OpenCodeConfigSync writes provider and model into opencode.json', async () => {
   const configPath = makeTempConfigPath();
   const sync = new OpenCodeConfigSync({ configPath });

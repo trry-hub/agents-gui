@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
+import { resolveOpenCodePaths } from './openCodePaths';
 
 const execFileAsync = promisify(execFile);
 
@@ -175,33 +176,8 @@ function ccSwitchDbPath(): string {
   return path.join(os.homedir(), '.cc-switch', 'cc-switch.db');
 }
 
-function usableAbsoluteEnvPath(value: string | undefined): string | undefined {
-  const trimmed = String(value || '').trim();
-  if (!trimmed || trimmed === 'undefined' || trimmed === 'null' || !path.isAbsolute(trimmed)) {
-    return undefined;
-  }
-  return trimmed;
-}
-
-function defaultConfigHome(): string {
-  const appData =
-    process.platform === 'win32' ? usableAbsoluteEnvPath(process.env.APPDATA) : undefined;
-  const home =
-    usableAbsoluteEnvPath(os.homedir()) ||
-    usableAbsoluteEnvPath(process.env.HOME) ||
-    usableAbsoluteEnvPath(process.env.USERPROFILE);
-  if (appData) {
-    return appData;
-  }
-  if (home) {
-    return path.join(home, '.config');
-  }
-  throw new McpConfigError('Unable to resolve user config directory', 'mcp_config_home_unresolved');
-}
-
 function openCodeConfigPath(): string {
-  const base = usableAbsoluteEnvPath(process.env.XDG_CONFIG_HOME) || defaultConfigHome();
-  return path.join(base, 'opencode', 'opencode.json');
+  return resolveOpenCodePaths().configPath;
 }
 
 function asObject(value: unknown): Record<string, unknown> {

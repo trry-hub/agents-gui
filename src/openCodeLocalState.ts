@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import {
   parseOpenCodeModelMetadata,
@@ -7,6 +6,7 @@ import {
   type OpenCodeModelMetadataMap,
   type OpenCodeModelState,
 } from './opencodeAgents';
+import { resolveOpenCodePaths, type OpenCodePathOptions } from './openCodePaths';
 
 export interface OpenCodeLocalStatePaths {
   stateHome: string;
@@ -15,24 +15,16 @@ export interface OpenCodeLocalStatePaths {
   modelMetadataPath: string;
 }
 
-export interface OpenCodeLocalStateOptions {
-  env?: NodeJS.ProcessEnv;
-  homeDir?: string;
-  platform?: NodeJS.Platform;
-}
+export type OpenCodeLocalStateOptions = OpenCodePathOptions;
 
 export class OpenCodeLocalState {
   constructor(private readonly options: OpenCodeLocalStateOptions = {}) {}
 
   paths(): OpenCodeLocalStatePaths {
-    const stateHome = this.stateHome();
-    const cacheHome = this.cacheHome();
-    return {
-      stateHome,
-      cacheHome,
-      modelStatePath: path.join(stateHome, 'opencode', 'model.json'),
-      modelMetadataPath: path.join(cacheHome, 'opencode', 'models.json'),
-    };
+    const { stateHome, cacheHome, modelStatePath, modelMetadataPath } = resolveOpenCodePaths(
+      this.options
+    );
+    return { stateHome, cacheHome, modelStatePath, modelMetadataPath };
   }
 
   readModelState(): OpenCodeModelState {
@@ -82,41 +74,4 @@ export class OpenCodeLocalState {
     }
   }
 
-  private stateHome(): string {
-    const env = this.options.env ?? process.env;
-    const platform = this.options.platform ?? process.platform;
-    const localAppData = platform === 'win32' ? usableAbsolutePath(env.LOCALAPPDATA) : undefined;
-    return (
-      usableAbsolutePath(env.XDG_STATE_HOME) ??
-      localAppData ??
-      path.join(this.homeDir(), '.local', 'state')
-    );
-  }
-
-  private cacheHome(): string {
-    const env = this.options.env ?? process.env;
-    const platform = this.options.platform ?? process.platform;
-    const localAppData = platform === 'win32' ? usableAbsolutePath(env.LOCALAPPDATA) : undefined;
-    return (
-      usableAbsolutePath(env.XDG_CACHE_HOME) ?? localAppData ?? path.join(this.homeDir(), '.cache')
-    );
-  }
-
-  private homeDir(): string {
-    return (
-      usableAbsolutePath(this.options.homeDir) ??
-      usableAbsolutePath(os.homedir()) ??
-      usableAbsolutePath(this.options.env?.HOME) ??
-      usableAbsolutePath(this.options.env?.USERPROFILE) ??
-      os.tmpdir()
-    );
-  }
-}
-
-function usableAbsolutePath(value: string | undefined): string | undefined {
-  const trimmed = String(value || '').trim();
-  if (!trimmed || trimmed === 'undefined' || trimmed === 'null' || !path.isAbsolute(trimmed)) {
-    return undefined;
-  }
-  return trimmed;
 }

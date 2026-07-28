@@ -1,7 +1,7 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import type { ApiProviderSettings, CustomApiProviderConfig } from './apiProviders';
+import { resolveOpenCodePaths, type OpenCodePathOptions } from './openCodePaths';
 
 /**
  * Sync VS Code API Provider settings into OpenCode's local config file
@@ -18,16 +18,10 @@ import type { ApiProviderSettings, CustomApiProviderConfig } from './apiProvider
  * A backup of the original opencode.json is written before each mutation.
  */
 
-const OPENCODE_CONFIG_DIR_CANDIDATES = [
-  process.env.XDG_CONFIG_HOME,
-  path.join(os.homedir(), '.config'),
-  path.join(os.homedir(), 'Library', 'Application Support'),
-];
-
 const SYNC_MARKER = '__agents_gui_synced';
 const SYNC_TAG = 'agents-gui';
 
-export interface OpenCodeConfigSyncOptions {
+export interface OpenCodeConfigSyncOptions extends OpenCodePathOptions {
   configPath?: string;
 }
 
@@ -35,7 +29,7 @@ export class OpenCodeConfigSync {
   private readonly configPath: string;
 
   constructor(options: OpenCodeConfigSyncOptions = {}) {
-    this.configPath = options.configPath ?? resolveOpenCodeConfigPath();
+    this.configPath = options.configPath ?? resolveOpenCodePaths(options).configPath;
   }
 
   /**
@@ -164,29 +158,6 @@ export class OpenCodeConfigSync {
       // Backup is best-effort; don't fail the sync over it.
     }
   }
-}
-
-function resolveOpenCodeConfigPath(): string {
-  for (const candidate of OPENCODE_CONFIG_DIR_CANDIDATES) {
-    if (!candidate) {
-      continue;
-    }
-    const configPath = path.join(candidate, 'opencode', 'opencode.json');
-    try {
-      // Prefer an existing config location. If none exists yet, fall back to
-      // the first candidate (XDG_CONFIG_HOME > ~/.config > macOS app support).
-      if (fs.existsSync(configPath)) {
-        return configPath;
-      }
-    } catch {
-      // ignore fs errors and keep scanning
-    }
-  }
-
-  // Default to ~/.config/opencode/opencode.json
-  const fallback = OPENCODE_CONFIG_DIR_CANDIDATES.find(Boolean);
-  const base = fallback ?? path.join(os.homedir(), '.config');
-  return path.join(base, 'opencode', 'opencode.json');
 }
 
 /**

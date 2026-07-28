@@ -7,6 +7,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { OpenCodeLocalState } = require('../.test-dist/openCodeLocalState.js');
+const { resolveOpenCodePaths } = require('../.test-dist/openCodePaths.js');
 
 test('OpenCodeLocalState reads model state and metadata from XDG paths', () => {
   const root = mkdtempSync(join(tmpdir(), 'agents-gui-opencode-state-'));
@@ -59,17 +60,37 @@ test('OpenCodeLocalState reads model state and metadata from XDG paths', () => {
   }
 });
 
-test('OpenCodeLocalState writes variants and falls back to Windows LOCALAPPDATA', async () => {
+test('OpenCodeLocalState uses shared resolver for pure Windows paths', () => {
+  const options = {
+    env: { LOCALAPPDATA: 'C:\\Users\\Agent\\AppData\\Local' },
+    homeDir: 'C:\\Users\\Agent',
+    platform: 'win32',
+  };
+  const localState = new OpenCodeLocalState(options);
+  const paths = resolveOpenCodePaths(options);
+
+  assert.deepEqual(localState.paths(), {
+    stateHome: paths.stateHome,
+    cacheHome: paths.cacheHome,
+    modelStatePath: paths.modelStatePath,
+    modelMetadataPath: paths.modelMetadataPath,
+  });
+});
+
+test('OpenCodeLocalState writes variants in host-native temp directories', async () => {
   const root = mkdtempSync(join(tmpdir(), 'agents-gui-opencode-win-state-'));
   try {
-    const localAppData = join(root, 'LocalAppData');
+    const stateHome = join(root, 'state');
+    const cacheHome = join(root, 'cache');
+    const env =
+      process.platform === 'win32'
+        ? { ...process.env, LOCALAPPDATA: stateHome }
+        : { ...process.env, XDG_STATE_HOME: stateHome, XDG_CACHE_HOME: cacheHome };
     const localState = new OpenCodeLocalState({
-      env: { LOCALAPPDATA: localAppData },
-      homeDir: join(root, 'home'),
-      platform: 'win32',
+      env,
     });
 
-    assert.equal(localState.paths().modelStatePath, join(localAppData, 'opencode', 'model.json'));
+    assert.equal(localState.paths().modelStatePath, join(stateHome, 'opencode', 'model.json'));
 
     await localState.updateModelVariant('openai/gpt-5.5', 'high');
     await localState.updateModelVariant('openai/gpt-5.4', 'low');

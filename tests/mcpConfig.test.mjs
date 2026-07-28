@@ -32,6 +32,7 @@ const {
   syncOpenCodeConfig,
 } = require('../.test-dist/mcpConfig.js');
 const { McpManager } = require('../.test-dist/mcpManager.js');
+const { resolveOpenCodePaths } = require('../.test-dist/openCodePaths.js');
 
 function initTestDb() {
   rmSync(dbPath, { force: true });
@@ -257,6 +258,12 @@ test('openCodeConfigPath ignores invalid XDG_CONFIG_HOME values', () => {
   process.env.XDG_CONFIG_HOME = 'relative-config';
   assert.equal(openCodeConfigPath(), join(tempHome, '.config', 'opencode', 'opencode.json'));
 
+  process.env.XDG_CONFIG_HOME = join(tempHome, '.config');
+});
+
+test('openCodeConfigPath matches the shared resolver when environment variables change', () => {
+  process.env.XDG_CONFIG_HOME = join(tempHome, 'alternate-config');
+  assert.equal(openCodeConfigPath(), resolveOpenCodePaths().configPath);
   process.env.XDG_CONFIG_HOME = join(tempHome, '.config');
 });
 
