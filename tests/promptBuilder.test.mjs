@@ -688,6 +688,7 @@ test('cli manager warms and attaches background CLI servers when available', () 
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
   const openCodePathsSource = readFileSync(new URL('../src/openCodePaths.ts', import.meta.url), 'utf8');
+  const systemProxyEnvSource = readFileSync(new URL('../src/systemProxyEnv.ts', import.meta.url), 'utf8');
   const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
 
   assert.match(source, /private readonly cliDiscovery = new CliDiscovery/);
@@ -727,6 +728,12 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(openCodePathsSource, /XDG_STATE_HOME/);
   assert.match(openCodePathsSource, /XDG_CACHE_HOME/);
   assert.match(openCodePathsSource, /LOCALAPPDATA/);
+  assert.match(systemProxyEnvSource, /const systemRoot = env\.SystemRoot/);
+  assert.match(
+    systemProxyEnvSource,
+    /path\.win32\.join\(systemRoot, 'System32', 'reg\.exe'\)/
+  );
+  assert.doesNotMatch(systemProxyEnvSource, /execFileSync\(\s*'reg\.exe'/);
   assert.match(discoverySource, /discovery\.defaultModelId \?\? modelState\.currentModelId/);
   assert.match(discoverySource, /modelState\.variants/);
   assert.match(discoverySource, /modelMetadata/);

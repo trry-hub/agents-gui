@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import * as path from 'path';
 
 export interface SystemProxyOptions {
   platform?: NodeJS.Platform;
@@ -11,7 +12,7 @@ export function getSystemProxyEnv(
   options: SystemProxyOptions = {}
 ): Record<string, string> {
   if (hasProxyEnv(sourceEnv)) {
-    return {};
+    return withLoopbackNoProxy(sourceEnv);
   }
 
   const platform = options.platform ?? process.platform;
@@ -20,7 +21,7 @@ export function getSystemProxyEnv(
     return output ? parseMacSystemProxyEnv(output) : {};
   }
   if (platform === 'win32') {
-    const output = (options.readWindowsInternetSettings ?? readWindowsInternetSettings)();
+    const output = (options.readWindowsInternetSettings ?? (() => readWindowsInternetSettings(sourceEnv)))();
     return output ? parseWindowsInternetSettings(output) : {};
   }
   return {};
@@ -77,10 +78,15 @@ function readScutilProxy(): string {
   }
 }
 
-function readWindowsInternetSettings(): string {
+function readWindowsInternetSettings(env: NodeJS.ProcessEnv): string {
+  const systemRoot = env.SystemRoot;
+  if (!systemRoot || !path.win32.isAbsolute(systemRoot)) {
+    return '';
+  }
+
   try {
     return execFileSync(
-      'reg.exe',
+      path.win32.join(systemRoot, 'System32', 'reg.exe'),
       ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'],
       {
         encoding: 'utf8',
@@ -126,6 +132,10 @@ export function parseWindowsInternetSettings(output: string): Record<string, str
     assignProxy(env, 'ALL_PROXY', withScheme(protocolEntries.socks, 'socks5'));
   }
 
+  if (Object.keys(env).length === 0) {
+    return {};
+  }
+
   const noProxy = normalizeWindowsProxyOverride(values.ProxyOverride || '');
   env.NO_PROXY = noProxy;
   env.no_proxy = noProxy;
@@ -156,10 +166,20 @@ function assignProxy(
 
 function withScheme(value: string | undefined, scheme: 'http' | 'socks5'): string {
   const trimmed = String(value || '').trim();
-  if (!trimmed) {
+  if (!trimmed || trimmed.includes(';')) {
     return '';
   }
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `${scheme}://${trimmed}`;
+}
+
+function withLoopbackNoProxy(sourceEnv: NodeJS.ProcessEnv): Record<string, string> {
+  const defaults = ['localhost', '127.0.0.1', '.local'];
+  const entries = [sourceEnv.NO_PROXY, sourceEnv.no_proxy]
+    .flatMap((value) => String(value || '').split(','))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const noProxy = [...new Set([...entries, ...defaults])].join(',');
+  return { NO_PROXY: noProxy, no_proxy: noProxy };
 }
 
 function normalizeWindowsProxyOverride(value: string): string {

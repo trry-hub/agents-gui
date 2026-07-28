@@ -41,12 +41,24 @@ test('disabled or malformed Windows proxy settings are non-fatal', () => {
     {}
   );
   assert.deepEqual(parseWindowsInternetSettings('not registry output'), {});
+  for (const proxyServer of [';', 'foo=bar', 'http=;https=']) {
+    assert.deepEqual(
+      parseWindowsInternetSettings(
+        `ProxyEnable REG_DWORD 0x1\nProxyServer REG_SZ ${proxyServer}\nProxyOverride REG_SZ <local>`
+      ),
+      {}
+    );
+  }
 });
 
-test('explicit proxy environment prevents Windows registry lookup', () => {
+test('explicit proxy environment prevents registry lookup and preserves loopback bypasses', () => {
   let reads = 0;
   const env = getSystemProxyEnv(
-    { HTTPS_PROXY: 'http://explicit:8443' },
+    {
+      HTTPS_PROXY: 'http://explicit:8443',
+      NO_PROXY: 'internal.example.com,localhost',
+      no_proxy: 'api.example.com,127.0.0.1',
+    },
     {
       platform: 'win32',
       readWindowsInternetSettings() {
@@ -55,7 +67,10 @@ test('explicit proxy environment prevents Windows registry lookup', () => {
       },
     }
   );
-  assert.deepEqual(env, {});
+  assert.deepEqual(env, {
+    NO_PROXY: 'internal.example.com,localhost,api.example.com,127.0.0.1,.local',
+    no_proxy: 'internal.example.com,localhost,api.example.com,127.0.0.1,.local',
+  });
   assert.equal(reads, 0);
 });
 
