@@ -34,19 +34,71 @@ function waitForProcess(child) {
   });
 }
 
-function waitForFirstJsonLine(child) {
+function waitForFirstJsonLine(child, timeoutMs = 10_000) {
   return new Promise((resolve, reject) => {
     let stdout = '';
-    child.once('error', reject);
-    child.stdout?.on('data', (chunk) => {
+    const onError = (error) => finish(reject, error);
+    const onClose = (code) =>
+      finish(reject, new Error(`process closed before emitting JSON (exit code ${code})`));
+    const onData = (chunk) => {
       stdout += chunk.toString();
       const newline = stdout.indexOf('\n');
       if (newline >= 0) {
-        resolve(JSON.parse(stdout.slice(0, newline)));
+        try {
+          finish(resolve, JSON.parse(stdout.slice(0, newline)));
+        } catch (error) {
+          finish(reject, error);
+        }
       }
-    });
+    };
+    const timer = setTimeout(
+      () => finish(reject, new Error(`timed out waiting ${timeoutMs}ms for fixture JSON`)),
+      timeoutMs
+    );
+    const finish = (settle, value) => {
+      clearTimeout(timer);
+      child.off('error', onError);
+      child.off('close', onClose);
+      child.stdout?.off('data', onData);
+      settle(value);
+    };
+
+    child.once('error', onError);
+    child.once('close', onClose);
+    child.stdout?.on('data', onData);
   });
 }
+
+function jsonChild() {
+  const child = fakeChild();
+  child.stdout = new EventEmitter();
+  return child;
+}
+
+async function settlementWithin(promise, timeoutMs) {
+  return Promise.race([
+    promise.then(
+      () => 'resolved',
+      () => 'rejected'
+    ),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs, 'timed out')),
+  ]);
+}
+
+test('waitForFirstJsonLine rejects when the process closes before emitting JSON', async () => {
+  const child = jsonChild();
+  const waiting = waitForFirstJsonLine(child);
+  child.emit('close', 1);
+
+  assert.equal(await settlementWithin(waiting, 25), 'rejected');
+});
+
+test('waitForFirstJsonLine rejects when JSON is not emitted before its timeout', async () => {
+  const child = jsonChild();
+  const waiting = waitForFirstJsonLine(child, 25);
+
+  assert.equal(await settlementWithin(waiting, 50), 'rejected');
+});
 
 async function waitForWindowsPidToExit(pid, timeoutMs = 5000) {
   const startedAt = Date.now();
@@ -158,6 +210,7 @@ test(
       assert.deepEqual(JSON.parse(result.stdout.trim()), args);
     };
 
+    let longLivedChild;
     try {
       await run([
         'run',
@@ -167,12 +220,15 @@ test(
       ]);
       await run(['serve', '--hostname', '127.0.0.1', '--port', '4096']);
 
-      const child = runner.spawnPromptProcess(shimPath, ['spawn-child'], root, env, 'ignore');
-      const firstLine = await waitForFirstJsonLine(child);
+      longLivedChild = runner.spawnPromptProcess(shimPath, ['spawn-child'], root, env, 'ignore');
+      const firstLine = await waitForFirstJsonLine(longLivedChild);
       assert.ok(Number.isInteger(firstLine.childPid));
-      runner.terminate(child);
+      runner.terminate(longLivedChild);
       await waitForWindowsPidToExit(firstLine.childPid);
     } finally {
+      if (longLivedChild && longLivedChild.exitCode === null) {
+        runner.terminate(longLivedChild);
+      }
       rmSync(root, { recursive: true, force: true });
     }
   }
