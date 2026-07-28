@@ -92,6 +92,10 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+test('test script uses cross-platform Node test discovery', () => {
+  assert.equal(manifest.scripts.test, 'npm run build:test && node scripts/run-tests.mjs');
+});
+
 test('all contributed commands are registered by the extension host entrypoint', () => {
   for (const command of manifest.contributes.commands.map((entry) => entry.command)) {
     const escaped = escapeRegExp(command);
@@ -403,6 +407,7 @@ test('CLI process lifecycle stays behind a dedicated process runner', () => {
   assert.match(cliProcessRunnerSource, /terminate\(proc: ChildProcess\)/);
   assert.match(cliProcessRunnerSource, /killTree\(proc: ChildProcess, signal: NodeJS\.Signals\)/);
   assert.match(cliProcessRunnerSource, /this\.spawnImpl\('taskkill', args/);
+  assert.doesNotMatch(cliDiscoverySource, /\bproc\.kill\(/);
   assert.match(architectureDoc, /CLI process spawning/);
 });
 

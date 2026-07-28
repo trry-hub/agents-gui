@@ -54,6 +54,33 @@ test('withCliLookupPath emits one canonical PATH key on Windows', () => {
   assert.equal(env.FOO, 'bar');
 });
 
+test('withCliLookupPath gives later case-insensitive Windows PATH overrides precedence', () => {
+  const env = withCliLookupPath(
+    {
+      Path: 'C:\\Inherited',
+      PATH: 'C:\\Provider Override',
+    },
+    [],
+    'win32'
+  );
+
+  assert.equal(env.PATH.split(';')[0], 'C:\\Provider Override');
+});
+
+test('withCliLookupPath keeps POSIX PATH lookup case-sensitive', () => {
+  const env = withCliLookupPath(
+    {
+      Path: '/not-the-posix-path',
+      PATH: '/provider-override',
+    },
+    [],
+    'linux'
+  );
+
+  assert.equal(env.PATH.split(':')[0], '/provider-override');
+  assert.equal(env.Path, '/not-the-posix-path');
+});
+
 test('normalizeCommandPathOutput prefers native Windows executables over shims', () => {
   const output = [
     'C:\\Users\\Agent\\AppData\\Roaming\\npm\\codex.cmd',

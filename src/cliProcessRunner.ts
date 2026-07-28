@@ -75,11 +75,26 @@ export class CliProcessRunner {
       return;
     }
 
+    const clearForceKillTimer = () => {
+      const timer = this.forceKillTimers.get(proc);
+      if (timer) {
+        clearTimeout(timer);
+        this.forceKillTimers.delete(proc);
+      }
+    };
     const timer = setTimeout(() => {
+      proc.off('close', clearForceKillTimer);
       this.forceKillTimers.delete(proc);
-      this.killTree(proc, 'SIGKILL');
+      if (this.isRunning(proc)) {
+        this.killTree(proc, 'SIGKILL');
+      }
     }, PROCESS_TERMINATE_GRACE_MS);
+    timer.unref();
     this.forceKillTimers.set(proc, timer);
+    proc.once('close', clearForceKillTimer);
+    if (!this.isRunning(proc)) {
+      clearForceKillTimer();
+    }
   }
 
   killTree(proc: ChildProcess, signal: NodeJS.Signals): void {

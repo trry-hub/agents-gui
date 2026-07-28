@@ -356,7 +356,7 @@
   "scripts": {
     "build": "node esbuild.mjs",
     "build:test": "node esbuild.mjs && tsc -p tsconfig.json --outDir .test-dist --rootDir src --module commonjs",
-    "test": "npm run build:test && node --test tests/*.test.mjs",
+    "test": "npm run build:test && node scripts/run-tests.mjs",
     "lint": "eslint src/ --ext .ts",
     "lint:fix": "eslint src/ --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",

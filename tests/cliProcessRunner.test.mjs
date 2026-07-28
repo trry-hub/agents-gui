@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const { CliDiscovery } = require('../.test-dist/cliDiscovery.js');
 const { CliProcessRunner } = require('../.test-dist/cliProcessRunner.js');
 
 function fakeChild() {
@@ -19,18 +20,35 @@ function fakeChild() {
   return child;
 }
 
-function waitForProcess(child) {
+function waitForProcess(child, runner, timeoutMs = 10_000) {
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
-    child.stdout?.on('data', (chunk) => {
+    const onStdout = (chunk) => {
       stdout += chunk.toString();
-    });
-    child.stderr?.on('data', (chunk) => {
+    };
+    const onStderr = (chunk) => {
       stderr += chunk.toString();
-    });
-    child.once('error', reject);
-    child.once('close', (code) => resolve({ code, stdout, stderr }));
+    };
+    const onError = (error) => finish(reject, error);
+    const onClose = (code) => finish(resolve, { code, stdout, stderr });
+    const timer = setTimeout(() => {
+      runner.terminate(child);
+      finish(reject, new Error(`timed out waiting ${timeoutMs}ms for fixture process`));
+    }, timeoutMs);
+    const finish = (settle, value) => {
+      clearTimeout(timer);
+      child.stdout?.off('data', onStdout);
+      child.stderr?.off('data', onStderr);
+      child.off('error', onError);
+      child.off('close', onClose);
+      settle(value);
+    };
+
+    child.stdout?.on('data', onStdout);
+    child.stderr?.on('data', onStderr);
+    child.once('error', onError);
+    child.once('close', onClose);
   });
 }
 
@@ -75,6 +93,47 @@ function jsonChild() {
   return child;
 }
 
+function probeChild(pid = 41) {
+  const child = jsonChild();
+  child.pid = pid;
+  child.stderr = new EventEmitter();
+  return child;
+}
+
+function closeFakeChild(child) {
+  child.exitCode = 0;
+  child.emit('close', 0);
+}
+
+function createWindowsProbeHarness() {
+  const probes = [];
+  const taskkillArgs = [];
+  const runner = new CliProcessRunner({
+    platform: 'win32',
+    spawn(command, args) {
+      if (command === 'taskkill') {
+        taskkillArgs.push([...args]);
+        const taskkill = fakeChild();
+        taskkill.exitCode = 0;
+        return taskkill;
+      }
+
+      const child = probeChild(100 + probes.length);
+      probes.push({ command, args: [...args], child });
+      return child;
+    },
+  });
+  return { probes, runner, taskkillArgs };
+}
+
+function createDiscovery(processRunner, openCodeClient = { fetchModelOptions: async () => [] }) {
+  return new CliDiscovery({
+    workspaceRoot: () => process.cwd(),
+    openCodeClient,
+    processRunner,
+  });
+}
+
 async function settlementWithin(promise, timeoutMs) {
   return Promise.race([
     promise.then(
@@ -100,6 +159,23 @@ test('waitForFirstJsonLine rejects when JSON is not emitted before its timeout',
   assert.equal(await settlementWithin(waiting, 50), 'rejected');
 });
 
+test('waitForProcess rejects and terminates the process tree after a bounded timeout', async () => {
+  const child = probeChild();
+  let terminated;
+  const waiting = waitForProcess(
+    child,
+    {
+      terminate(proc) {
+        terminated = proc;
+      },
+    },
+    25
+  );
+
+  assert.equal(await settlementWithin(waiting, 50), 'rejected');
+  assert.equal(terminated, child);
+});
+
 async function waitForWindowsPidToExit(pid, timeoutMs = 5000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -118,6 +194,28 @@ async function waitForWindowsPidToExit(pid, timeoutMs = 5000) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.fail(`child PID ${pid} survived CliProcessRunner.terminate()`);
+}
+
+async function waitForFile(filePath, timeoutMs = 5000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (existsSync(filePath)) {
+      return readFileSync(filePath, 'utf8');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail(`fixture did not create ${filePath} within ${timeoutMs}ms`);
+}
+
+function forceKillWindowsPid(pid) {
+  try {
+    execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+  } catch {
+    // Process may already be dead.
+  }
 }
 
 test('CliProcessRunner preserves argument arrays and disables shell execution', () => {
@@ -162,6 +260,73 @@ test('CliProcessRunner exposes a non-detached probe process', () => {
   assert.deepEqual(calls[0].options.stdio, ['ignore', 'pipe', 'pipe']);
 });
 
+test('CliProcessRunner cancels forced tree termination after the process closes', async () => {
+  const taskkillArgs = [];
+  const runner = new CliProcessRunner({
+    platform: 'win32',
+    spawn(command, args) {
+      assert.equal(command, 'taskkill');
+      taskkillArgs.push([...args]);
+      const taskkill = fakeChild();
+      taskkill.exitCode = 0;
+      return taskkill;
+    },
+  });
+  const child = fakeChild();
+
+  runner.terminate(child);
+  closeFakeChild(child);
+  await new Promise((resolve) => setTimeout(resolve, 1600));
+
+  assert.deepEqual(taskkillArgs, [['/pid', '41', '/T']]);
+});
+
+test('CliDiscovery tree-terminates a debug-config probe that exceeds its output limit', async () => {
+  const harness = createWindowsProbeHarness();
+  const discovery = createDiscovery(harness.runner);
+  const result = discovery.getOpenCodeAgentModesFromDebugConfig('opencode', process.cwd());
+  const probe = harness.probes[0].child;
+
+  try {
+    probe.stdout.emit('data', Buffer.alloc(2_000_001));
+    await result;
+    assert.deepEqual(harness.taskkillArgs, [['/pid', '100', '/T']]);
+  } finally {
+    closeFakeChild(probe);
+  }
+});
+
+test('CliDiscovery tree-terminates a model probe that exceeds its output limit', async () => {
+  const harness = createWindowsProbeHarness();
+  const discovery = createDiscovery(harness.runner);
+  const result = discovery.getOpenCodeModelOptions('opencode');
+  const probe = harness.probes[0].child;
+
+  try {
+    probe.stdout.emit('data', Buffer.alloc(1_000_001));
+    await result;
+    assert.deepEqual(harness.taskkillArgs, [['/pid', '100', '/T']]);
+  } finally {
+    closeFakeChild(probe);
+  }
+});
+
+test('CliDiscovery tree-terminates a version probe after its timeout', async () => {
+  const harness = createWindowsProbeHarness();
+  const discovery = createDiscovery(harness.runner);
+  discovery.resolveCommandPath = async () => 'codex';
+  const result = discovery.getCommandVersion({ command: 'codex' });
+
+  await Promise.resolve();
+  const probe = harness.probes[0].child;
+  try {
+    assert.equal(await result, undefined);
+    assert.deepEqual(harness.taskkillArgs, [['/pid', '100', '/T']]);
+  } finally {
+    closeFakeChild(probe);
+  }
+});
+
 test(
   'CliProcessRunner executes npm-style Windows shims without interpreting arguments',
   { skip: process.platform !== 'win32' },
@@ -204,7 +369,7 @@ test(
     const env = { ...process.env, Path: process.env.Path || process.env.PATH };
     const run = async (args) => {
       const child = runner.spawnPromptProcess(shimPath, args, root, env, 'ignore');
-      const result = await waitForProcess(child);
+      const result = await waitForProcess(child, runner);
       assert.equal(result.code, 0);
       assert.equal(result.stderr.trim(), 'fixture-stderr');
       assert.deepEqual(JSON.parse(result.stdout.trim()), args);
@@ -228,6 +393,63 @@ test(
     } finally {
       if (longLivedChild && longLivedChild.exitCode === null) {
         runner.terminate(longLivedChild);
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  'CliDiscovery timeout terminates descendants of an npm-style Windows probe shim',
+  { skip: process.platform !== 'win32', timeout: 15_000 },
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agents gui probe 中文 '));
+    const fixturePath = join(root, 'fixture.mjs');
+    const shimPath = join(root, 'opencode.cmd');
+    const descendantPidPath = join(root, 'probe-child.pid');
+    writeFileSync(
+      fixturePath,
+      [
+        "import { spawn } from 'node:child_process';",
+        "import { writeFileSync } from 'node:fs';",
+        "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {",
+        "  stdio: 'ignore',",
+        '  windowsHide: true,',
+        '});',
+        "writeFileSync(new URL('probe-child.pid', import.meta.url), String(child.pid));",
+        "child.once('exit', () => process.exit(0));",
+        'setInterval(() => {}, 1000);',
+      ].join('\n'),
+      'utf8'
+    );
+    writeFileSync(
+      shimPath,
+      [
+        '@ECHO off',
+        'SETLOCAL',
+        'SET "_prog=%~dp0node.exe"',
+        'IF NOT EXIST "%_prog%" SET "_prog=node"',
+        '"%_prog%" "%~dp0fixture.mjs" %*',
+      ].join('\r\n'),
+      'utf8'
+    );
+
+    const runner = new CliProcessRunner();
+    const discovery = new CliDiscovery({
+      workspaceRoot: () => root,
+      openCodeClient: { fetchModelOptions: async () => [] },
+      processRunner: runner,
+    });
+    let descendantPid;
+    try {
+      const probe = discovery.getOpenCodeAgentModesFromDebugConfig(shimPath, root);
+      descendantPid = Number((await waitForFile(descendantPidPath)).trim());
+      assert.ok(Number.isInteger(descendantPid));
+      await probe;
+      await waitForWindowsPidToExit(descendantPid);
+    } finally {
+      if (Number.isInteger(descendantPid)) {
+        forceKillWindowsPid(descendantPid);
       }
       rmSync(root, { recursive: true, force: true });
     }

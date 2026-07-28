@@ -337,22 +337,14 @@ export class CliDiscovery {
       };
 
       const timeout = setTimeout(() => {
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // Process may already be gone.
-        }
+        this.processRunner.terminate(proc);
         finish();
       }, 5000);
 
       proc.stdout?.on('data', (data: Buffer) => {
         output += data.toString();
-        if (output.length > 2_000_000) {
-          try {
-            proc.kill('SIGTERM');
-          } catch {
-            // Process may already be gone.
-          }
+        if (!settled && output.length > 2_000_000) {
+          this.processRunner.terminate(proc);
           finish();
         }
       });
@@ -412,22 +404,14 @@ export class CliDiscovery {
         };
 
         const timeout = setTimeout(() => {
-          try {
-            proc.kill('SIGTERM');
-          } catch {
-            // Process may already be gone.
-          }
+          this.processRunner.terminate(proc);
           finishCli();
         }, 5000);
 
         proc.stdout?.on('data', (data: Buffer) => {
           output += data.toString();
-          if (output.length > 1_000_000) {
-            try {
-              proc.kill('SIGTERM');
-            } catch {
-              // Process may already be gone.
-            }
+          if (!cliDone && output.length > 1_000_000) {
+            this.processRunner.terminate(proc);
             finishCli();
           }
         });
@@ -494,7 +478,7 @@ export class CliDiscovery {
           resolve(version);
         };
         const timeout = setTimeout(() => {
-          proc.kill('SIGTERM');
+          this.processRunner.terminate(proc);
           finish(undefined);
         }, 1800);
 

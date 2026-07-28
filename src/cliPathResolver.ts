@@ -21,13 +21,16 @@ export function buildCliLookupPath(options: CliLookupPathOptions = {}): string {
   const platform = options.platform ?? process.platform;
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const homeDir =
-    options.homeDir || readEnvValue(env, 'USERPROFILE') || readEnvValue(env, 'HOME') || '';
-  const envPath = readEnvValue(env, 'PATH') || '';
+    options.homeDir ||
+    readEnvValue(env, 'USERPROFILE', platform) ||
+    readEnvValue(env, 'HOME', platform) ||
+    '';
+  const envPath = readEnvValue(env, 'PATH', platform) || '';
 
   if (platform === 'win32') {
-    const appData = readEnvValue(env, 'APPDATA');
-    const localAppData = readEnvValue(env, 'LOCALAPPDATA');
-    const programData = readEnvValue(env, 'ProgramData');
+    const appData = readEnvValue(env, 'APPDATA', platform);
+    const localAppData = readEnvValue(env, 'LOCALAPPDATA', platform);
+    const programData = readEnvValue(env, 'ProgramData', platform);
     return mergePathEntries(
       [
         envPath,
@@ -93,7 +96,8 @@ export function withCliLookupPath(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(sourceEnv)) {
-    if (key.toLowerCase() !== 'path') {
+    const isPathKey = platform === 'win32' ? key.toLowerCase() === 'path' : key === 'PATH';
+    if (!isPathKey) {
       env[key] = value;
     }
   }
@@ -128,8 +132,15 @@ export function normalizeCommandPathOutput(
     .sort((left, right) => left.rank - right.rank || left.index - right.index)[0]?.value;
 }
 
-function readEnvValue(env: NodeJS.ProcessEnv, name: string): string {
-  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+function readEnvValue(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platform): string {
+  const key =
+    platform === 'win32'
+      ? Object.keys(env)
+          .reverse()
+          .find((candidate) => candidate.toLowerCase() === name.toLowerCase())
+      : Object.hasOwn(env, name)
+        ? name
+        : undefined;
   return key ? String(env[key] || '').trim() : '';
 }
 
