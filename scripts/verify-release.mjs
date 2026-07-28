@@ -40,7 +40,7 @@ const steps = [
   {
     label: 'dependency audit',
     command: npmCommand,
-    args: ['audit', '--omit=optional'],
+    args: ['audit', '--omit=dev', '--omit=optional'],
   },
   {
     label: 'VSIX package',

@@ -341,7 +341,7 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
   assert.match(releaseVerifySource, /npmCommand/);
   assert.match(releaseVerifySource, /'run', 'test', '--', '--runInBand'/);
   assert.match(releaseVerifySource, /'run', 'smoke:extension'/);
-  assert.match(releaseVerifySource, /'audit', '--omit=optional'/);
+  assert.match(releaseVerifySource, /'audit', '--omit=dev', '--omit=optional'/);
   assert.match(releaseVerifySource, /'run', 'package'/);
   assert.match(releaseVerifySource, /'diff', '--cached', '--check'/);
 });
