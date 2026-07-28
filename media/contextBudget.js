@@ -25,16 +25,20 @@
       return '<0.1';
     }
     if (value < 1) {
-      return String(Math.round(value * 10) / 10);
+      const rounded = Math.round(value * 10) / 10;
+      return rounded >= 1 ? '<1' : String(rounded);
     }
-    return String(Math.round(value));
+    const rounded = Math.round(value);
+    return value < 100 && rounded >= 100 ? '<100' : String(rounded);
   }
 
   function deriveContextBudgetPresentation(options) {
     const tokenUsage = options?.tokenUsage;
     const precision = tokenUsage?.precision;
     const hasUsage = (precision === 'exact' || precision === 'estimated')
-      && Number.isFinite(Number(tokenUsage?.tokens));
+      && typeof tokenUsage?.tokens === 'number'
+      && Number.isFinite(tokenUsage.tokens)
+      && tokenUsage.tokens >= 0;
     const scope = tokenUsage?.scope;
     const mode = scope === 'attached-context'
       || (scope !== 'session-context' && precision === 'estimated')
@@ -92,6 +96,9 @@
 
   function formatScaledCount(value, scale, suffix) {
     const scaled = Math.round((value / scale) * 100) / 100;
+    if (suffix === 'k' && scaled >= 1000) {
+      return formatScaledCount(value, 1000000, 'm');
+    }
     return `${scaled}${suffix}`;
   }
 

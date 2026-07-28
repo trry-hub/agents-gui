@@ -3946,6 +3946,22 @@
     );
   }
 
+  function clearContextBudget() {
+    contextBudget.hidden = true;
+    contextBudgetLabel.textContent = '';
+    contextBudgetTitle.textContent = '';
+    contextBudgetPercent.textContent = '';
+    contextBudgetTokens.textContent = '';
+    contextBudgetTokenizer.textContent = '';
+    contextBudgetPolicy.textContent = '';
+    contextBudget.title = '';
+    contextBudget.setAttribute('aria-label', i18n.t('contextWindow.label'));
+    contextBudget.classList.toggle('has-total', false);
+    contextBudget.classList.toggle('is-unavailable', false);
+    contextBudget.classList.toggle('is-estimated', false);
+    contextBudget.classList.toggle('is-attached', false);
+  }
+
   function renderContextBudget() {
     if (
       !contextBudget ||
@@ -3962,9 +3978,7 @@
     const profile = activeProfile();
     const tokenUsage = contextSummary?.tokenUsage;
     if (!profile || !contextSummary || !tokenUsage) {
-      contextBudget.hidden = true;
-      contextBudgetLabel.textContent = '';
-      contextBudget.title = '';
+      clearContextBudget();
       return;
     }
 
@@ -3980,8 +3994,7 @@
     contextBudget.classList.toggle('is-attached', presentation.mode === 'attached');
 
     if (contextBudget.hidden) {
-      contextBudgetLabel.textContent = '';
-      contextBudget.title = '';
+      clearContextBudget();
       return;
     }
 

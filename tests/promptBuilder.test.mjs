@@ -1176,6 +1176,23 @@ test('context budget formatting keeps small percentages and useful token precisi
   assert.equal(formatTokenCount(999), '999');
 });
 
+test('context budget formatting does not round ratios across their truth boundaries', () => {
+  assert.equal(formatPercentage(0.95), '<1');
+  assert.equal(formatPercentage(0.99), '<1');
+  assert.equal(formatPercentage(99.49), '99');
+  assert.equal(formatPercentage(99.5), '<100');
+  assert.equal(formatPercentage(99.99), '<100');
+  assert.equal(formatPercentage(100), '100');
+});
+
+test('context budget formatting promotes rounded token unit rollovers', () => {
+  assert.equal(formatTokenCount(999), '999');
+  assert.equal(formatTokenCount(1000), '1k');
+  assert.equal(formatTokenCount(999999), '1m');
+  assert.equal(formatTokenCount(1000000), '1m');
+  assert.equal(formatTokenCount(127977), '127.98k');
+});
+
 test('context budget fails closed for unknown scope and hides an empty attached snapshot', () => {
   assert.equal(
     deriveContextBudgetPresentation({
@@ -1209,6 +1226,27 @@ test('context budget keeps unsupported precision unavailable even when it has a 
   assert.equal(presentation.mode, 'unavailable');
   assert.equal(presentation.visible, true);
   assert.equal(presentation.tokenLabel, undefined);
+});
+
+test('context budget rejects invalid raw token fields for recognized precision', () => {
+  for (const [precision, tokens] of [
+    ['exact', null],
+    ['estimated', null],
+    ['exact', ''],
+    ['estimated', '   '],
+    ['exact', '23'],
+    ['estimated', -1],
+    ['exact', Number.NaN],
+    ['estimated', Infinity],
+  ]) {
+    const presentation = deriveContextBudgetPresentation({
+      tokenUsage: { precision, scope: 'session-context', tokens },
+      totalTokens: 128000,
+    });
+
+    assert.equal(presentation.mode, 'unavailable', `${precision} ${String(tokens)}`);
+    assert.equal(presentation.visible, true, `${precision} ${String(tokens)}`);
+  }
 });
 
 test('context window resolution prefers a known model before the profile fallback', () => {
@@ -2957,6 +2995,33 @@ test('webview displays scope-accurate context budget details', () => {
   assert.match(i18nScript, /'contextWindow\.attachedTitle': '附加的 IDE 上下文'/);
   assert.match(i18nScript, /'contextWindow\.attachedExcludes': 'Excludes chat history and provider context'/);
   assert.match(i18nScript, /'contextWindow\.attachedExcludes': '不含对话历史和模型侧上下文'/);
+});
+
+test('webview clears all context-budget state when its presentation is hidden', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const clearSource = script.slice(
+    script.indexOf('function clearContextBudget()'),
+    script.indexOf('function renderContextBudget()')
+  );
+  const renderSource = script.slice(
+    script.indexOf('function renderContextBudget()'),
+    script.indexOf('function positionContextBudgetPopover()')
+  );
+
+  assert.match(clearSource, /contextBudget\.hidden = true;/);
+  assert.match(clearSource, /contextBudgetLabel\.textContent = '';/);
+  assert.match(clearSource, /contextBudgetTitle\.textContent = '';/);
+  assert.match(clearSource, /contextBudgetPercent\.textContent = '';/);
+  assert.match(clearSource, /contextBudgetTokens\.textContent = '';/);
+  assert.match(clearSource, /contextBudgetTokenizer\.textContent = '';/);
+  assert.match(clearSource, /contextBudgetPolicy\.textContent = '';/);
+  assert.match(clearSource, /contextBudget\.title = '';/);
+  assert.match(clearSource, /contextBudget\.setAttribute\('aria-label', i18n\.t\('contextWindow\.label'\)\);/);
+  for (const className of ['has-total', 'is-unavailable', 'is-estimated', 'is-attached']) {
+    assert.match(clearSource, new RegExp(`contextBudget\\.classList\\.toggle\\('${className}', false\\);`));
+  }
+  assert.match(renderSource, /if \(!profile \|\| !contextSummary \|\| !tokenUsage\) \{\s*clearContextBudget\(\);\s*return;/s);
+  assert.match(renderSource, /if \(contextBudget\.hidden\) \{\s*clearContextBudget\(\);\s*return;/s);
 });
 
 test('webview hides low-value default composer chips', () => {
