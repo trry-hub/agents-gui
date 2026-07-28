@@ -1,12 +1,20 @@
 # 更新日志
 
-## v0.0.18 - 2026-07-27
+## v0.0.19 - 2026-07-28
 
 ### Windows 兼容性
 
 - 修复 npm 安装的 OpenCode、Codex、Claude Code 与 Gemini `.cmd` shim 可发现但无法启动的问题，同时保持参数数组隔离，避免用户输入被解释为 shell 语法。
 - 补全 Windows 用户级 CLI 搜索路径、OpenCode APPDATA/LOCALAPPDATA 路径、系统代理读取与进程树终止验证。
 - 新增 Windows Node 20 CI，与 Ubuntu Node 18/20 一起执行完整质量检查。
+
+### 发布质量
+
+- 测试入口改为跨平台 Node 启动器，确保 Windows、macOS 与 Linux 使用一致的测试发现和参数传递逻辑。
+- 发布审计只检查实际随扩展交付的运行时依赖；VSIX 明确排除内部工作树、Agent 元数据、Node.js、npm 与 `node_modules`。
+- 扩展继续使用 VS Code Extension Host 自带的 Node.js，并调用系统中已安装的 Agent CLI。
+
+## v0.0.18 - 2026-07-27
 
 ### 新增
 
