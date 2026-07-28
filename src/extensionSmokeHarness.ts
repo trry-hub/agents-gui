@@ -58,7 +58,9 @@ export async function runExtensionSmokeProbe(
     await webview.receive({ command: 'checkProfiles' });
     await webview.receive({
       command: 'refreshContext',
+      requestId: 'smoke-context-1',
       cliId: 'opencode',
+      modelId: 'mimo/mimo-v2.5-pro',
       contextOptions: defaultContextOptions(),
     });
     await webview.receive({
@@ -117,6 +119,16 @@ export async function runExtensionSmokeProbe(
     'stopped',
   ];
   const missing = requiredCommands.filter((command) => !postedCommands.includes(command));
+  const correlatedContextSummary = postedMessages.some(
+    (message) =>
+      message.command === 'contextSummary' &&
+      message.requestId === 'smoke-context-1' &&
+      message.cliId === 'opencode' &&
+      message.modelId === 'mimo/mimo-v2.5-pro'
+  );
+  if (!correlatedContextSummary) {
+    missing.push('correlated context summary');
+  }
   if (runtime.startedPrompts.length !== 1) {
     missing.push('single startPrompt call');
   }

@@ -108,6 +108,7 @@
   });
   const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState.optionDialogKinds();
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
+  const CUSTOM_MODEL_CONTEXT_REFRESH_DELAY_MS = 160;
   const SESSION_HISTORY_MIN_WIDTH = 180;
   const SESSION_HISTORY_MAX_WIDTH = 480;
   const SESSION_HISTORY_DEFAULT_WIDTH = 220;
@@ -182,6 +183,11 @@
   let activeThreadByProvider = saved.activeThreadByProvider || {};
   let contextOptions = { ...DEFAULT_CONTEXT_OPTIONS };
   let contextSummary = null;
+  const contextRequestNamespace = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  let contextRequestSequence = 0;
+  let latestContextRequest = null;
+  let contextSummaryPending = false;
+  let customModelContextRefreshTimer = undefined;
   // Session history panel width (px), persisted across sessions via webview state.
   let sessionHistoryWidth = clampSessionHistoryWidth(saved.sessionHistoryWidth);
   let streamTargets = {};
@@ -1298,6 +1304,11 @@
 
   function activeCustomModel(cliId = activeId) {
     return String(customModelByProvider[cliId] || '').trim();
+  }
+
+  function effectiveActiveModelId(cliId = activeId) {
+    const profile = profiles.find((item) => item.id === cliId);
+    return providerOptions.effectiveModelId(activeModel(profile), activeCustomModel(cliId));
   }
 
   function activeRuntimeId(cliId = activeId) {
@@ -2767,11 +2778,64 @@
     popover.style.setProperty('--composer-popover-max-height', `${Math.round(availableHeight)}px`);
   }
 
+  function nextContextRequestId() {
+    contextRequestSequence += 1;
+    return `${contextRequestNamespace}-${contextRequestSequence}`;
+  }
+
   function refreshActiveContext() {
     if (!activeId) {
       return;
     }
-    vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
+    const modelId = effectiveActiveModelId();
+    if (!modelId) {
+      return;
+    }
+    const request = {
+      requestId: nextContextRequestId(),
+      cliId: activeId,
+      modelId,
+    };
+    contextSummary = null;
+    latestContextRequest = request;
+    contextSummaryPending = true;
+    renderProviderHint();
+    renderContextSummaryLabel();
+    renderContextBudget();
+    renderOpenCodeSidebar();
+    renderOpenCodeStatusDialog();
+    vscode.postMessage({
+      command: 'refreshContext',
+      ...request,
+      contextOptions: defaultContextOptions(),
+    });
+  }
+
+  function scheduleCustomModelContextRefresh(cliId) {
+    if (customModelContextRefreshTimer) {
+      clearTimeout(customModelContextRefreshTimer);
+    }
+    const modelId = effectiveActiveModelId(cliId);
+    customModelContextRefreshTimer = setTimeout(() => {
+      customModelContextRefreshTimer = undefined;
+      if (activeId !== cliId) {
+        return;
+      }
+      if (effectiveActiveModelId(cliId) !== modelId) {
+        return;
+      }
+      refreshActiveContext();
+    }, CUSTOM_MODEL_CONTEXT_REFRESH_DELAY_MS);
+  }
+
+  function commitCustomModelContextRefresh(cliId) {
+    if (customModelContextRefreshTimer) {
+      clearTimeout(customModelContextRefreshTimer);
+      customModelContextRefreshTimer = undefined;
+    }
+    if (activeId === cliId) {
+      refreshActiveContext();
+    }
   }
 
   function switchActiveProvider(providerId) {
@@ -2790,8 +2854,8 @@
     closeComposerMenus();
     persist();
     persistUserSelection();
-    renderAll();
     refreshActiveContext();
+    renderAll();
     input.focus();
   }
 
@@ -3167,8 +3231,8 @@
     closeComposerMenus();
     persist();
     persistUserSelection();
-    renderAll();
     refreshActiveContext();
+    renderAll();
     input.focus();
   }
 
@@ -3214,7 +3278,7 @@
 
   function renderContextSummary() {
     if (!contextSummary) {
-      return i18n.t('context.waiting');
+      return i18n.t(contextSummaryPending ? 'context.waiting' : 'context.none');
     }
 
     const parts = [];
@@ -3584,7 +3648,7 @@
         return;
       case 'refresh':
         vscode.postMessage({ command: 'checkProfiles', force: true });
-        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
+        refreshActiveContext();
         return;
       case 'stop':
         if (runningByProvider[activeId]) {
@@ -3619,7 +3683,7 @@
       case 'mcp':
         closeComposerMenus();
         showOpenCodeStatusDialog('mcp', { commandQuery: sourceQuery });
-        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
+        refreshActiveContext();
         return;
       case 'variants':
         closeComposerMenus();
@@ -3636,7 +3700,7 @@
       case 'status':
         closeComposerMenus();
         showOpenCodeStatusDialog('status', { commandQuery: sourceQuery });
-        vscode.postMessage({ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions(), modelId: activeModelId() });
+        refreshActiveContext();
         return;
       case 'themes':
         closeComposerMenus();
@@ -3906,7 +3970,9 @@
 
   function renderContextChipText() {
     if (!contextSummary) {
-      return i18n.t('context.compactPending');
+      return i18n.t(
+        contextSummaryPending ? 'context.compactPending' : 'context.compactNone'
+      );
     }
 
     const parts = [];
@@ -3962,6 +4028,16 @@
     contextBudget.classList.toggle('is-attached', false);
   }
 
+  function contextWindowTotal(summary, profile) {
+    if (
+      summary
+      && Object.prototype.hasOwnProperty.call(summary, 'contextWindowTokens')
+    ) {
+      return summary.contextWindowTokens;
+    }
+    return profile?.contextWindowTokens;
+  }
+
   function renderContextBudget() {
     if (
       !contextBudget ||
@@ -3984,13 +4060,13 @@
 
     const presentation = contextBudgetPresentation.deriveContextBudgetPresentation({
       tokenUsage,
-      totalTokens: contextSummary.contextWindowTokens || profile.contextWindowTokens,
+      totalTokens: contextWindowTotal(contextSummary, profile),
       autoCompact: profile.autoCompactsContext,
     });
     contextBudget.hidden = !presentation.visible;
     contextBudget.classList.toggle('has-total', presentation.ring === 'usage');
     contextBudget.classList.toggle('is-unavailable', presentation.mode === 'unavailable');
-    contextBudget.classList.toggle('is-estimated', presentation.mode === 'attached');
+    contextBudget.classList.toggle('is-estimated', presentation.precision === 'estimated');
     contextBudget.classList.toggle('is-attached', presentation.mode === 'attached');
 
     if (contextBudget.hidden) {
@@ -4018,9 +4094,14 @@
     if (presentation.mode === 'attached') {
       contextBudgetTitle.textContent = i18n.t('contextWindow.attachedTitle');
       contextBudgetLabel.textContent = presentation.tokenLabel;
-      contextBudgetPercent.textContent = i18n.t('contextWindow.attachedTokens', {
+      contextBudgetPercent.textContent = i18n.t(
+        presentation.precision === 'estimated'
+          ? 'contextWindow.attachedTokens'
+          : 'contextWindow.attachedExactTokens',
+        {
         tokens: presentation.tokenValueLabel,
-      });
+        }
+      );
       contextBudgetTokens.textContent = presentation.hasTotal
         ? i18n.t('contextWindow.attachedReference', {
             percent: presentation.percentageLabel,
@@ -4104,7 +4185,7 @@
   function openCodeContextMetrics(profile) {
     const presentation = contextBudgetPresentation.deriveContextBudgetPresentation({
       tokenUsage: contextSummary?.tokenUsage,
-      totalTokens: contextSummary?.contextWindowTokens || profile?.contextWindowTokens,
+      totalTokens: contextWindowTotal(contextSummary, profile),
       autoCompact: profile?.autoCompactsContext,
     });
     if (!presentation.visible || presentation.mode === 'unavailable') {
@@ -4114,9 +4195,12 @@
     if (presentation.mode === 'attached') {
       return [
         {
-          text: `${i18n.t('contextWindow.attachedTitle')}: ${i18n.t('contextWindow.attachedTokens', {
-            tokens: presentation.tokenValueLabel,
-          })}`,
+          text: `${i18n.t('contextWindow.attachedTitle')}: ${i18n.t(
+            presentation.precision === 'estimated'
+              ? 'contextWindow.attachedTokens'
+              : 'contextWindow.attachedExactTokens',
+            { tokens: presentation.tokenValueLabel }
+          )}`,
           strong: true,
         },
         ...(presentation.hasTotal
@@ -5392,6 +5476,7 @@
       rememberRecentModel(activeId, value);
       persist();
       persistUserSelection();
+      refreshActiveContext();
       if (option?.custom) {
         closeOpenCodeStatusDialog();
         renderAll();
@@ -9908,8 +9993,8 @@
     closeComposerMenus();
     persist();
     persistUserSelection();
-    renderAll();
     refreshActiveContext();
+    renderAll();
   });
 
   providerTabs.addEventListener('click', (event) => {
@@ -9977,6 +10062,7 @@
     rememberRecentModel(activeId, modelSelect.value);
     persist();
     persistUserSelection();
+    refreshActiveContext();
     renderAll();
     if (option && !option.custom) {
       maybeShowOpenCodeVariantDialog(option);
@@ -9995,6 +10081,7 @@
     rememberRecentModel(activeId, button.dataset.value);
     persist();
     persistUserSelection();
+    refreshActiveContext();
     renderAll();
 
     if (option?.custom) {
@@ -10010,9 +10097,25 @@
   });
 
   customModelInput.addEventListener('input', () => {
-    customModelByProvider[activeId] = customModelInput.value;
+    const cliId = activeId;
+    customModelByProvider[cliId] = customModelInput.value;
+    contextSummary = null;
+    contextSummaryPending = false;
     persist();
+    renderProviderHint();
+    renderContextSummaryLabel();
+    renderContextBudget();
+    renderOpenCodeSidebar();
+    renderOpenCodeStatusDialog();
     renderComposer();
+    scheduleCustomModelContextRefresh(cliId);
+  });
+
+  customModelInput.addEventListener('change', () => {
+    const cliId = activeId;
+    customModelByProvider[cliId] = customModelInput.value;
+    persist();
+    commitCustomModelContextRefresh(cliId);
   });
 
   runtimeSelect.addEventListener('change', () => {
@@ -10311,13 +10414,32 @@
         }
         persist();
         persistUserSelection();
+        contextSummary = null;
+        latestContextRequest = null;
+        contextSummaryPending = false;
         renderAll();
-        refreshActiveContext();
         break;
       case 'switchProvider':
         switchActiveProvider(message.providerId);
         break;
+      case 'contextInvalidated':
+        if (!message.cliId || message.cliId === activeId) {
+          refreshActiveContext();
+        }
+        break;
       case 'contextSummary':
+        {
+          const matches = providerOptions.contextSummaryMatches({
+            expectedRequest: latestContextRequest,
+            response: message,
+            activeCliId: activeId,
+            activeModelId: effectiveActiveModelId(),
+          });
+          if (!matches) {
+            break;
+          }
+        }
+        contextSummaryPending = false;
         contextSummary = message.summary;
         renderProviderHint();
         renderContextSummaryLabel();

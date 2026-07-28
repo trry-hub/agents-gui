@@ -39,19 +39,7 @@
       && typeof tokenUsage?.tokens === 'number'
       && Number.isFinite(tokenUsage.tokens)
       && tokenUsage.tokens >= 0;
-    const scope = tokenUsage?.scope;
-    const mode = scope === 'attached-context'
-      || (scope !== 'session-context' && precision === 'estimated')
-      ? 'attached'
-      : 'session';
     const tokens = toSafeTokenCount(tokenUsage?.tokens);
-    const totalTokens = toSafeTokenCount(options?.totalTokens);
-    const hasTotal = totalTokens > 0;
-    const rawPercent = hasTotal ? (tokens / totalTokens) * 100 : undefined;
-    const displayedPercent = mode === 'session' && rawPercent !== undefined
-      ? Math.min(100, rawPercent)
-      : rawPercent;
-    const tokenValueLabel = formatTokenCount(tokens);
 
     if (!hasUsage) {
       return {
@@ -64,13 +52,40 @@
       };
     }
 
+    const scope = tokenUsage?.scope;
+    if (precision === 'estimated' && scope === 'session-context') {
+      return {
+        mode: 'unavailable',
+        visible: true,
+        hasTotal: false,
+        showRemaining: false,
+        showAutoCompact: false,
+        ring: 'neutral',
+      };
+    }
+
+    const mode = scope === 'attached-context'
+      || (scope !== 'session-context' && precision === 'estimated')
+      ? 'attached'
+      : 'session';
+    const hasTotal = typeof options?.totalTokens === 'number'
+      && Number.isFinite(options.totalTokens)
+      && options.totalTokens > 0;
+    const totalTokens = hasTotal ? Math.round(options.totalTokens) : 0;
+    const rawPercent = hasTotal ? (tokens / totalTokens) * 100 : undefined;
+    const displayedPercent = mode === 'session' && rawPercent !== undefined
+      ? Math.min(100, rawPercent)
+      : rawPercent;
+    const tokenValueLabel = formatTokenCount(tokens);
+
     if (mode === 'attached') {
       return {
         mode,
+        precision,
         visible: tokens > 0,
         hasTotal,
         tokenValueLabel,
-        tokenLabel: `~${tokenValueLabel}`,
+        tokenLabel: precision === 'estimated' ? `~${tokenValueLabel}` : tokenValueLabel,
         totalLabel: hasTotal ? formatTokenCount(totalTokens) : undefined,
         percentageLabel: displayedPercent === undefined ? undefined : formatPercentage(displayedPercent),
         showRemaining: false,
@@ -81,6 +96,7 @@
 
     return {
       mode,
+      precision,
       visible: true,
       hasTotal,
       tokenValueLabel,
@@ -103,7 +119,11 @@
   }
 
   function toSafeTokenCount(value) {
-    return Math.max(0, Math.round(Number(value) || 0));
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return 0;
+    }
+    return Math.max(0, Math.round(numericValue));
   }
 
   return {

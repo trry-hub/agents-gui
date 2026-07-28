@@ -144,7 +144,54 @@ test('refresh providers title action reloads the full sidebar state', () => {
   );
   assert.match(
     sidebarSource,
-    /async refreshProviders\(\): Promise<void> \{[\s\S]*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);[\s\S]*await this\.sendProfiles\(\{ force: true \}\);[\s\S]*await this\.sendContextSummary\(\);[\s\S]*await this\.sendHomeAgentSettings\(\);[\s\S]*await this\.sendApiProviderSettings\(\);[\s\S]*await this\.sendCommitMessageSettings\(\);[\s\S]*\}/
+    /async refreshProviders\(\): Promise<void> \{[\s\S]*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);[\s\S]*await this\.sendProfiles\(\{ force: true \}\);[\s\S]*await this\.sendHomeAgentSettings\(\);[\s\S]*await this\.sendApiProviderSettings\(\);[\s\S]*await this\.sendCommitMessageSettings\(\);[\s\S]*\}/
+  );
+  assert.doesNotMatch(
+    sidebarSource.slice(
+      sidebarSource.indexOf('async refreshProviders()'),
+      sidebarSource.indexOf('async openProviderSettings(')
+    ),
+    /sendContextSummary\(/
+  );
+});
+
+test('context summary protocol is correlated and host invalidations replace unsolicited summaries', () => {
+  const sendSummaryCalls = sidebarSource.match(/sendContextSummary\(/g) || [];
+  const previewSource = readFileSync(
+    new URL('../scripts/preview-webview.mjs', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(
+    webviewProtocolSource,
+    /command: 'refreshContext';[\s\S]*requestId: string;[\s\S]*cliId: string;[\s\S]*modelId: string;/
+  );
+  assert.match(
+    webviewProtocolSource,
+    /command: 'contextSummary';\s*requestId: string;\s*cliId: string;\s*modelId: string;\s*summary: AssistantContextSummary/
+  );
+  assert.match(
+    webviewProtocolSource,
+    /command: 'contextInvalidated'; cliId\?: string/
+  );
+  assert.equal(
+    sendSummaryCalls.length,
+    3,
+    'sendContextSummary should only be declared, serve refreshContext, and continue its retry chain'
+  );
+  assert.match(sidebarSource, /command: 'contextSummary',\s*requestId,\s*cliId,\s*modelId,\s*summary,/);
+  assert.match(sidebarSource, /scheduleOpenCodeStatusRefresh\([\s\S]*requestId/);
+  assert.match(sidebarSource, /command: 'contextInvalidated'/);
+  assert.match(previewSource, /requestId:\s*message\.requestId/);
+  assert.match(previewSource, /cliId:\s*message\.cliId/);
+  assert.match(previewSource, /modelId:\s*message\.modelId/);
+  assert.match(
+    extensionSmokeHarnessSource,
+    /command: 'refreshContext',[\s\S]*requestId: 'smoke-context-1',[\s\S]*cliId: 'opencode',[\s\S]*modelId:/
+  );
+  assert.match(
+    extensionSmokeHarnessSource,
+    /message\.command === 'contextSummary'[\s\S]*message\.requestId === 'smoke-context-1'[\s\S]*message\.cliId === 'opencode'/
   );
 });
 

@@ -52,10 +52,10 @@ export type WebviewToHostMessage =
   | { command: 'checkProfiles'; force?: boolean }
   | {
       command: 'refreshContext';
-      cliId?: string;
-      providerId?: string;
+      requestId: string;
+      cliId: string;
       contextOptions?: Partial<AssistantContextOptions>;
-      modelId?: string;
+      modelId: string;
     }
   | {
       command: 'openCodeNativeCommand';
@@ -121,6 +121,7 @@ export type HostToWebviewMessage =
   | { command: 'mcpServerSaved'; cliId: string; ok: boolean; message?: string; code?: string }
   | { command: 'openProviderSettings'; section?: SettingsSection }
   | { command: 'switchProvider'; providerId: string }
+  | { command: 'contextInvalidated'; cliId?: string }
   | { command: 'rendererRuntimeSnapshot'; runs: ActiveRendererRun[] }
   | ({
       command: 'requestStarted';
@@ -175,4 +176,10 @@ export type HostToWebviewMessage =
       threadId?: string;
       sessionId?: string;
     }
-  | { command: 'contextSummary'; cliId?: string; summary: AssistantContextSummary };
+  | {
+      command: 'contextSummary';
+      requestId: string;
+      cliId: string;
+      modelId: string;
+      summary: AssistantContextSummary;
+    };

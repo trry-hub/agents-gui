@@ -141,10 +141,16 @@ window.acquireVsCodeApi = () => ({
           { id: 'missing', name: 'Missing CLI', accent: '#d97757', installed: false, installHint: 'install missing-cli' }
         ],
       }})), 20);
+      setTimeout(() => window.dispatchEvent(new MessageEvent('message', {
+        data: { command: 'contextInvalidated' },
+      })), 21);
     }
     if (message.command === 'refreshContext') {
       setTimeout(() => window.dispatchEvent(new MessageEvent('message', { data: {
         command: 'contextSummary',
+        requestId: message.requestId,
+        cliId: message.cliId,
+        modelId: message.modelId,
         summary: {
           workspace: 'agents-gui',
           workspacePath: '/Users/t/6bt/myproject/agents-gui',

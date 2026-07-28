@@ -107,6 +107,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private providerClientTerminals = new Map<string, ProviderClientTerminalState>();
   private openCodeStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private openCodeStatusRefreshAttempts = new Map<string, number>();
+  private latestContextRequestByCli = new Map<string, string>();
   private profilesById = new Map<string, CliProfile>();
   private webviewAssetVersion = Date.now();
   private webviewReloadTimer?: ReturnType<typeof setTimeout>;
@@ -246,11 +247,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           await this.sendProfiles({ force: Boolean(message.force) });
           break;
         case 'refreshContext':
-          await this.sendContextSummary(
-            message.contextOptions,
-            this.settingsManager.resolveCliId(message),
-            message.modelId
-          );
+          {
+            const requestId = typeof message.requestId === 'string' ? message.requestId.trim() : '';
+            const cliId = this.settingsManager.resolveCliId(message);
+            const modelId = typeof message.modelId === 'string' ? message.modelId.trim() : '';
+            if (!requestId || !cliId || !modelId) {
+              break;
+            }
+            if (cliId === 'opencode' && this.latestContextRequestByCli.get(cliId) !== requestId) {
+              const timer = this.openCodeStatusRefreshTimers.get(cliId);
+              if (timer) {
+                clearTimeout(timer);
+                this.openCodeStatusRefreshTimers.delete(cliId);
+              }
+              this.openCodeStatusRefreshAttempts.delete(cliId);
+            }
+            this.latestContextRequestByCli.set(cliId, requestId);
+            await this.sendContextSummary(message.contextOptions ?? {}, cliId, modelId, requestId);
+          }
           break;
         case 'openCodeNativeCommand':
           await this.handleOpenCodeNativeCommand(message);
@@ -361,7 +375,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       newOpenCodeSessionId: result.newOpenCodeSessionId,
       title: result.title,
     });
-    await this.sendContextSummary(undefined, 'opencode');
+    await this.invalidateContext('opencode');
   }
 
   private async handleDeleteOpenCodeSession(message: {
@@ -371,7 +385,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ? await this.openCodeCapability.deleteSession(message.openCodeSessionId).catch(() => false)
       : false;
     if (ok) {
-      await this.sendContextSummary(undefined, 'opencode');
+      await this.invalidateContext('opencode');
     }
   }
 
@@ -407,7 +421,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   async refreshProviders(): Promise<void> {
     await this.postToWebview({ command: 'refreshStarted' });
     await this.sendProfiles({ force: true });
-    await this.sendContextSummary();
     await this.sendHomeAgentSettings();
     await this.sendApiProviderSettings();
     await this.sendCommitMessageSettings();
@@ -511,6 +524,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       ),
       taskBoardDismissed: this.state?.get<boolean>(TASK_BOARD_DISMISSED_STATE_KEY, false),
     });
+    await this.invalidateContext();
   }
 
   private toSetupProfile(profile: CliProfile): SetupCliProfile {
@@ -738,7 +752,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     if (result.ok) {
       await this.handleLoadMcpServers({ cliId });
-      await this.sendContextSummary(undefined, cliId);
+      await this.invalidateContext(cliId);
     }
   }
 
@@ -767,7 +781,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     if (result.ok) {
       await this.handleLoadMcpServers({ cliId });
-      await this.sendContextSummary(undefined, cliId);
+      await this.invalidateContext(cliId);
     }
   }
 
@@ -791,7 +805,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
     if (result.ok) {
       await this.handleLoadMcpServers({ cliId });
-      await this.sendContextSummary(undefined, cliId);
+      await this.invalidateContext(cliId);
     }
   }
 
@@ -829,10 +843,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendContextSummary(
-    contextOptions: Partial<AssistantContextOptions> = {},
-    cliId = this.settingsManager.getDefaultCliId(),
-    modelId?: string
+    contextOptions: Partial<AssistantContextOptions>,
+    cliId: string,
+    modelId: string,
+    requestId: string
   ): Promise<void> {
+    if (this.latestContextRequestByCli.get(cliId) !== requestId) {
+      return;
+    }
     const options = this.settingsManager.resolveContextOptions(contextOptions);
     const snapshot = await this.contextCollector.collect(
       options,
@@ -861,11 +879,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           ...baseSummary,
           workspaceBranch,
         };
+    if (this.latestContextRequestByCli.get(cliId) !== requestId) {
+      return;
+    }
     this.postToWebview({
       command: 'contextSummary',
+      requestId,
+      cliId,
+      modelId,
       summary,
     });
-    this.scheduleOpenCodeStatusRefresh(profile?.id, openCodeStatus, contextOptions, modelId);
+    this.scheduleOpenCodeStatusRefresh(
+      profile?.id,
+      openCodeStatus,
+      contextOptions,
+      modelId,
+      requestId
+    );
+  }
+
+  private invalidateContext(cliId?: string): Thenable<boolean> | undefined {
+    return this.postToWebview({
+      command: 'contextInvalidated',
+      cliId,
+    });
   }
 
   private shouldRetryOpenCodeStatus(
@@ -888,9 +925,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     profileId: string | undefined,
     status: AssistantOpenCodeStatus | undefined,
     contextOptions: Partial<AssistantContextOptions>,
-    modelId?: string
+    modelId: string,
+    requestId: string
   ): void {
-    if (profileId !== 'opencode') {
+    if (profileId !== 'opencode' || this.latestContextRequestByCli.get(profileId) !== requestId) {
       return;
     }
 
@@ -913,7 +951,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.openCodeStatusRefreshAttempts.set(key, attempts + 1);
     const timer = setTimeout(() => {
       this.openCodeStatusRefreshTimers.delete(key);
-      void this.sendContextSummary(contextOptions, 'opencode', modelId);
+      void this.sendContextSummary(contextOptions, 'opencode', modelId, requestId);
     }, delay);
     this.openCodeStatusRefreshTimers.set(key, timer);
   }
@@ -1434,7 +1472,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.webviewAssetVersion = Date.now();
     this.view.webview.html = this.getHtml(this.view.webview);
     void this.sendProfiles();
-    void this.sendContextSummary();
   }
 
   private getWebviewUri(webview: vscode.Webview, ...paths: string[]): string {
@@ -1485,7 +1522,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.webviewAssetVersion = Date.now();
       this.view.webview.html = this.getHtml(this.view.webview);
       await this.sendProfiles();
-      await this.sendContextSummary();
     }
   }
 

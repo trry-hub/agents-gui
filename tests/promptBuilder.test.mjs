@@ -1249,6 +1249,66 @@ test('context budget rejects invalid raw token fields for recognized precision',
   }
 });
 
+test('context budget keeps precision independent from explicit and fallback scope', () => {
+  const cases = [
+    ['exact', 'attached-context', 'attached', 'exact'],
+    ['exact', 'session-context', 'session', 'exact'],
+    ['exact', undefined, 'session', 'exact'],
+    ['exact', 'future-scope', 'session', 'exact'],
+    ['estimated', 'attached-context', 'attached', 'estimated'],
+    ['estimated', 'session-context', 'unavailable', undefined],
+    ['estimated', undefined, 'attached', 'estimated'],
+    ['estimated', 'future-scope', 'attached', 'estimated'],
+    ['unavailable', 'attached-context', 'unavailable', undefined],
+    ['unavailable', 'session-context', 'unavailable', undefined],
+    ['unavailable', undefined, 'unavailable', undefined],
+    ['unavailable', 'future-scope', 'unavailable', undefined],
+  ];
+
+  for (const [precision, scope, expectedMode, expectedPrecision] of cases) {
+    const presentation = deriveContextBudgetPresentation({
+      tokenUsage: { precision, scope, tokens: 23 },
+      totalTokens: 128000,
+      autoCompact: true,
+    });
+
+    assert.equal(presentation.mode, expectedMode, `${precision} ${String(scope)}`);
+    assert.equal(presentation.precision, expectedPrecision, `${precision} ${String(scope)}`);
+  }
+});
+
+test('exact attached context stays attached without estimate or session-only affordances', () => {
+  const presentation = deriveContextBudgetPresentation({
+    tokenUsage: { precision: 'exact', scope: 'attached-context', tokens: 23 },
+    totalTokens: 128000,
+    autoCompact: true,
+  });
+
+  assert.equal(presentation.mode, 'attached');
+  assert.equal(presentation.precision, 'exact');
+  assert.equal(presentation.tokenLabel, '23');
+  assert.equal(presentation.showRemaining, false);
+  assert.equal(presentation.showAutoCompact, false);
+  assert.equal(presentation.ring, 'neutral');
+});
+
+test('invalid raw totals suppress ratios and remaining capacity', () => {
+  for (const totalTokens of [Infinity, Number.NaN, -1, 0, '', '128000']) {
+    const presentation = deriveContextBudgetPresentation({
+      tokenUsage: { precision: 'exact', scope: 'session-context', tokens: 23 },
+      totalTokens,
+      autoCompact: true,
+    });
+
+    assert.equal(presentation.hasTotal, false, String(totalTokens));
+    assert.equal(presentation.percentageLabel, undefined, String(totalTokens));
+    assert.equal(presentation.remainingLabel, undefined, String(totalTokens));
+    assert.equal(presentation.showRemaining, false, String(totalTokens));
+    assert.equal(presentation.showAutoCompact, false, String(totalTokens));
+  }
+  assert.equal(formatTokenCount(Infinity), '0');
+});
+
 test('context window resolution prefers a known model before the profile fallback', () => {
   const profile = { contextWindowTokens: 258000 };
 
@@ -1720,9 +1780,9 @@ test('opencode MCP sidebar retries while server status is warming up', () => {
   assert.match(sidebarSource, /openCodeStatusRefreshAttempts = new Map/);
   assert.match(sidebarSource, /const mcpStatusPending = this\.shouldRetryOpenCodeStatus\(profile\?\.id, openCodeStatus\)/);
   assert.match(sidebarSource, /mcpStatusPending,/);
-  assert.match(sidebarSource, /this\.scheduleOpenCodeStatusRefresh\(profile\?\.id, openCodeStatus, contextOptions, modelId\)/);
+  assert.match(sidebarSource, /this\.scheduleOpenCodeStatusRefresh\([\s\S]*profile\?\.id,[\s\S]*openCodeStatus,[\s\S]*contextOptions,[\s\S]*modelId,[\s\S]*requestId[\s\S]*\)/);
   assert.match(sidebarSource, /private scheduleOpenCodeStatusRefresh/);
-  assert.match(sidebarSource, /this\.sendContextSummary\(contextOptions, 'opencode', modelId\)/);
+  assert.match(sidebarSource, /this\.sendContextSummary\(contextOptions, 'opencode', modelId, requestId\)/);
   assert.match(sidebarSource, /private clearOpenCodeStatusRefreshTimers/);
   assert.match(script, /contextSummary\?\.mcpStatusPending/);
   assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.loading'\)/);
@@ -2631,13 +2691,84 @@ test('webview refreshes context after a concrete provider is active', () => {
 
   assert.match(script, /const DEFAULT_CONTEXT_OPTIONS = Object\.freeze\(\{\s*includeWorkspace: true,\s*includeCurrentFile: true,\s*includeSelection: true,\s*includeDiagnostics: true,\s*\}\);/);
   assert.match(script, /function defaultContextOptions\(\) \{\s*return \{ \.\.\.DEFAULT_CONTEXT_OPTIONS \};\s*\}/);
-  assert.match(script, /function refreshActiveContext\(\) \{\s*if \(!activeId\) \{\s*return;\s*\}\s*vscode\.postMessage\(\{ command: 'refreshContext', cliId: activeId, contextOptions: defaultContextOptions\(\), modelId: activeModelId\(\) \}\);\s*\}/);
-  assert.match(script, /providerSelect\.addEventListener\('change', \(\) => \{[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*\}\);/);
-  assert.match(script, /case 'profiles':[\s\S]*setupProfiles = normalizeSetupProfiles\(message\.setupProfiles\);[\s\S]*renderAll\(\);[\s\S]*refreshActiveContext\(\);[\s\S]*break;/);
-  assert.match(script, /case 'profiles':[\s\S]*renderAll\(\);\s*refreshActiveContext\(\);[\s\S]*break;/);
+  assert.match(script, /function effectiveActiveModelId\(cliId = activeId\)/);
+  assert.match(script, /providerOptions\.effectiveModelId\(activeModel\(profile\), activeCustomModel\(cliId\)\)/);
+  assert.match(script, /function refreshActiveContext\(\)/);
+  assert.match(script, /requestId:\s*nextContextRequestId\(\)/);
+  assert.match(script, /const modelId = effectiveActiveModelId\(\);/);
+  assert.match(script, /const request = \{[\s\S]*modelId,[\s\S]*\};/);
+  assert.equal(
+    script.match(/vscode\.postMessage\(\{\s*command:\s*'refreshContext'/g)?.length,
+    1,
+    'all context refreshes must use the centralized correlated path'
+  );
+  const providerSelection = script.slice(
+    script.indexOf("providerSelect.addEventListener('change'"),
+    script.indexOf("providerTabs.addEventListener('click'")
+  );
+  const profilesMessage = script.slice(
+    script.indexOf("case 'profiles':"),
+    script.indexOf("case 'switchProvider':")
+  );
+  assert.ok(
+    providerSelection.indexOf('refreshActiveContext()') < providerSelection.indexOf('renderAll()')
+  );
+  assert.notEqual(profilesMessage.indexOf('contextSummary = null'), -1);
+  assert.ok(
+    profilesMessage.indexOf('contextSummary = null') < profilesMessage.indexOf('renderAll()')
+  );
   assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
   assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*mountCodexRenderer\(\);[\s\S]*renderAll\(\);/);
+});
+
+test('all model selection paths refresh context and custom input commits cannot stay stale', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const dialogFunctionStart = script.indexOf('function selectOpenCodeDialogOption');
+  const dialogModelStart = script.indexOf("if (kind === 'models')", dialogFunctionStart);
+  const dialogSelection = script.slice(
+    dialogModelStart,
+    script.indexOf("if (kind === 'agents')", dialogModelStart)
+  );
+  const nativeSelection = script.slice(
+    script.indexOf("modelSelect.addEventListener('change'"),
+    script.indexOf("modelOptionList?.addEventListener('click'")
+  );
+  const listSelection = script.slice(
+    script.indexOf("modelOptionList?.addEventListener('click'"),
+    script.indexOf("customModelInput.addEventListener('input'")
+  );
+
+  assert.match(dialogSelection, /refreshActiveContext\(\)/);
+  assert.match(nativeSelection, /refreshActiveContext\(\)/);
+  assert.match(listSelection, /refreshActiveContext\(\)/);
+  assert.ok(
+    nativeSelection.indexOf('refreshActiveContext()') < nativeSelection.indexOf('renderAll()')
+  );
+  assert.ok(
+    listSelection.indexOf('refreshActiveContext()') < listSelection.indexOf('renderAll()')
+  );
+  assert.match(script, /function scheduleCustomModelContextRefresh\(cliId\)/);
+  assert.match(script, /if \(activeId !== cliId\)/);
+  assert.match(script, /customModelInput\.addEventListener\('input', \(\) => \{[\s\S]*contextSummary = null;[\s\S]*scheduleCustomModelContextRefresh\(cliId\);[\s\S]*\}\);/);
+  assert.match(script, /customModelInput\.addEventListener\('change', \(\) => \{[\s\S]*commitCustomModelContextRefresh\(cliId\);[\s\S]*\}\);/);
+});
+
+test('webview only applies the latest correlated context summary for the active selection', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.match(script, /let latestContextRequest = null;/);
+  assert.match(script, /let contextSummaryPending = false;/);
+  assert.match(script, /contextSummary = null;[\s\S]*latestContextRequest = request;[\s\S]*contextSummaryPending = true;/);
+  assert.match(script, /case 'contextInvalidated':[\s\S]*refreshActiveContext\(\);[\s\S]*break;/);
+  assert.match(script, /case 'contextSummary':[\s\S]*providerOptions\.contextSummaryMatches\(/);
+  assert.match(script, /activeModelId:\s*effectiveActiveModelId\(\)/);
+  assert.match(script, /if \(!matches\) \{\s*break;\s*\}/);
+  assert.match(script, /contextSummaryPending = false;\s*contextSummary = message\.summary;/);
+  assert.doesNotMatch(
+    script.slice(script.indexOf("case 'contextSummary':"), script.indexOf("case 'apiProviderSettings':")),
+    /latestContextRequest = null/
+  );
 });
 
 test('webview empty state is visible in large blank panels', () => {
@@ -2968,10 +3099,12 @@ test('webview displays scope-accurate context budget details', () => {
   assert.match(script, /const contextBudgetPopover = contextBudget\?\.querySelector\('\.context-budget-popover'\);/);
   assert.match(script, /const contextBudgetPresentation = window\.AgentsGuiContextBudget;/);
   assert.match(script, /deriveContextBudgetPresentation\(/);
+  assert.match(script, /function contextWindowTotal\(summary, profile\)/);
+  assert.doesNotMatch(script, /contextSummary\?*\.contextWindowTokens \|\| profile\?*\.contextWindowTokens/);
   assert.match(script, /function renderContextBudget/);
   assert.match(script, /positionContextBudgetPopover\(\);/);
   assert.match(script, /contextWindow\.attachedTitle/);
-  assert.match(script, /contextWindow\.attachedTokens', \{\s*tokens: presentation\.tokenValueLabel,/s);
+  assert.match(script, /\? 'contextWindow\.attachedTokens'\s*: 'contextWindow\.attachedExactTokens'/s);
   assert.match(script, /contextWindow\.attachedReference/);
   assert.match(script, /contextWindow\.attachedExcludes/);
   assert.match(script, /contextBudget\.setAttribute\('aria-label', contextBudget\.title\);/);
@@ -2992,9 +3125,13 @@ test('webview displays scope-accurate context budget details', () => {
   assert.match(css, /\.context-budget:hover \.context-budget-popover/);
   assert.match(i18nScript, /'contextWindow\.attachedTitle': 'Attached IDE context'/);
   assert.match(i18nScript, /'contextWindow\.attachedTokens': '~\{tokens\} tokens'/);
+  assert.match(i18nScript, /'contextWindow\.attachedExactTokens': '\{tokens\} tokens'/);
   assert.match(i18nScript, /'contextWindow\.attachedTitle': '附加的 IDE 上下文'/);
+  assert.match(i18nScript, /'contextWindow\.attachedExactTokens': '\{tokens\} token'/);
   assert.match(i18nScript, /'contextWindow\.attachedExcludes': 'Excludes chat history and provider context'/);
   assert.match(i18nScript, /'contextWindow\.attachedExcludes': '不含对话历史和模型侧上下文'/);
+  assert.match(script, /presentation\.precision === 'estimated'/);
+  assert.match(openCodeMetricsSource, /presentation\.precision === 'estimated'/);
 });
 
 test('webview clears all context-budget state when its presentation is hidden', () => {
@@ -4247,6 +4384,113 @@ test('provider options helper owns normalization and fallback option rules', () 
   assert.deepEqual(
     providerOptions.optionListFor(undefined, 'unknown', 'fallback.label', undefined, (key) => `t:${key}`),
     [{ id: 'default', label: 't:fallback.label', description: '' }]
+  );
+});
+
+test('provider options resolve the effective model used for context windows', () => {
+  assert.equal(
+    providerOptions.effectiveModelId({ id: 'gpt-5.5' }, ''),
+    'gpt-5.5'
+  );
+  assert.equal(
+    providerOptions.effectiveModelId(
+      { id: 'configured', configuredModelId: 'openai/gpt-5.5' },
+      ''
+    ),
+    'openai/gpt-5.5'
+  );
+  assert.equal(
+    providerOptions.effectiveModelId({ id: 'custom', custom: true }, ' openai/gpt-4.1 '),
+    'openai/gpt-4.1'
+  );
+});
+
+test('context summary matching rejects reverse-order and cross-selection responses', () => {
+  const latestRequest = {
+    requestId: 'page-2',
+    cliId: 'codex',
+    modelId: 'gpt-5.5',
+  };
+  const secondResponse = { ...latestRequest, summary: { workspace: 'latest' } };
+  const firstResponse = {
+    requestId: 'page-1',
+    cliId: 'opencode',
+    modelId: 'openai/gpt-4.1',
+    summary: { workspace: 'stale' },
+  };
+  let applied;
+
+  for (const response of [secondResponse, firstResponse]) {
+    if (
+      providerOptions.contextSummaryMatches({
+        expectedRequest: latestRequest,
+        response,
+        activeCliId: 'codex',
+        activeModelId: 'gpt-5.5',
+      })
+    ) {
+      applied = response.summary.workspace;
+    }
+  }
+
+  assert.equal(applied, 'latest');
+  for (const response of [
+    { ...secondResponse, requestId: 'page-1' },
+    { ...secondResponse, cliId: 'opencode' },
+    { ...secondResponse, modelId: 'openai/gpt-4.1' },
+    { ...secondResponse, summary: undefined },
+    { command: 'contextSummary', summary: { workspace: 'legacy' } },
+  ]) {
+    assert.equal(
+      providerOptions.contextSummaryMatches({
+        expectedRequest: latestRequest,
+        response,
+        activeCliId: 'codex',
+        activeModelId: 'gpt-5.5',
+      }),
+      false
+    );
+  }
+
+  assert.equal(
+    providerOptions.contextSummaryMatches({
+      expectedRequest: { requestId: '2', cliId: 'codex', modelId: 'gpt-5.5' },
+      response: {
+        requestId: 2,
+        cliId: 'codex',
+        modelId: 'gpt-5.5',
+        summary: {},
+      },
+      activeCliId: 'codex',
+      activeModelId: 'gpt-5.5',
+    }),
+    false
+  );
+});
+
+test('context summary matching accepts same-request retries but rejects superseded retries', () => {
+  const latestRequest = {
+    requestId: 'page-3',
+    cliId: 'opencode',
+    modelId: 'openai/gpt-5.5',
+  };
+  const matches = (response) =>
+    providerOptions.contextSummaryMatches({
+      expectedRequest: latestRequest,
+      response,
+      activeCliId: 'opencode',
+      activeModelId: 'openai/gpt-5.5',
+    });
+
+  assert.equal(matches({ ...latestRequest, summary: { mcpStatusPending: true } }), true);
+  assert.equal(matches({ ...latestRequest, summary: { mcpStatusPending: false } }), true);
+  assert.equal(
+    matches({
+      ...latestRequest,
+      requestId: 'page-2',
+      summary: { mcpStatusPending: false },
+    }),
+    false
   );
 });
 

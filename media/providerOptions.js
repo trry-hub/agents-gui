@@ -82,6 +82,60 @@
     return { title: parts[0], detail: parts.slice(1).join(' - ') };
   }
 
+  function effectiveModelId(option, customModel) {
+    const customId = option?.custom ? String(customModel || '').trim() : '';
+    return customId
+      || String(option?.configuredModelId || '').trim()
+      || String(option?.id || '').trim();
+  }
+
+  function contextSummaryMatches({
+    expectedRequest,
+    response,
+    activeCliId,
+    activeModelId,
+  } = {}) {
+    if (!expectedRequest || !response) {
+      return false;
+    }
+
+    if (
+      typeof expectedRequest.requestId !== 'string'
+      || typeof expectedRequest.cliId !== 'string'
+      || typeof expectedRequest.modelId !== 'string'
+      || typeof response.requestId !== 'string'
+      || typeof response.cliId !== 'string'
+      || typeof response.modelId !== 'string'
+      || !response.summary
+      || typeof response.summary !== 'object'
+    ) {
+      return false;
+    }
+
+    const expectedRequestId = expectedRequest.requestId;
+    const expectedCliId = expectedRequest.cliId;
+    const expectedModelId = expectedRequest.modelId;
+    const responseRequestId = response.requestId;
+    const responseCliId = response.cliId;
+    const responseModelId = response.modelId;
+    if (
+      !expectedRequestId
+      || !expectedCliId
+      || !expectedModelId
+      || !responseRequestId
+      || !responseCliId
+      || !responseModelId
+    ) {
+      return false;
+    }
+
+    return responseRequestId === expectedRequestId
+      && responseCliId === expectedCliId
+      && responseModelId === expectedModelId
+      && activeCliId === expectedCliId
+      && activeModelId === expectedModelId;
+  }
+
   function controlForOptionKey(key) {
     switch (key) {
       case 'agentModes':
@@ -103,6 +157,8 @@
 
   return {
     agentModesFor,
+    contextSummaryMatches,
+    effectiveModelId,
     mapLegacyWorkflowMode,
     normalizeAgentModeId,
     normalizeOptionId,
