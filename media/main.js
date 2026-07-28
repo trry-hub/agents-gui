@@ -18,6 +18,7 @@
   const stateManager = window.AgentsGuiStateManager;
   const pacedReveal = window.AgentsGuiPacedReveal;
   const codexRenderer = window.AgentsGuiCodexRenderer;
+  const contextBudgetPresentation = window.AgentsGuiContextBudget;
   const codexRendererEnabled = document.body.dataset.codexRenderer === 'true'
     && Boolean(codexRenderer);
   const normalizeMessageText = messageText.normalizeMessageText;
@@ -238,6 +239,7 @@
   const contextBudget = document.getElementById('contextBudget');
   const contextBudgetPopover = contextBudget?.querySelector('.context-budget-popover');
   const contextBudgetLabel = document.getElementById('contextBudgetLabel');
+  const contextBudgetTitle = document.getElementById('contextBudgetTitle');
   const contextBudgetPercent = document.getElementById('contextBudgetPercent');
   const contextBudgetTokens = document.getElementById('contextBudgetTokens');
   const contextBudgetTokenizer = document.getElementById('contextBudgetTokenizer');
@@ -617,18 +619,6 @@
     if (icon) {
       container.appendChild(icon);
     }
-  }
-
-  function formatTokenCount(tokens) {
-    const value = Math.max(0, Math.round(Number(tokens) || 0));
-    if (value >= 1000000) {
-      return `${Math.round(value / 100000) / 10}m`;
-    }
-    if (value >= 1000) {
-      return `${Math.round(value / 1000)}k`;
-    }
-
-    return String(value);
   }
 
   function formatBytes(bytes) {
@@ -3960,6 +3950,7 @@
     if (
       !contextBudget ||
       !contextBudgetLabel ||
+      !contextBudgetTitle ||
       !contextBudgetPercent ||
       !contextBudgetTokens ||
       !contextBudgetTokenizer ||
@@ -3977,15 +3968,25 @@
       return;
     }
 
-    contextBudget.hidden = false;
-    const isExact = tokenUsage.precision === 'exact' && Number.isFinite(Number(tokenUsage.tokens));
-    const isEstimated = tokenUsage.precision === 'estimated' && Number.isFinite(Number(tokenUsage.tokens));
-    const hasTokenUsage = isExact || isEstimated;
-    contextBudget.classList.toggle('has-total', Boolean(hasTokenUsage && (contextSummary.contextWindowTokens || profile.contextWindowTokens)));
-    contextBudget.classList.toggle('is-unavailable', !hasTokenUsage);
-    contextBudget.classList.toggle('is-estimated', isEstimated);
+    const presentation = contextBudgetPresentation.deriveContextBudgetPresentation({
+      tokenUsage,
+      totalTokens: contextSummary.contextWindowTokens || profile.contextWindowTokens,
+      autoCompact: profile.autoCompactsContext,
+    });
+    contextBudget.hidden = !presentation.visible;
+    contextBudget.classList.toggle('has-total', presentation.ring === 'usage');
+    contextBudget.classList.toggle('is-unavailable', presentation.mode === 'unavailable');
+    contextBudget.classList.toggle('is-estimated', presentation.mode === 'attached');
+    contextBudget.classList.toggle('is-attached', presentation.mode === 'attached');
 
-    if (!hasTokenUsage) {
+    if (contextBudget.hidden) {
+      contextBudgetLabel.textContent = '';
+      contextBudget.title = '';
+      return;
+    }
+
+    if (presentation.mode === 'unavailable') {
+      contextBudgetTitle.textContent = i18n.t('contextWindow.title');
       contextBudgetLabel.textContent = '';
       contextBudgetPercent.textContent = i18n.t('contextWindow.exactUnavailable', { provider: profile.name });
       contextBudgetTokens.textContent = i18n.t('contextWindow.providerManaged', { provider: profile.name });
@@ -3996,45 +3997,51 @@
         contextBudgetPercent.textContent,
         contextBudgetTokens.textContent,
       ].filter(Boolean).join(' ');
+      contextBudget.setAttribute('aria-label', contextBudget.title);
       positionContextBudgetPopover();
       return;
     }
 
-    const usedTokens = Math.max(0, Math.round(Number(tokenUsage.tokens) || 0));
-    const totalTokens = Math.max(0, Math.round(Number(contextSummary.contextWindowTokens) || Number(profile.contextWindowTokens) || 0));
-    const hasTotal = totalTokens > 0;
-    const used = formatTokenCount(usedTokens);
-
-    if (hasTotal) {
-      const usedPercent = Math.min(100, Math.max(usedTokens > 0 ? 1 : 0, Math.round((usedTokens / totalTokens) * 100)));
-      const total = formatTokenCount(totalTokens);
-      const remaining = formatTokenCount(Math.max(0, totalTokens - usedTokens));
-      contextBudgetLabel.textContent = isEstimated ? `~${usedPercent}%` : `${usedPercent}%`;
-      contextBudgetPercent.textContent = i18n.t('contextWindow.usedPercent', { percent: String(usedPercent) });
-      contextBudgetTokens.textContent = i18n.t('contextWindow.usedTokens', { used });
-      contextBudgetTokenizer.textContent = i18n.t('contextWindow.totalTokens', { total });
+    if (presentation.mode === 'attached') {
+      contextBudgetTitle.textContent = i18n.t('contextWindow.attachedTitle');
+      contextBudgetLabel.textContent = presentation.tokenLabel;
+      contextBudgetPercent.textContent = i18n.t('contextWindow.attachedTokens', {
+        tokens: presentation.tokenValueLabel,
+      });
+      contextBudgetTokens.textContent = presentation.hasTotal
+        ? i18n.t('contextWindow.attachedReference', {
+            percent: presentation.percentageLabel,
+            total: presentation.totalLabel,
+          })
+        : '';
+      contextBudgetTokenizer.textContent = i18n.t('contextWindow.attachedExcludes');
+      contextBudgetPolicy.textContent = '';
+    } else if (presentation.hasTotal) {
+      contextBudgetTitle.textContent = i18n.t('contextWindow.title');
+      contextBudgetLabel.textContent = `${presentation.percentageLabel}%`;
+      contextBudgetPercent.textContent = i18n.t('contextWindow.usedPercent', { percent: presentation.percentageLabel });
+      contextBudgetTokens.textContent = i18n.t('contextWindow.usedTokens', { used: presentation.tokenValueLabel });
+      contextBudgetTokenizer.textContent = i18n.t('contextWindow.totalTokens', { total: presentation.totalLabel });
       contextBudgetPolicy.textContent = [
-        isEstimated ? i18n.t('contextWindow.estimated') : '',
-        i18n.t('contextWindow.remaining', { remaining }),
-        profile.autoCompactsContext ? i18n.t('contextWindow.autoCompact') : '',
+        presentation.showRemaining ? i18n.t('contextWindow.remaining', { remaining: presentation.remainingLabel }) : '',
+        presentation.showAutoCompact ? i18n.t('contextWindow.autoCompact') : '',
       ].filter(Boolean).join(' · ');
     } else {
-      contextBudgetLabel.textContent = isEstimated ? `~${used}` : used;
-      contextBudgetPercent.textContent = i18n.t('contextWindow.usedTokens', { used });
+      contextBudgetTitle.textContent = i18n.t('contextWindow.title');
+      contextBudgetLabel.textContent = presentation.tokenLabel;
+      contextBudgetPercent.textContent = i18n.t('contextWindow.usedTokens', { used: presentation.tokenValueLabel });
       contextBudgetTokens.textContent = contextSummary.workspace || '';
       contextBudgetTokenizer.textContent = contextSummary.activeFile || '';
-      contextBudgetPolicy.textContent = [
-        isEstimated ? i18n.t('contextWindow.estimated') : '',
-        profile.autoCompactsContext ? i18n.t('contextWindow.autoCompact') : '',
-      ].filter(Boolean).join(' · ');
+      contextBudgetPolicy.textContent = '';
     }
     contextBudget.title = [
-      i18n.t('contextWindow.title'),
+      contextBudgetTitle.textContent,
       contextBudgetPercent.textContent,
       contextBudgetTokens.textContent,
       contextBudgetTokenizer.textContent,
       contextBudgetPolicy.textContent,
     ].filter(Boolean).join(' ');
+    contextBudget.setAttribute('aria-label', contextBudget.title);
     positionContextBudgetPopover();
   }
 
@@ -4060,10 +4067,6 @@
     contextBudget.style.setProperty('--context-budget-popover-left', `${Math.round(left)}px`);
   }
 
-  function formatOpenCodeNumber(value) {
-    return Math.max(0, Math.round(Number(value) || 0)).toLocaleString('en-US');
-  }
-
   function formatOpenCodeTimestamp(value) {
     const date = new Date(Number(value) || Date.now());
     return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
@@ -4086,16 +4089,45 @@
   }
 
   function openCodeContextMetrics(profile) {
-    const tokenUsage = contextSummary?.tokenUsage;
-    const isExact = tokenUsage?.precision === 'exact' && Number.isFinite(Number(tokenUsage.tokens));
-    const usedTokens = isExact ? Math.max(0, Math.round(Number(tokenUsage.tokens) || 0)) : 0;
-    const totalTokens = Math.max(0, Math.round(Number(contextSummary?.contextWindowTokens) || Number(profile?.contextWindowTokens) || 0));
-    const usedPercent = totalTokens > 0 ? Math.min(100, Math.round((usedTokens / totalTokens) * 100)) : 0;
+    const presentation = contextBudgetPresentation.deriveContextBudgetPresentation({
+      tokenUsage: contextSummary?.tokenUsage,
+      totalTokens: contextSummary?.contextWindowTokens || profile?.contextWindowTokens,
+      autoCompact: profile?.autoCompactsContext,
+    });
+    if (!presentation.visible || presentation.mode === 'unavailable') {
+      return [];
+    }
+
+    if (presentation.mode === 'attached') {
+      return [
+        {
+          text: `${i18n.t('contextWindow.attachedTitle')}: ${i18n.t('contextWindow.attachedTokens', {
+            tokens: presentation.tokenValueLabel,
+          })}`,
+          strong: true,
+        },
+        ...(presentation.hasTotal
+          ? [
+              {
+                text: i18n.t('contextWindow.attachedReference', {
+                  percent: presentation.percentageLabel,
+                  total: presentation.totalLabel,
+                }),
+              },
+            ]
+          : []),
+        { text: i18n.t('contextWindow.attachedExcludes') },
+      ];
+    }
 
     return [
-      { text: `${formatOpenCodeNumber(usedTokens)} tokens`, strong: true },
-      { text: `${usedPercent}% used` },
-      { text: '$0.00 spent' },
+      { text: i18n.t('contextWindow.usedTokens', { used: presentation.tokenValueLabel }), strong: true },
+      ...(presentation.hasTotal
+        ? [
+            { text: i18n.t('contextWindow.usedPercent', { percent: presentation.percentageLabel }) },
+            { text: i18n.t('contextWindow.remaining', { remaining: presentation.remainingLabel }) },
+          ]
+        : []),
     ];
   }
 

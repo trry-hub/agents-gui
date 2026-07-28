@@ -67,6 +67,11 @@ const workbenchLayout = require('../media/workbenchLayout.js');
 const taskBoardState = require('../media/taskBoardState.js');
 const composerState = require('../media/composerState.js');
 const providerOptions = require('../media/providerOptions.js');
+const {
+  deriveContextBudgetPresentation,
+  formatPercentage,
+  formatTokenCount,
+} = require('../media/contextBudget.js');
 
 test('buildAssistantPrompt includes provider agent mode, action, user request, and selected code context', () => {
   const prompt = buildAssistantPrompt({
@@ -1128,6 +1133,82 @@ test('context token usage ignores the empty IDE context wrapper', () => {
   const usage = countContextTokens({ diagnostics: [] }, {});
 
   assert.equal(usage.tokens, 0);
+});
+
+test('attached context estimate uses a truthful reference-window presentation', () => {
+  const presentation = deriveContextBudgetPresentation({
+    tokenUsage: { precision: 'estimated', scope: 'attached-context', tokens: 23 },
+    totalTokens: 128000,
+    autoCompact: true,
+  });
+
+  assert.equal(presentation.mode, 'attached');
+  assert.equal(presentation.tokenLabel, '~23');
+  assert.equal(presentation.percentageLabel, '<0.1');
+  assert.equal(presentation.showRemaining, false);
+  assert.equal(presentation.showAutoCompact, false);
+  assert.equal(presentation.ring, 'neutral');
+});
+
+test('exact session context preserves precise remaining capacity and auto-compact metadata', () => {
+  const presentation = deriveContextBudgetPresentation({
+    tokenUsage: { precision: 'exact', scope: 'session-context', tokens: 23 },
+    totalTokens: 128000,
+    autoCompact: true,
+  });
+
+  assert.equal(presentation.mode, 'session');
+  assert.equal(presentation.tokenLabel, '23');
+  assert.equal(presentation.percentageLabel, '<0.1');
+  assert.equal(presentation.totalLabel, '128k');
+  assert.equal(presentation.remainingLabel, '127.98k');
+  assert.equal(presentation.showRemaining, true);
+  assert.equal(presentation.showAutoCompact, true);
+});
+
+test('context budget formatting keeps small percentages and useful token precision', () => {
+  assert.equal(formatPercentage(0), '0');
+  assert.equal(formatPercentage(0.01796875), '<0.1');
+  assert.equal(formatPercentage(0.1), '0.1');
+  assert.equal(formatPercentage(1), '1');
+  assert.equal(formatTokenCount(128000), '128k');
+  assert.equal(formatTokenCount(127977), '127.98k');
+  assert.equal(formatTokenCount(999), '999');
+});
+
+test('context budget fails closed for unknown scope and hides an empty attached snapshot', () => {
+  assert.equal(
+    deriveContextBudgetPresentation({
+      tokenUsage: { precision: 'estimated', tokens: 23 },
+      totalTokens: 128000,
+    }).mode,
+    'attached'
+  );
+  assert.equal(
+    deriveContextBudgetPresentation({
+      tokenUsage: { precision: 'exact', tokens: 23 },
+      totalTokens: 128000,
+    }).mode,
+    'session'
+  );
+  assert.equal(
+    deriveContextBudgetPresentation({
+      tokenUsage: { precision: 'estimated', scope: 'attached-context', tokens: 0 },
+      totalTokens: 128000,
+    }).visible,
+    false
+  );
+});
+
+test('context budget keeps unsupported precision unavailable even when it has a numeric token field', () => {
+  const presentation = deriveContextBudgetPresentation({
+    tokenUsage: { precision: 'unavailable', scope: 'attached-context', tokens: 23 },
+    totalTokens: 128000,
+  });
+
+  assert.equal(presentation.mode, 'unavailable');
+  assert.equal(presentation.visible, true);
+  assert.equal(presentation.tokenLabel, undefined);
 });
 
 test('context window resolution prefers a known model before the profile fallback', () => {
@@ -2830,40 +2911,52 @@ test('webview provider status keeps transient running text out of the composer',
   assert.doesNotMatch(css, /\.prompt-shell\.is-busy\s*\{/);
 });
 
-test('webview displays attached context window usage details', () => {
+test('webview displays scope-accurate context budget details', () => {
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const assets = JSON.parse(readFileSync(new URL('../media/webview-assets.json', import.meta.url), 'utf8'));
+  const openCodeMetricsSource = script.slice(
+    script.indexOf('function openCodeContextMetrics(profile)'),
+    script.indexOf('function openCodeMcpStatusLabel(entry)')
+  );
 
   assert.match(html, /id="contextBudget"/);
   assert.match(html, /id="contextBudgetLabel"/);
   assert.match(html, /id="contextBudgetTokenizer"/);
+  assert.match(html, /__CONTEXT_BUDGET_JS_URI__[\s\S]*__MAIN_JS_URI__/);
+  assert.ok(assets.assets.some((asset) => asset.path === 'contextBudget.js'));
   assert.match(script, /const contextBudgetPopover = contextBudget\?\.querySelector\('\.context-budget-popover'\);/);
+  assert.match(script, /const contextBudgetPresentation = window\.AgentsGuiContextBudget;/);
+  assert.match(script, /deriveContextBudgetPresentation\(/);
   assert.match(script, /function renderContextBudget/);
   assert.match(script, /positionContextBudgetPopover\(\);/);
-  assert.match(script, /profile\.contextWindowTokens/);
-  assert.match(script, /contextSummary\?\.tokenUsage/);
+  assert.match(script, /contextWindow\.attachedTitle/);
+  assert.match(script, /contextWindow\.attachedTokens', \{\s*tokens: presentation\.tokenValueLabel,/s);
+  assert.match(script, /contextWindow\.attachedReference/);
+  assert.match(script, /contextWindow\.attachedExcludes/);
+  assert.match(script, /contextBudget\.setAttribute\('aria-label', contextBudget\.title\);/);
   assert.match(script, /case 'contextSummary':[\s\S]*renderContextBudget\(\);[\s\S]*break;/);
-  assert.match(script, /contextWindow\.usedPercent/);
-  assert.match(script, /contextWindow\.usedTokens/);
-  assert.match(script, /contextWindow\.totalTokens/);
-  assert.match(script, /contextWindow\.remaining/);
-  assert.match(script, /contextWindow\.autoCompact/);
-  assert.match(script, /tokenUsage\.precision === 'exact'/);
-  assert.match(script, /tokenUsage\.precision === 'estimated'/);
-  assert.match(script, /contextWindow\.estimated/);
+  assert.match(script, /contextBudget\.classList\.toggle\('is-attached'/);
+  assert.match(script, /openCodeContextMetrics\(profile\)/);
+  assert.doesNotMatch(script, /\$0\.00 spent/);
+  assert.match(openCodeMetricsSource, /i18n\.t\('contextWindow\.attachedTitle'/);
+  assert.match(openCodeMetricsSource, /i18n\.t\('contextWindow\.attachedReference'/);
+  assert.match(openCodeMetricsSource, /i18n\.t\('contextWindow\.attachedExcludes'/);
   assert.match(script, /contextWindow\.exactUnavailable/);
   assert.match(script, /contextBudgetTokens\.textContent = i18n\.t\('contextWindow\.providerManaged'/);
   assert.match(css, /\.context-budget\s*\{/);
   assert.match(css, /\.context-budget-ring\s*\{\s*[^}]*width:\s*14px;/s);
+  assert.match(css, /\.context-budget\.is-attached \.context-budget-ring/);
   assert.match(css, /\.context-budget-popover\s*\{/);
   assert.match(css, /\.context-budget-popover\s*\{\s*[^}]*width:\s*min\(220px,\s*calc\(100vw - 20px\)\);/s);
   assert.match(css, /\.context-budget:hover \.context-budget-popover/);
-  assert.match(i18nScript, /'contextWindow\.title'/);
-  assert.match(i18nScript, /'contextWindow\.totalTokens'/);
-  assert.match(i18nScript, /'contextWindow\.remaining'/);
-  assert.match(i18nScript, /'contextWindow\.estimated'/);
+  assert.match(i18nScript, /'contextWindow\.attachedTitle': 'Attached IDE context'/);
+  assert.match(i18nScript, /'contextWindow\.attachedTokens': '~\{tokens\} tokens'/);
+  assert.match(i18nScript, /'contextWindow\.attachedTitle': '附加的 IDE 上下文'/);
+  assert.match(i18nScript, /'contextWindow\.attachedExcludes': 'Excludes chat history and provider context'/);
+  assert.match(i18nScript, /'contextWindow\.attachedExcludes': '不含对话历史和模型侧上下文'/);
 });
 
 test('webview hides low-value default composer chips', () => {

@@ -754,6 +754,10 @@ body.is-sidebar-visible .thread-select {
   border-color: color-mix(in srgb, var(--assistant-muted) 42%, transparent);
 }
 
+.context-budget.is-attached .context-budget-ring {
+  border-color: color-mix(in srgb, var(--assistant-muted) 48%, transparent);
+}
+
 .context-budget-popover {
   position: absolute;
   left: var(--context-budget-popover-left, 0px);

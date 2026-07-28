@@ -20,6 +20,7 @@
     { "placeholder": "__STATE_MANAGER_JS_URI__", "path": "stateManager.js" },
     { "placeholder": "__PACED_REVEAL_JS_URI__", "path": "pacedReveal.js" },
     { "placeholder": "__CODEX_RENDERER_JS_URI__", "path": "codex-renderer.js" },
+    { "placeholder": "__CONTEXT_BUDGET_JS_URI__", "path": "contextBudget.js" },
     { "placeholder": "__MAIN_JS_URI__", "path": "main.js" }
   ],
   "providerIcons": {
