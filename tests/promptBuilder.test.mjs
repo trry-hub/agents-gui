@@ -823,10 +823,14 @@ test('cli manager warms and attaches background CLI servers when available', () 
   assert.match(source, /this\.processRunner\.terminate\(proc\)/);
   assert.match(source, /proc\.on\('close', \(code\) => \{[\s\S]*?this\.processRunner\.killTree\(proc, 'SIGTERM'\)/);
   assert.match(source, /const clearState = \(\) => \{[\s\S]*?this\.processRunner\.killTree\(backgroundProc, 'SIGTERM'\)/);
-  assert.match(processRunnerSource, /detached:\s*process\.platform !== 'win32'/);
+  assert.match(processRunnerSource, /from 'cross-spawn'/);
+  assert.match(processRunnerSource, /spawnProbeProcess/);
+  assert.match(discoverySource, /this\.processRunner\.spawnProbeProcess/);
+  assert.doesNotMatch(discoverySource, /from 'child_process'/);
+  assert.doesNotMatch(processRunnerSource, /shell:\s*true/);
   assert.match(processRunnerSource, /PROCESS_TERMINATE_GRACE_MS/);
   assert.match(processRunnerSource, /process\.kill\(-proc\.pid,\s*signal\)/);
-  assert.match(processRunnerSource, /spawn\('taskkill', args, \{ stdio: 'ignore', windowsHide: true \}\)/);
+  assert.match(processRunnerSource, /this\.spawnImpl\('taskkill', args/);
   assert.match(sidebarSource, /const newSession = await this\.agentRuntime\.startPrompt/);
   assert.match(sidebarSource, /this\.sessionController\.register\(session\)/);
   assert.match(sessionControllerSource, /session\.onEvent\.event\(\(event\) =>/);

@@ -392,8 +392,14 @@ test('CLI process lifecycle stays behind a dedicated process runner', () => {
   assert.match(cliProcessRunnerSource, /export class CliProcessRunner/);
   assert.match(cliProcessRunnerSource, /spawnPromptProcess/);
   assert.match(cliProcessRunnerSource, /spawnBackgroundProcess/);
+  assert.match(cliProcessRunnerSource, /from 'cross-spawn'/);
+  assert.match(cliProcessRunnerSource, /spawnProbeProcess/);
+  assert.match(cliDiscoverySource, /this\.processRunner\.spawnProbeProcess/);
+  assert.doesNotMatch(cliDiscoverySource, /from 'child_process'/);
+  assert.doesNotMatch(cliProcessRunnerSource, /shell:\s*true/);
   assert.match(cliProcessRunnerSource, /terminate\(proc: ChildProcess\)/);
   assert.match(cliProcessRunnerSource, /killTree\(proc: ChildProcess, signal: NodeJS\.Signals\)/);
+  assert.match(cliProcessRunnerSource, /this\.spawnImpl\('taskkill', args/);
   assert.match(architectureDoc, /CLI process spawning/);
 });
 

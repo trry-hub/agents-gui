@@ -87,6 +87,7 @@ export class CliManager {
   private readonly cliDiscovery = new CliDiscovery({
     workspaceRoot: () => this.getWorkspaceRoot(),
     openCodeClient: this.openCodeClient,
+    processRunner: this.processRunner,
   });
 
   getWorkspaceRoot(): string {

@@ -1,7 +1,7 @@
-import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { CliProcessRunner } from './cliProcessRunner';
 import { CliAgentMode, CliModelOption, CliProfile } from './cliProfiles';
 import {
   getLoginShellLookupArgs,
@@ -22,6 +22,7 @@ interface CliDiscoveryOptions {
   workspaceRoot(): string;
   openCodeClient: OpenCodeServerClient;
   openCodeLocalState?: OpenCodeLocalState;
+  processRunner?: CliProcessRunner;
 }
 
 export interface CliProfileStatusOptions {
@@ -46,9 +47,11 @@ export class CliDiscovery {
   };
 
   private readonly openCodeLocalState: OpenCodeLocalState;
+  private readonly processRunner: CliProcessRunner;
 
   constructor(private readonly options: CliDiscoveryOptions) {
     this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
+    this.processRunner = options.processRunner ?? new CliProcessRunner();
   }
 
   async checkInstalled(profile: CliProfile | undefined): Promise<boolean> {
@@ -246,9 +249,9 @@ export class CliDiscovery {
   private lookupCommandInPath(command: string): Promise<string | undefined> {
     return new Promise<string | undefined>((resolve) => {
       const lookupCommand = process.platform === 'win32' ? 'where' : 'which';
-      const proc = spawn(lookupCommand, [command], {
+      const proc = this.processRunner.spawnProbeProcess(lookupCommand, [command], {
         env: withCliLookupPath(process.env),
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stderr: 'ignore',
       });
       let output = '';
       proc.stdout?.on('data', (data: Buffer) => {
@@ -268,10 +271,14 @@ export class CliDiscovery {
     shellPath: string
   ): Promise<string | undefined> {
     return new Promise<string | undefined>((resolve) => {
-      const proc = spawn(shellPath, getLoginShellLookupArgs(command, shellPath), {
-        env: withCliLookupPath(process.env),
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
+      const proc = this.processRunner.spawnProbeProcess(
+        shellPath,
+        getLoginShellLookupArgs(command, shellPath),
+        {
+          env: withCliLookupPath(process.env),
+          stderr: 'ignore',
+        }
+      );
       let output = '';
       proc.stdout?.on('data', (data: Buffer) => {
         output += data.toString();
@@ -302,20 +309,20 @@ export class CliDiscovery {
       const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
       const env = withCliLookupPath(
         {
-        ...process.env,
-        OPENCODE_DB: path.join(
-          os.tmpdir(),
-          `agents-gui-opencode-debug-config-${stableHash(cwd).toString(16)}-${process.pid}.db`
-        ),
-        OMO_DISABLE_POSTHOG: '1',
-        OMO_SEND_ANONYMOUS_TELEMETRY: '0',
+          ...process.env,
+          OPENCODE_DB: path.join(
+            os.tmpdir(),
+            `agents-gui-opencode-debug-config-${stableHash(cwd).toString(16)}-${process.pid}.db`
+          ),
+          OMO_DISABLE_POSTHOG: '1',
+          OMO_SEND_ANONYMOUS_TELEMETRY: '0',
         },
         [commandDir]
       );
-      const proc = spawn(command, ['debug', 'config'], {
+      const proc = this.processRunner.spawnProbeProcess(command, ['debug', 'config'], {
         cwd,
         env,
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stderr: 'ignore',
       });
       let output = '';
       let settled = false;
@@ -377,20 +384,20 @@ export class CliDiscovery {
         const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
         const env = withCliLookupPath(
           {
-          ...process.env,
-          OPENCODE_DB: path.join(
-            os.tmpdir(),
-            `agents-gui-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
-          ),
-          OMO_DISABLE_POSTHOG: '1',
-          OMO_SEND_ANONYMOUS_TELEMETRY: '0',
+            ...process.env,
+            OPENCODE_DB: path.join(
+              os.tmpdir(),
+              `agents-gui-opencode-models-${stableHash(cwd).toString(16)}-${process.pid}.db`
+            ),
+            OMO_DISABLE_POSTHOG: '1',
+            OMO_SEND_ANONYMOUS_TELEMETRY: '0',
           },
           [commandDir]
         );
-        const proc = spawn(command, ['models'], {
+        const proc = this.processRunner.spawnProbeProcess(command, ['models'], {
           cwd,
           env,
-          stdio: ['ignore', 'pipe', 'ignore'],
+          stderr: 'ignore',
         });
         let output = '';
         let cliDone = false;
@@ -461,16 +468,20 @@ export class CliDiscovery {
 
       return new Promise<string | undefined>((resolve) => {
         const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-        const proc = spawn(command, profile.versionArgs ?? ['--version'], {
-          env: withCliLookupPath(
-            {
-            ...process.env,
-            ...this.expandProfileEnv(profile.env, this.options.workspaceRoot()),
-            },
-            [commandDir]
-          ),
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        const proc = this.processRunner.spawnProbeProcess(
+          command,
+          profile.versionArgs ?? ['--version'],
+          {
+            env: withCliLookupPath(
+              {
+                ...process.env,
+                ...this.expandProfileEnv(profile.env, this.options.workspaceRoot()),
+              },
+              [commandDir]
+            ),
+            stderr: 'pipe',
+          }
+        );
         let output = '';
         let settled = false;
         const finish = (version: string | undefined) => {
@@ -494,7 +505,12 @@ export class CliDiscovery {
           output += data.toString();
         });
         proc.on('close', () => finish(normalizeCommandVersionOutput(output)));
-        proc.on('error', () => finish(undefined));
+        proc.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') {
+            this.evictCommandPath(profile.command);
+          }
+          finish(undefined);
+        });
       });
     });
   }

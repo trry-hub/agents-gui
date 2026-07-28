@@ -1,11 +1,35 @@
-import { spawn, type ChildProcess, type StdioOptions } from 'child_process';
+import crossSpawn from 'cross-spawn';
+import type { ChildProcess, SpawnOptions, StdioOptions } from 'child_process';
 
 export type CliProcessStdin = 'ignore' | 'pipe';
+export type CliSpawn = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions
+) => ChildProcess;
+
+export interface CliProcessRunnerOptions {
+  spawn?: CliSpawn;
+  platform?: NodeJS.Platform;
+}
+
+export interface CliProbeProcessOptions {
+  cwd?: string;
+  env: NodeJS.ProcessEnv;
+  stderr?: 'ignore' | 'pipe';
+}
 
 const PROCESS_TERMINATE_GRACE_MS = 1500;
 
 export class CliProcessRunner {
   private forceKillTimers = new WeakMap<ChildProcess, NodeJS.Timeout>();
+  private readonly spawnImpl: CliSpawn;
+  private readonly platform: NodeJS.Platform;
+
+  constructor(options: CliProcessRunnerOptions = {}) {
+    this.spawnImpl = options.spawn ?? crossSpawn;
+    this.platform = options.platform ?? process.platform;
+  }
 
   spawnPromptProcess(
     command: string,
@@ -14,7 +38,7 @@ export class CliProcessRunner {
     env: NodeJS.ProcessEnv,
     stdin: CliProcessStdin
   ): ChildProcess {
-    return this.spawnProcess(command, args, cwd, env, [stdin, 'pipe', 'pipe']);
+    return this.spawnProcess(command, args, cwd, env, [stdin, 'pipe', 'pipe'], true);
   }
 
   spawnBackgroundProcess(
@@ -23,7 +47,22 @@ export class CliProcessRunner {
     cwd: string,
     env: NodeJS.ProcessEnv
   ): ChildProcess {
-    return this.spawnProcess(command, args, cwd, env, ['ignore', 'ignore', 'ignore']);
+    return this.spawnProcess(command, args, cwd, env, ['ignore', 'ignore', 'ignore'], true);
+  }
+
+  spawnProbeProcess(
+    command: string,
+    args: string[],
+    options: CliProbeProcessOptions
+  ): ChildProcess {
+    return this.spawnProcess(
+      command,
+      args,
+      options.cwd,
+      options.env,
+      ['ignore', 'pipe', options.stderr ?? 'ignore'],
+      false
+    );
   }
 
   terminate(proc: ChildProcess): void {
@@ -53,13 +92,13 @@ export class CliProcessRunner {
       return;
     }
 
-    if (process.platform === 'win32') {
+    if (this.platform === 'win32') {
       const args = ['/pid', String(proc.pid), '/T'];
       if (signal === 'SIGKILL') {
         args.push('/F');
       }
       try {
-        spawn('taskkill', args, { stdio: 'ignore', windowsHide: true });
+        this.spawnImpl('taskkill', args, { stdio: 'ignore', windowsHide: true });
       } catch {
         try {
           proc.kill(signal);
@@ -88,15 +127,17 @@ export class CliProcessRunner {
   private spawnProcess(
     command: string,
     args: string[],
-    cwd: string,
+    cwd: string | undefined,
     env: NodeJS.ProcessEnv,
-    stdio: StdioOptions
+    stdio: StdioOptions,
+    detachProcessGroup: boolean
   ): ChildProcess {
-    return spawn(command, args, {
+    return this.spawnImpl(command, args, {
       cwd,
       env,
-      detached: process.platform !== 'win32',
+      detached: detachProcessGroup && this.platform !== 'win32',
       stdio,
+      windowsHide: true,
     });
   }
 }
