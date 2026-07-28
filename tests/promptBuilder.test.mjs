@@ -1131,10 +1131,12 @@ test('context token usage ignores the empty IDE context wrapper', () => {
 });
 
 test('context window resolution prefers a known model before the profile fallback', () => {
-  const profile = { contextWindowTokens: 128000 };
+  const profile = { contextWindowTokens: 258000 };
 
   assert.equal(resolveContextWindowTokens(profile, 'openai/gpt-4.1'), 1048576);
-  assert.equal(resolveContextWindowTokens(profile, 'provider/unknown-model'), 128000);
+  assert.equal(resolveContextWindowTokens(profile, 'provider/unknown-model'), 258000);
+  assert.equal(resolveContextWindowTokens(profile, 'gpt-5.5'), 128000);
+  assert.equal(resolveContextWindowTokens(profile, 'unknown-model'), 258000);
 });
 
 test('extension contributes reload window command for debugging', () => {

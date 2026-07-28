@@ -970,6 +970,21 @@ export function inferContextWindowTokens(modelId: string | undefined): number | 
   const [provider, ...rest] = modelId.split('/');
   const modelName = rest.join('/') || modelId;
 
+  if (rest.length === 0) {
+    const openAiWindow = OPENAI_CONTEXT_WINDOW_TOKENS[modelId];
+    const anthropicWindow = ANTHROPIC_CONTEXT_WINDOW_TOKENS[modelId];
+
+    if (
+      openAiWindow !== undefined &&
+      anthropicWindow !== undefined &&
+      openAiWindow !== anthropicWindow
+    ) {
+      return undefined;
+    }
+
+    return openAiWindow ?? anthropicWindow;
+  }
+
   if (provider === 'openai' || provider === 'azure') {
     return OPENAI_CONTEXT_WINDOW_TOKENS[modelName];
   }
