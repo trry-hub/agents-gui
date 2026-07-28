@@ -441,3 +441,7 @@ test('packaged build avoids tokenizer wasm runtime assets', () => {
   assert.doesNotMatch(esbuildScript, /copy-runtime-assets/);
   assert.doesNotMatch(vscodeIgnore, /^\s*!\s*dist\/tiktoken_bg\.wasm\s*$/m);
 });
+
+test('packaged build excludes internal Git worktrees', () => {
+  assert.match(vscodeIgnore, /^\.worktrees\/\*\*\s*$/m);
+});
