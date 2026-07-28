@@ -96,6 +96,14 @@ test('test script uses cross-platform Node test discovery', () => {
   assert.equal(manifest.scripts.test, 'npm run build:test && node scripts/run-tests.mjs');
 });
 
+test('release verification uses the serial Node test runner option', () => {
+  assert.match(
+    releaseVerifySource,
+    /args: \['run', 'test', '--', '--test-concurrency=1'\]/
+  );
+  assert.doesNotMatch(releaseVerifySource, /--runInBand/);
+});
+
 test('all contributed commands are registered by the extension host entrypoint', () => {
   for (const command of manifest.contributes.commands.map((entry) => entry.command)) {
     const escaped = escapeRegExp(command);
@@ -343,7 +351,6 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
   assert.match(extensionSmokeHarnessSource, /openCodeTextDelta\('smoke reply'\)/);
   assert.match(extensionSmokeHarnessSource, /requiredCommands(?:: string\[\])? = \[/);
   assert.match(releaseVerifySource, /npmCommand/);
-  assert.match(releaseVerifySource, /'run', 'test', '--', '--runInBand'/);
   assert.match(releaseVerifySource, /'run', 'smoke:extension'/);
   assert.match(releaseVerifySource, /'audit', '--omit=dev', '--omit=optional'/);
   assert.match(releaseVerifySource, /'run', 'package'/);

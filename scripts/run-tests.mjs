@@ -10,7 +10,7 @@ const testFiles = readdirSync(testsDirectory, { withFileTypes: true })
 
 const result = spawnSync(
   process.execPath,
-  ['--test', ...testFiles, ...process.argv.slice(2)],
+  ['--test', ...process.argv.slice(2), ...testFiles],
   { stdio: 'inherit' }
 );
 if (result.error) {

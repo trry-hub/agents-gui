@@ -3,12 +3,31 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const Module = require('node:module');
+const pathModule = require('node:path');
 const {
   buildCliLookupPath,
   mergePathEntries,
   normalizeCommandPathOutput,
   withCliLookupPath,
 } = require('../.test-dist/cliPathResolver.js');
+
+function loadResolverWithHostPath(hostPath) {
+  const resolverPath = require.resolve('../.test-dist/cliPathResolver.js');
+  const originalLoad = Module._load;
+  delete require.cache[resolverPath];
+  Module._load = function (request, parent, isMain) {
+    return request === 'path'
+      ? hostPath
+      : originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    return require(resolverPath);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[resolverPath];
+  }
+}
 
 test('buildCliLookupPath adds and deduplicates Windows user CLI locations', () => {
   const result = buildCliLookupPath({
@@ -36,10 +55,27 @@ test('buildCliLookupPath adds and deduplicates Windows user CLI locations', () =
   assert.ok(result.includes('C:\\Users\\Agent\\AppData\\Local\\Programs\\Python\\Scripts'));
 });
 
-test('mergePathEntries uses Windows delimiter and case-insensitive first-match precedence', () => {
+test('mergePathEntries uses requested Windows semantics on a simulated POSIX host', () => {
+  const simulatedHostPath = {
+    ...pathModule,
+    delimiter: pathModule.posix.delimiter,
+  };
+  const resolver = loadResolverWithHostPath(simulatedHostPath);
   assert.equal(
-    mergePathEntries(['C:\\One;C:\\Two', 'c:\\one', 'C:\\Three'], 'win32'),
+    resolver.mergePathEntries(['C:\\One;C:\\Two', 'c:\\one', 'C:\\Three'], 'win32'),
     'C:\\One;C:\\Two;C:\\Three'
+  );
+});
+
+test('mergePathEntries uses requested POSIX semantics on a simulated Windows host', () => {
+  const simulatedHostPath = {
+    ...pathModule,
+    delimiter: pathModule.win32.delimiter,
+  };
+  const resolver = loadResolverWithHostPath(simulatedHostPath);
+  assert.equal(
+    resolver.mergePathEntries(['/usr/local/bin:/usr/bin', '/opt/bin'], 'linux'),
+    '/usr/local/bin:/usr/bin:/opt/bin'
   );
 });
 

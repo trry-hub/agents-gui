@@ -25,7 +25,7 @@ const steps = [
   {
     label: 'unit and architecture tests',
     command: npmCommand,
-    args: ['run', 'test', '--', '--runInBand'],
+    args: ['run', 'test', '--', '--test-concurrency=1'],
   },
   {
     label: 'Extension Development Host smoke',

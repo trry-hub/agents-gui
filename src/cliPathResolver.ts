@@ -70,7 +70,7 @@ export function mergePathEntries(
   entries: Array<string | undefined>,
   platform: NodeJS.Platform = process.platform
 ): string {
-  const delimiter = platform === 'win32' ? ';' : path.delimiter;
+  const delimiter = platform === 'win32' ? path.win32.delimiter : path.posix.delimiter;
   const seen = new Set<string>();
   const merged: string[] = [];
 
