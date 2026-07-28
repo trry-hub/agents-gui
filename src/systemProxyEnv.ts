@@ -1,16 +1,29 @@
 import { execFileSync } from 'child_process';
 
-let cachedProxyEnv: Record<string, string> | undefined;
+export interface SystemProxyOptions {
+  platform?: NodeJS.Platform;
+  readMacProxy?: () => string;
+  readWindowsInternetSettings?: () => string;
+}
 
 export function getSystemProxyEnv(
-  sourceEnv: NodeJS.ProcessEnv = process.env
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+  options: SystemProxyOptions = {}
 ): Record<string, string> {
-  if (hasProxyEnv(sourceEnv) || process.platform !== 'darwin') {
+  if (hasProxyEnv(sourceEnv)) {
     return {};
   }
 
-  cachedProxyEnv ??= readMacSystemProxyEnv();
-  return cachedProxyEnv;
+  const platform = options.platform ?? process.platform;
+  if (platform === 'darwin') {
+    const output = (options.readMacProxy ?? readScutilProxy)();
+    return output ? parseMacSystemProxyEnv(output) : {};
+  }
+  if (platform === 'win32') {
+    const output = (options.readWindowsInternetSettings ?? readWindowsInternetSettings)();
+    return output ? parseWindowsInternetSettings(output) : {};
+  }
+  return {};
 }
 
 function hasProxyEnv(env: NodeJS.ProcessEnv): boolean {
@@ -22,15 +35,6 @@ function hasProxyEnv(env: NodeJS.ProcessEnv): boolean {
     env.https_proxy ||
     env.all_proxy
   );
-}
-
-function readMacSystemProxyEnv(): Record<string, string> {
-  const output = readScutilProxy();
-  if (!output) {
-    return {};
-  }
-
-  return parseMacSystemProxyEnv(output);
 }
 
 export function parseMacSystemProxyEnv(output: string): Record<string, string> {
@@ -71,6 +75,101 @@ function readScutilProxy(): string {
   } catch {
     return '';
   }
+}
+
+function readWindowsInternetSettings(): string {
+  try {
+    return execFileSync(
+      'reg.exe',
+      ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'],
+      {
+        encoding: 'utf8',
+        timeout: 1000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      }
+    );
+  } catch {
+    return '';
+  }
+}
+
+export function parseWindowsInternetSettings(output: string): Record<string, string> {
+  const values = readWindowsRegistryValues(output);
+  if (values.ProxyEnable !== '0x1' && values.ProxyEnable !== '1') {
+    return {};
+  }
+
+  const proxyServer = values.ProxyServer?.trim();
+  if (!proxyServer) {
+    return {};
+  }
+
+  const env: Record<string, string> = {};
+  const protocolEntries = Object.fromEntries(
+    proxyServer
+      .split(';')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.includes('='))
+      .map((entry) => {
+        const separator = entry.indexOf('=');
+        return [entry.slice(0, separator).toLowerCase(), entry.slice(separator + 1).trim()];
+      })
+  );
+
+  if (Object.keys(protocolEntries).length === 0) {
+    assignProxy(env, 'HTTP_PROXY', withScheme(proxyServer, 'http'));
+    assignProxy(env, 'HTTPS_PROXY', withScheme(proxyServer, 'http'));
+  } else {
+    assignProxy(env, 'HTTP_PROXY', withScheme(protocolEntries.http, 'http'));
+    assignProxy(env, 'HTTPS_PROXY', withScheme(protocolEntries.https, 'http'));
+    assignProxy(env, 'ALL_PROXY', withScheme(protocolEntries.socks, 'socks5'));
+  }
+
+  const noProxy = normalizeWindowsProxyOverride(values.ProxyOverride || '');
+  env.NO_PROXY = noProxy;
+  env.no_proxy = noProxy;
+  return env;
+}
+
+function readWindowsRegistryValues(output: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const match of output.matchAll(
+    /^\s*(ProxyEnable|ProxyServer|ProxyOverride)\s+REG_[A-Z_]+\s+(.+?)\s*$/gim
+  )) {
+    values[match[1]] = match[2].trim();
+  }
+  return values;
+}
+
+function assignProxy(
+  env: Record<string, string>,
+  upperName: 'HTTP_PROXY' | 'HTTPS_PROXY' | 'ALL_PROXY',
+  value: string
+): void {
+  if (!value) {
+    return;
+  }
+  env[upperName] = value;
+  env[upperName.toLowerCase()] = value;
+}
+
+function withScheme(value: string | undefined, scheme: 'http' | 'socks5'): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `${scheme}://${trimmed}`;
+}
+
+function normalizeWindowsProxyOverride(value: string): string {
+  const defaults = ['localhost', '127.0.0.1', '.local'];
+  const entries = value
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry && entry.toLowerCase() !== '<local>')
+    .map((entry) => (entry.startsWith('*.') ? entry.slice(1) : entry));
+  return [...new Set([...defaults, ...entries])].join(',');
 }
 
 function readProxyUrl(

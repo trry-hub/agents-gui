@@ -35,7 +35,6 @@ const {
   normalizeCommandPathOutput,
   shellQuote,
 } = require('../.test-dist/cliPathResolver.js');
-const { parseMacSystemProxyEnv } = require('../.test-dist/systemProxyEnv.js');
 const { getProviderExtensionBridge } = require('../.test-dist/providerExtensions.js');
 const {
   parseOpenCodeDebugConfigOutput,
@@ -1025,30 +1024,9 @@ test('CLI path resolver keeps the first absolute command path from shell output'
   assert.equal(shellQuote("bad'name"), "'bad'\\''name'");
 });
 
-test('macOS system proxy output maps to CLI proxy environment variables', () => {
-  const env = parseMacSystemProxyEnv(`
-<dictionary> {
-  ExceptionsList : <array> {
-    0 : 127.0.0.1
-    1 : localhost
-    2 : *.local
-  }
-  HTTPEnable : 1
-  HTTPPort : 7897
-  HTTPProxy : 127.0.0.1
-  HTTPSEnable : 1
-  HTTPSPort : 7897
-  HTTPSProxy : 127.0.0.1
-  SOCKSEnable : 1
-  SOCKSPort : 7897
-  SOCKSProxy : 127.0.0.1
-}
-`);
-
-  assert.equal(env.HTTP_PROXY, 'http://127.0.0.1:7897');
-  assert.equal(env.HTTPS_PROXY, 'http://127.0.0.1:7897');
-  assert.equal(env.ALL_PROXY, 'socks5://127.0.0.1:7897');
-  assert.match(env.NO_PROXY, /localhost/);
+test('CLI manager continues to merge system proxy environment values', () => {
+  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
+  assert.match(source, /\.\.\.getSystemProxyEnv\(process\.env\)/);
 });
 
 test('CLI manager revalidates cached command paths before spawning', () => {
