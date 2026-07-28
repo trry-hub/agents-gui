@@ -21,7 +21,9 @@ export function getSystemProxyEnv(
     return output ? parseMacSystemProxyEnv(output) : {};
   }
   if (platform === 'win32') {
-    const output = (options.readWindowsInternetSettings ?? (() => readWindowsInternetSettings(sourceEnv)))();
+    const output = (
+      options.readWindowsInternetSettings ?? (() => readWindowsInternetSettings(sourceEnv))
+    )();
     return output ? parseWindowsInternetSettings(output) : {};
   }
   return {};

@@ -63,11 +63,7 @@ import type {
   SetupCliProfile,
   WebviewToHostMessage,
 } from './webviewProtocol';
-import {
-  providerIconPaths,
-  renderWebviewHtml,
-  webviewAssetPaths,
-} from './webviewHtmlRenderer';
+import { providerIconPaths, renderWebviewHtml, webviewAssetPaths } from './webviewHtmlRenderer';
 import {
   AGENT_MODE_STATE_KEY,
   CLAUDE_TERMINAL_BANNER_STATE_KEY,
@@ -1074,19 +1070,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       tokenUsage: countContextTokens(snapshot, profile, effectiveModel.id),
     };
     if (actionRequiresActiveFile(action) && !snapshot.activeFile) {
-      this.postError(
-        cliId,
-        runtimeT(this.locale, 'error.missingActiveFile'),
-        message.threadId
-      );
+      this.postError(cliId, runtimeT(this.locale, 'error.missingActiveFile'), message.threadId);
       return;
     }
     if (actionRequiresSelection(action) && !snapshot.selection) {
-      this.postError(
-        cliId,
-        runtimeT(this.locale, 'error.missingSelection'),
-        message.threadId
-      );
+      this.postError(cliId, runtimeT(this.locale, 'error.missingSelection'), message.threadId);
       return;
     }
 
@@ -1399,12 +1387,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return options;
   }
 
-  private postError(
-    cliId: string,
-    text: string,
-    threadId?: string,
-    sessionId?: string
-  ): void {
+  private postError(cliId: string, text: string, threadId?: string, sessionId?: string): void {
     this.postToWebview({
       command: 'error',
       cliId,
@@ -1420,10 +1403,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const assets = webviewAssetPaths(this.extensionUri);
-    const pattern = new vscode.RelativePattern(
-      this.extensionUri,
-      `media/{${assets.join(',')}}`
-    );
+    const pattern = new vscode.RelativePattern(this.extensionUri, `media/{${assets.join(',')}}`);
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const scheduleReload = () => this.scheduleWebviewReloadForDevelopment();
 

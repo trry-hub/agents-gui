@@ -10,14 +10,8 @@ export interface WebviewAssetManifest {
   static: string[];
 }
 
-export function readWebviewAssetManifest(
-  extensionUri: vscode.Uri
-): WebviewAssetManifest {
-  const manifestPath = path.join(
-    extensionUri.fsPath,
-    'media',
-    'webview-assets.json'
-  );
+export function readWebviewAssetManifest(extensionUri: vscode.Uri): WebviewAssetManifest {
+  const manifestPath = path.join(extensionUri.fsPath, 'media', 'webview-assets.json');
   return JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as WebviewAssetManifest;
 }
 
@@ -27,10 +21,7 @@ export function webviewAssetPaths(extensionUri: vscode.Uri): string[] {
     manifest.html,
     'webview-assets.json',
     ...manifest.assets.map((asset) => asset.path),
-    ...Object.values(manifest.providerIcons).flatMap((icon) => [
-      icon.light,
-      icon.dark,
-    ]),
+    ...Object.values(manifest.providerIcons).flatMap((icon) => [icon.light, icon.dark]),
     ...manifest.static,
   ];
 }
@@ -49,11 +40,7 @@ export function renderWebviewHtml(options: {
   codexRendererEnabled: boolean;
 }): string {
   const manifest = readWebviewAssetManifest(options.extensionUri);
-  const htmlPath = path.join(
-    options.extensionUri.fsPath,
-    'media',
-    manifest.html
-  );
+  const htmlPath = path.join(options.extensionUri.fsPath, 'media', manifest.html);
   let html = fs.readFileSync(htmlPath, 'utf8');
 
   const nonce = getNonce();
@@ -70,19 +57,11 @@ export function renderWebviewHtml(options: {
   html = html.replace('__CSP__', csp);
   html = html.replace(/__NONCE__/g, nonce);
   html = html.replace(/__LOCALE__/g, options.locale);
-  html = html.replace(
-    /__CODEX_RENDERER_ENABLED__/g,
-    String(options.codexRendererEnabled)
-  );
+  html = html.replace(/__CODEX_RENDERER_ENABLED__/g, String(options.codexRendererEnabled));
   for (const asset of manifest.assets) {
     html = html.replace(
       new RegExp(asset.placeholder, 'g'),
-      getWebviewUri(
-        options.extensionUri,
-        options.webview,
-        'media',
-        ...asset.path.split('/')
-      )
+      getWebviewUri(options.extensionUri, options.webview, 'media', ...asset.path.split('/'))
     );
   }
   return html;

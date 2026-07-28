@@ -176,7 +176,7 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.doesNotMatch(sidebarSource, /this\.view\?\.webview\.postMessage\(\{/);
   assert.match(
     sidebarSource,
-    /import \{[\s\S]*renderWebviewHtml,[\s\S]*webviewAssetPaths,[\s\S]*\} from '\.\/webviewHtmlRenderer';/
+    /import \{\s*providerIconPaths,\s*renderWebviewHtml,\s*webviewAssetPaths,?\s*\} from '\.\/webviewHtmlRenderer';/
   );
   assert.match(
     sidebarSource,

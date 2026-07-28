@@ -94,10 +94,7 @@ export class ThreadEventAdapter {
     if (envelopes.length > 0) {
       this.replayBuffer.push(...envelopes);
       if (this.replayBuffer.length > MAX_REPLAY_ENVELOPES) {
-        this.replayBuffer.splice(
-          0,
-          this.replayBuffer.length - MAX_REPLAY_ENVELOPES
-        );
+        this.replayBuffer.splice(0, this.replayBuffer.length - MAX_REPLAY_ENVELOPES);
       }
     }
     return envelopes;
@@ -108,15 +105,12 @@ export class ThreadEventAdapter {
   }
 
   activeRuns(): ActiveRendererRun[] {
-    return Array.from(
-      this.activeTurnBySession.entries(),
-      ([sessionId, binding]) => ({
-        providerId: binding.providerId,
-        threadId: binding.threadId,
-        sessionId,
-        turnId: binding.turnId,
-      })
-    );
+    return Array.from(this.activeTurnBySession.entries(), ([sessionId, binding]) => ({
+      providerId: binding.providerId,
+      threadId: binding.threadId,
+      sessionId,
+      turnId: binding.turnId,
+    }));
   }
 
   private startTurn(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {
@@ -148,10 +142,11 @@ export class ThreadEventAdapter {
       type: 'user-message',
       status: 'completed',
       content: String(message.text ?? ''),
-      meta: [message.actionLabel, message.agentModeLabel ?? message.agentMode]
-        .map(clean)
-        .filter(Boolean)
-        .join(' · ') || undefined,
+      meta:
+        [message.actionLabel, message.agentModeLabel ?? message.agentMode]
+          .map(clean)
+          .filter(Boolean)
+          .join(' · ') || undefined,
       attachments: Array.isArray(message.attachments) ? message.attachments : undefined,
       startedAt,
       completedAt: startedAt,
@@ -343,10 +338,7 @@ export class ThreadEventAdapter {
     ];
   }
 
-  private forwardFeedback(
-    message: LegacyLifecycleMessage,
-    failed: boolean
-  ): ThreadEventEnvelope[] {
+  private forwardFeedback(message: LegacyLifecycleMessage, failed: boolean): ThreadEventEnvelope[] {
     const binding = this.bindingFor(message);
     const content = clean(message.text);
     if (!binding || !content) {
@@ -398,19 +390,23 @@ function itemTypeForActivity(kind: ThreadActivity['kind']): ThreadItemType {
 }
 
 function activityIdentity(activity: ThreadActivity): string {
-  return [activity.kind, activity.name, activity.target]
-    .map((value) => clean(value).replace(/[^a-zA-Z0-9_.-]+/g, '-'))
-    .filter(Boolean)
-    .join(':') || 'activity';
+  return (
+    [activity.kind, activity.name, activity.target]
+      .map((value) => clean(value).replace(/[^a-zA-Z0-9_.-]+/g, '-'))
+      .filter(Boolean)
+      .join(':') || 'activity'
+  );
 }
 
 function titleFrom(value: unknown): string {
-  return String(value ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean)
-    ?.replace(/\s+/g, ' ')
-    .slice(0, 42) || 'New session';
+  return (
+    String(value ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean)
+      ?.replace(/\s+/g, ' ')
+      .slice(0, 42) || 'New session'
+  );
 }
 
 function clean(value: unknown): string {

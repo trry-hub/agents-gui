@@ -59,10 +59,7 @@ export function computeVirtualRange(options: VirtualRangeOptions): VirtualRange 
   const safeScrollOffset = clamp(scrollOffset, 0, Math.max(0, total));
   const viewportEnd = safeScrollOffset + Math.max(0, viewportHeight);
   const firstVisible = firstBottomAfter(offsets, safeScrollOffset);
-  const lastVisible = Math.max(
-    firstVisible,
-    firstOffsetAtOrAfter(offsets, viewportEnd) - 1
-  );
+  const lastVisible = Math.max(firstVisible, firstOffsetAtOrAfter(offsets, viewportEnd) - 1);
   const start = Math.max(0, firstVisible - overscan);
   const end = Math.min(turnIds.length - 1, lastVisible + overscan);
   return {
@@ -110,10 +107,7 @@ export function compensateScrollOffset(options: {
   if (options.changedIndex >= options.anchorIndex) {
     return options.scrollTop;
   }
-  return Math.max(
-    0,
-    options.scrollTop + options.nextHeight - options.previousHeight
-  );
+  return Math.max(0, options.scrollTop + options.nextHeight - options.previousHeight);
 }
 
 function buildOffsets(
@@ -124,8 +118,7 @@ function buildOffsets(
   const offsets = [0];
   for (const turnId of turnIds) {
     const measured = measuredHeights[turnId];
-    const height =
-      Number.isFinite(measured) && measured > 0 ? measured : estimatedHeight;
+    const height = Number.isFinite(measured) && measured > 0 ? measured : estimatedHeight;
     offsets.push(offsets[offsets.length - 1] + height);
   }
   return offsets;

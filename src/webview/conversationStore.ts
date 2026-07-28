@@ -20,17 +20,13 @@ export interface ConversationStore {
     threadsByProvider: Record<string, LegacyThread[]> | undefined,
     activeThreadByProvider?: Record<string, string>
   ): void;
-  ensureThread(
-    providerId: string,
-    threadId: string,
-    title?: string,
-    updatedAt?: number
-  ): void;
+  ensureThread(providerId: string, threadId: string, title?: string, updatedAt?: number): void;
   setActiveThread(providerId: string, threadId: string): boolean;
   deleteThread(providerId: string, threadId: string): boolean;
-  getConversationHistory(providerId: string, threadId: string): ReturnType<
-    typeof projectConversationHistory
-  >;
+  getConversationHistory(
+    providerId: string,
+    threadId: string
+  ): ReturnType<typeof projectConversationHistory>;
   getThreadSummaries(): ReturnType<typeof projectThreadSummaries>;
 }
 
@@ -75,10 +71,7 @@ export function createConversationStore(
         return false;
       }
       const sequenceKeys = Array.from(
-        new Set([
-          ...(effectiveEnvelope.coalescedSequences ?? []),
-          effectiveEnvelope.sequence,
-        ])
+        new Set([...(effectiveEnvelope.coalescedSequences ?? []), effectiveEnvelope.sequence])
       ).map((sequence) => envelopeKey(effectiveEnvelope, sequence));
       for (const sequenceKey of sequenceKeys) {
         if (seen.has(sequenceKey)) {
@@ -209,9 +202,7 @@ function filterSeenDeltaSegments(
   seen: Set<string>
 ): ThreadEventEnvelope | undefined {
   if (!isDelta(envelope)) {
-    return hasSeenSequence(seen, envelope, envelope.sequence)
-      ? undefined
-      : envelope;
+    return hasSeenSequence(seen, envelope, envelope.sequence) ? undefined : envelope;
   }
   const segments = envelope.deltaSegments ?? [
     { sequence: envelope.sequence, delta: envelope.event.delta },
@@ -236,12 +227,9 @@ function filterSeenDeltaSegments(
 }
 
 function envelopeKey(envelope: ThreadEventEnvelope, sequence: number): string {
-  return [
-    envelope.providerId,
-    envelope.threadId,
-    envelope.streamId ?? 'legacy',
-    sequence,
-  ].join(':');
+  return [envelope.providerId, envelope.threadId, envelope.streamId ?? 'legacy', sequence].join(
+    ':'
+  );
 }
 
 function hasSeenSequence(
@@ -253,14 +241,11 @@ function hasSeenSequence(
     return true;
   }
   return (
-    !envelope.streamId &&
-    seen.has([envelope.providerId, envelope.threadId, sequence].join(':'))
+    !envelope.streamId && seen.has([envelope.providerId, envelope.threadId, sequence].join(':'))
   );
 }
 
-function isDelta(
-  envelope: ThreadEventEnvelope
-): envelope is ThreadEventEnvelope & {
+function isDelta(envelope: ThreadEventEnvelope): envelope is ThreadEventEnvelope & {
   event:
     | {
         type: 'item/assistantMessage/delta';

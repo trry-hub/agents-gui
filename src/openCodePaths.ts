@@ -27,25 +27,16 @@ export function resolveOpenCodePaths(options: OpenCodePathOptions = {}): OpenCod
 
   const configCandidates =
     platform === 'win32'
-      ? [
-          joinAbsolute(pathApi, env.APPDATA, 'opencode', 'opencode.json'),
-          legacyConfigPath,
-        ]
+      ? [joinAbsolute(pathApi, env.APPDATA, 'opencode', 'opencode.json'), legacyConfigPath]
       : [
           joinAbsolute(pathApi, env.XDG_CONFIG_HOME, 'opencode', 'opencode.json'),
           legacyConfigPath,
           platform === 'darwin'
-            ? pathApi.join(
-                homeDir,
-                'Library',
-                'Application Support',
-                'opencode',
-                'opencode.json'
-              )
+            ? pathApi.join(homeDir, 'Library', 'Application Support', 'opencode', 'opencode.json')
             : undefined,
         ];
-  const validConfigCandidates = configCandidates.filter(
-    (candidate): candidate is string => Boolean(candidate)
+  const validConfigCandidates = configCandidates.filter((candidate): candidate is string =>
+    Boolean(candidate)
   );
   const configPath =
     validConfigCandidates.find((candidate) => safeExists(exists, candidate)) ??
@@ -56,13 +47,13 @@ export function resolveOpenCodePaths(options: OpenCodePathOptions = {}): OpenCod
     platform === 'win32' ? usableAbsolutePath(env.LOCALAPPDATA, pathApi) : undefined;
   const stateHome =
     platform === 'win32'
-      ? localAppData ?? pathApi.join(homeDir, '.local', 'state')
-      : usableAbsolutePath(env.XDG_STATE_HOME, pathApi) ??
-        pathApi.join(homeDir, '.local', 'state');
+      ? (localAppData ?? pathApi.join(homeDir, '.local', 'state'))
+      : (usableAbsolutePath(env.XDG_STATE_HOME, pathApi) ??
+        pathApi.join(homeDir, '.local', 'state'));
   const cacheHome =
     platform === 'win32'
-      ? localAppData ?? pathApi.join(homeDir, '.cache')
-      : usableAbsolutePath(env.XDG_CACHE_HOME, pathApi) ?? pathApi.join(homeDir, '.cache');
+      ? (localAppData ?? pathApi.join(homeDir, '.cache'))
+      : (usableAbsolutePath(env.XDG_CACHE_HOME, pathApi) ?? pathApi.join(homeDir, '.cache'));
 
   return {
     configPath,
@@ -86,8 +77,7 @@ function resolveHomeDir(
   return (
     candidates
       .map((candidate) => usableAbsolutePath(candidate, pathApi))
-      .find((candidate): candidate is string => Boolean(candidate)) ??
-    pathApi.resolve(os.tmpdir())
+      .find((candidate): candidate is string => Boolean(candidate)) ?? pathApi.resolve(os.tmpdir())
   );
 }
 

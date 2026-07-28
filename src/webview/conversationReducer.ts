@@ -90,9 +90,7 @@ export function reduceConversation(
           ...existing,
           providerId: envelope.providerId,
           title:
-            existing.turnOrder.length > 0
-              ? existing.title
-              : event.thread.title || existing.title,
+            existing.turnOrder.length > 0 ? existing.title : event.thread.title || existing.title,
           status: event.thread.status,
           updatedAt: event.thread.updatedAt,
         }
@@ -155,10 +153,7 @@ export function reduceConversation(
     return withThread(snapshot, thread, true);
   }
 
-  if (
-    event.type === 'item/assistantMessage/delta' ||
-    event.type === 'item/reasoning/delta'
-  ) {
+  if (event.type === 'item/assistantMessage/delta' || event.type === 'item/reasoning/delta') {
     if (!event.turnId || !event.itemId || !event.delta) {
       return snapshot;
     }
@@ -169,8 +164,7 @@ export function reduceConversation(
       : {
           id: event.itemId,
           turnId: event.turnId,
-          type:
-            event.type === 'item/reasoning/delta' ? 'reasoning' : 'assistant-message',
+          type: event.type === 'item/reasoning/delta' ? 'reasoning' : 'assistant-message',
           status: 'running',
           content: event.delta,
           startedAt: turn.startedAt,
@@ -373,9 +367,7 @@ export function projectLegacyThreads(
   snapshot: ConversationSnapshot
 ): Record<string, LegacyThread[]> {
   const projected: Record<string, LegacyThread[]> = {};
-  for (const [providerId, threadOrder] of Object.entries(
-    snapshot.threadOrderByProvider
-  )) {
+  for (const [providerId, threadOrder] of Object.entries(snapshot.threadOrderByProvider)) {
     projected[providerId] = threadOrder.flatMap((threadId) => {
       const thread = snapshot.threadsById[threadId];
       if (!thread || thread.providerId !== providerId) {
@@ -431,8 +423,7 @@ export function projectLegacyThreads(
           createdAt:
             thread.turnOrder
               .map((turnId) => thread.turnsById[turnId]?.startedAt)
-              .find((value): value is number => Number.isFinite(value)) ??
-            thread.updatedAt,
+              .find((value): value is number => Number.isFinite(value)) ?? thread.updatedAt,
           updatedAt: thread.updatedAt,
           messages,
         },
@@ -442,10 +433,7 @@ export function projectLegacyThreads(
   return projected;
 }
 
-function ensureThread(
-  snapshot: ConversationSnapshot,
-  envelope: ThreadEventEnvelope
-): ThreadState {
+function ensureThread(snapshot: ConversationSnapshot, envelope: ThreadEventEnvelope): ThreadState {
   return (
     snapshot.threadsById[envelope.threadId] ?? {
       id: envelope.threadId,
@@ -500,9 +488,7 @@ function withThread(
   setActive: boolean
 ): ConversationSnapshot {
   const currentOrder = snapshot.threadOrderByProvider[thread.providerId] ?? [];
-  const order = currentOrder.includes(thread.id)
-    ? currentOrder
-    : [...currentOrder, thread.id];
+  const order = currentOrder.includes(thread.id) ? currentOrder : [...currentOrder, thread.id];
   const activeThreadByProvider =
     setActive && !snapshot.activeThreadByProvider[thread.providerId]
       ? { ...snapshot.activeThreadByProvider, [thread.providerId]: thread.id }

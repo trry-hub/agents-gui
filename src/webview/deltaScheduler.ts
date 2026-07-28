@@ -105,9 +105,7 @@ export function createDeltaScheduler(options: DeltaSchedulerOptions): DeltaSched
   };
 }
 
-function isDelta(
-  envelope: ThreadEventEnvelope
-): envelope is ThreadEventEnvelope & {
+function isDelta(envelope: ThreadEventEnvelope): envelope is ThreadEventEnvelope & {
   event:
     | {
         type: 'item/assistantMessage/delta';
@@ -128,7 +126,9 @@ function isDelta(
   );
 }
 
-function deltaKey(envelope: ThreadEventEnvelope & { event: { turnId: string; itemId: string } }): string {
+function deltaKey(
+  envelope: ThreadEventEnvelope & { event: { turnId: string; itemId: string } }
+): string {
   return [
     envelope.providerId,
     envelope.threadId,
