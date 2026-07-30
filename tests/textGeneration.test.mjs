@@ -245,6 +245,84 @@ test('CLI text generation adapter passes exact cwd without generated policy or e
   assert.deepEqual(phases, ['launch', 'wait-first-output', 'stream', 'cleanup', 'completed']);
 });
 
+test('CLI text generation adapter stops on a chunked diagnostic line without streaming it', async () => {
+  const manager = createFakeCliManager();
+  const adapter = new CliTextGenerationAdapter(manager);
+  const partials = [];
+  const generation = adapter.generate(fastGenerationRequest(), activeSignal, (event) => {
+    if (event.type === 'output') {
+      partials.push(event.text);
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const delta = (text) =>
+    JSON.stringify({
+      type: 'message.part.delta',
+      properties: { part: { type: 'text' }, delta: text },
+    });
+  manager.events.fire({
+    type: 'output',
+    stream: 'stdout',
+    transport: 'process',
+    text: `${delta('fix(adapter): preserve native CLI output')}\n`,
+  });
+  manager.events.fire({
+    type: 'output',
+    stream: 'stdout',
+    transport: 'process',
+    text: `${delta('\n-api er')}\n`,
+  });
+  manager.events.fire({
+    type: 'output',
+    stream: 'stdout',
+    transport: 'process',
+    text: `${delta('ror: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.')}\n`,
+  });
+
+  await assert.rejects(
+    () => generation,
+    (error) =>
+      error instanceof TextGenerationError &&
+      error.code === 'provider-error' &&
+      error.message === 'api error: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.'
+  );
+  assert.deepEqual(manager.stopped, ['opencode-1']);
+  assert.equal(manager.calls.length, 1);
+  assert.ok(partials.every((partial) => !/api error|request failed|unsupported model/i.test(partial)));
+});
+
+test('CLI text generation adapter stops before a nonzero exit can expose a buffered diagnostic', async () => {
+  const manager = createFakeCliManager();
+  const adapter = new CliTextGenerationAdapter(manager);
+  const generation = adapter.generate(fastGenerationRequest(), activeSignal);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  manager.events.fire({
+    type: 'output',
+    stream: 'stdout',
+    transport: 'process',
+    text: JSON.stringify({
+      type: 'message.part.delta',
+      properties: {
+        part: { type: 'text' },
+        delta: 'fix(adapter): preserve native CLI output\nerror: Request failed: Bad request (400)',
+      },
+    }),
+  });
+  manager.events.fire({ type: 'end', exitCode: 1 });
+
+  await assert.rejects(
+    () => generation,
+    (error) =>
+      error instanceof TextGenerationError &&
+      error.code === 'provider-error' &&
+      error.message === 'error: Request failed: Bad request (400)'
+  );
+  assert.deepEqual(manager.stopped, ['opencode-1']);
+  assert.equal(manager.calls.length, 1);
+});
+
 test('CLI text generation adapter stops a session on first-output timeout', async () => {
   const manager = createFakeCliManager();
   const adapter = new CliTextGenerationAdapter(manager);

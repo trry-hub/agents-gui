@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const {
   buildCommitMessagePrompt,
   cleanGeneratedCommitMessage,
+  findProviderDiagnosticLine,
   resolveCommitMessageLanguage,
   truncateCommitDiff,
 } = require('../.test-dist/commitMessage.js');
@@ -118,6 +119,44 @@ test('commit cleaner rejects provider and HTTP diagnostics', () => {
     'HTTP 503 upstream failure: fix(api): retry the request',
   ]) {
     assert.equal(cleanGeneratedCommitMessage(text), '');
+  }
+});
+
+test('commit cleaner rejects a diagnostic after an otherwise valid subject', () => {
+  assert.equal(
+    cleanGeneratedCommitMessage(
+      [
+        'fix(adapter): preserve the native CLI transport',
+        '  - api error: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.',
+      ].join('\n')
+    ),
+    ''
+  );
+});
+
+test('provider diagnostic classifier is line-oriented and preserves valid conventional subjects', () => {
+  for (const [text, expected] of [
+    [' - error: missing credentials', 'error: missing credentials'],
+    ['-- api-error: missing credentials', 'api-error: missing credentials'],
+    ['request-failed: upstream rejected the request', 'request-failed: upstream rejected the request'],
+    ['bad request (400): unsupported request', 'bad request (400): unsupported request'],
+    ['fix(adapter): preserve output\n -- HTTP 503 upstream failure', 'HTTP 503 upstream failure'],
+    ['unsupported-model MiMo-V2.5-Pro', 'unsupported-model MiMo-V2.5-Pro'],
+    ['available-models for this provider: foo', 'available-models for this provider: foo'],
+  ]) {
+    assert.equal(findProviderDiagnosticLine(text), expected);
+  }
+  assert.equal(
+    findProviderDiagnosticLine('docs: list available models for this provider'),
+    undefined
+  );
+
+  for (const text of [
+    'fix(api): handle HTTP 503 responses',
+    'fix(core): report unsupported model clearly',
+    'docs: list available models for this provider',
+  ]) {
+    assert.equal(cleanGeneratedCommitMessage(text), text);
   }
 });
 

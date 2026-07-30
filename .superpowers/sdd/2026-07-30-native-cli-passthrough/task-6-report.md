@@ -77,6 +77,37 @@ The two skips are the pre-existing Windows npm-shim platform tests. Lint emits t
 
 `fix: generate SCM messages with selected CLI only`
 
+Follow-up: `fix: harden SCM diagnostic boundary`
+
 ## Concerns
 
 None for task scope. The pre-existing lint module-type warning remains outside this change.
+
+## Review follow-up: line-oriented diagnostic boundary
+
+### Root cause and RED
+
+The initial diagnostic checks diverged: the cleaner searched the whole output for keyword matches, while the adapter only recognized `error:` at the beginning of the complete accumulated display string. That missed a diagnostic after a valid subject and could instead let OpenCode display normalization replace the actual error line with a generic message.
+
+Added adversarial tests first. The RED run showed the shared classifier was absent and that a chunked later `api error:` line reached the adapter's display-normalization path instead of being reported verbatim.
+
+### Implementation and GREEN
+
+- Added exported pure `findProviderDiagnosticLine()` in `src/commitMessage.ts`.
+- It scans logical lines only, accepts indentation and bullet/hyphen variants, and classifies case-insensitive `error:`, `api error:`, request-failed, bad-request `(400)`, HTTP 4xx/5xx, unsupported-model, and available-models prefixes.
+- The cleaner rejects any classified line but preserves valid conventional subjects that mention HTTP 503, unsupported models, or available models in their summary.
+- The adapter uses that helper before display normalization, after normalization as a safeguard, and during end handling. It stops the existing selected session and reports the extracted diagnostic line.
+- Tests cover a valid subject followed by a diagnostic split across multiple OpenCode delta events, no diagnostic partial, session stop, one CLI launch, and buffered/nonzero-exit ordering.
+
+### Verification
+
+```text
+Focused SCM tests: 30 passed, 0 failed
+Focused architecture tests: 2 passed, 0 failed
+npm test: 339 passed, 0 failed, 2 pre-existing platform skips
+npm run lint: exit 0
+npm run typecheck: exit 0
+npm run format:check: exit 0
+npm run build: exit 0
+git diff --check: clean
+```

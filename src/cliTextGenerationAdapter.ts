@@ -1,5 +1,6 @@
 import type { AgentRunEvent, StartPromptOptions } from './cliManager';
 import { getCliProfile, type CliProfile } from './cliProfiles';
+import { findProviderDiagnosticLine } from './commitMessage';
 import {
   flushCliOutputBuffer,
   normalizeCliOutput,
@@ -245,11 +246,17 @@ export class CliTextGenerationAdapter
             const normalized = normalizeCliOutputChunk(event.text, session.cliId, buffer);
             buffer = normalized.buffer;
             output += normalized.text;
+            const diagnosticLine = findProviderDiagnosticLine(output);
+            if (diagnosticLine) {
+              fail('provider-error', diagnosticLine, streaming ? 'stream' : 'wait-first-output');
+              return;
+            }
             const normalizedOutput = normalizeCliOutput(output, session.cliId);
-            if (isProviderErrorOutput(normalizedOutput)) {
+            const normalizedDiagnosticLine = findProviderDiagnosticLine(normalizedOutput);
+            if (normalizedDiagnosticLine) {
               fail(
                 'provider-error',
-                normalizedOutput.trim().replace(/^(?:error|api error):\s*/i, ''),
+                normalizedDiagnosticLine,
                 streaming ? 'stream' : 'wait-first-output'
               );
               return;
@@ -275,6 +282,23 @@ export class CliTextGenerationAdapter
           output += flushCliOutputBuffer(buffer, session.cliId);
           const normalizedOutput = normalizeCliOutput(output, session.cliId);
           const normalizedStderr = normalizeCliOutput(stderr, session.cliId).trim();
+          const diagnosticLine =
+            findProviderDiagnosticLine(output) ??
+            findProviderDiagnosticLine(normalizedOutput) ??
+            findProviderDiagnosticLine(normalizedStderr);
+          if (diagnosticLine) {
+            settle(() =>
+              reject(
+                new TextGenerationError(
+                  'provider-error',
+                  diagnosticLine,
+                  request.providerId,
+                  streaming ? 'stream' : 'wait-first-output'
+                )
+              )
+            );
+            return;
+          }
           if (event.exitCode === 0) {
             if (!normalizedOutput.trim() && isLikelyCliError(normalizedStderr)) {
               settle(() =>
@@ -289,20 +313,6 @@ export class CliTextGenerationAdapter
               );
               return;
             }
-            if (isProviderErrorOutput(normalizedOutput)) {
-              settle(() =>
-                reject(
-                  new TextGenerationError(
-                    'provider-error',
-                    normalizedOutput.trim().replace(/^Error:\s*/i, ''),
-                    request.providerId,
-                    streaming ? 'stream' : 'wait-first-output'
-                  )
-                )
-              );
-              return;
-            }
-
             settle(() => resolve(normalizedOutput));
             return;
           }
@@ -377,8 +387,4 @@ function isLikelyCliError(text: string): boolean {
   return /\b(?:error|failed|exception|eperm|eacces|enoent|timeout|timed out|http\s*5\d\d)\b/i.test(
     text
   );
-}
-
-function isProviderErrorOutput(text: string): boolean {
-  return /^(?:error|api error):\s+\S/i.test(text.trim());
 }

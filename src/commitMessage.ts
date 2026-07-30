@@ -90,9 +90,7 @@ export function cleanGeneratedCommitMessage(
   text: string,
   _options: CleanCommitMessageOptions = {}
 ): string {
-  const diagnostic =
-    /^(?:error|api error):\s|\b(?:request failed|bad request \(\d{3}\)|http\s*\d{3}|unsupported model|available models for this provider)\b/i;
-  if (diagnostic.test(text.trim())) {
+  if (findProviderDiagnosticLine(text)) {
     return '';
   }
   const fenced = extractFirstFence(text);
@@ -116,6 +114,28 @@ export function cleanGeneratedCommitMessage(
     .trim();
 
   return normalizeCommitMessageFormat(stripTrailingExplanation(selected));
+}
+
+export function findProviderDiagnosticLine(text: string): string | undefined {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+  for (const line of lines) {
+    const candidate = line
+      .trimStart()
+      .replace(/^(?:[-–—]+\s*)+/, '')
+      .trimStart();
+    if (isProviderDiagnosticLine(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function isProviderDiagnosticLine(line: string): boolean {
+  return /^(?:error\s*:\s*\S|api\s*[-–—]?\s*error\s*:\s*\S|request(?:[\s-]+)failed\b|bad(?:[\s-]+)request(?:\s*\(400\))?(?:\b|:)|http\s*[45]\d{2}\b|unsupported(?:[\s-]+)model\b|available(?:[\s-]+)models\b)/i.test(
+    line
+  );
 }
 
 function extractFirstFence(text: string): string | undefined {
