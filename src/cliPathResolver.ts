@@ -114,6 +114,21 @@ export function withCliLookupPath(
   return env;
 }
 
+/** Preserve the inherited environment while making one resolved CLI executable discoverable. */
+export function withCommandDirectoryPath(
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+  commandDir: string | undefined,
+  platform: NodeJS.Platform = process.platform
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(sourceEnv)) {
+    const isPathKey = platform === 'win32' ? key.toLowerCase() === 'path' : key === 'PATH';
+    if (!isPathKey) env[key] = value;
+  }
+  env.PATH = mergePathEntries([commandDir, readEnvValue(sourceEnv, 'PATH', platform)], platform);
+  return env;
+}
+
 export function normalizeCommandPathOutput(
   output: string,
   platform: NodeJS.Platform = process.platform

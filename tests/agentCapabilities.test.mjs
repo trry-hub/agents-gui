@@ -226,25 +226,12 @@ test('CLI profiles declare runtime capabilities and permission posture explicitl
   }
 });
 
-test.skip('CLI capability declarations expose only implemented elevated behavior', () => {
+test('CLI capability declarations omit unsupported continuation and override capabilities', () => {
   const openCode = CLI_PROFILES.find((profile) => profile.id === 'opencode');
-  assert.ok(openCode.executionCapabilities.includes('session.resume'));
-
-  for (const providerId of ['claude', 'codex']) {
-    const profile = CLI_PROFILES.find((candidate) => candidate.id === providerId);
-    const dangerousModes = profile.permissionModes.filter((mode) => mode.dangerous);
-    assert.ok(dangerousModes.length > 0, providerId);
-    assert.ok(
-      dangerousModes.every((mode) => mode.posture === 'unrestricted'),
-      providerId
-    );
-    assert.ok(profile.executionCapabilities.includes('sandbox.bypass'), providerId);
-  }
-
-  for (const profile of CLI_PROFILES.filter(
-    (candidate) => !['claude', 'codex'].includes(candidate.id)
-  )) {
-    assert.ok(!profile.executionCapabilities.includes('sandbox.bypass'), profile.id);
+  assert.ok(openCode);
+  assert.equal(openCode.executionCapabilities.includes('session.resume'), false);
+  for (const profile of CLI_PROFILES) {
+    assert.equal(profile.executionCapabilities.includes('session.resume'), false, profile.id);
   }
 });
 

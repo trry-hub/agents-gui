@@ -263,28 +263,16 @@ test('commit generation cancellation never attempts a fallback provider', async 
   assert.equal(requests.length, 1);
 });
 
-test.skip('CLI text generation adapter passes exact cwd and isolated OpenCode policy', async () => {
+test('CLI text generation adapter passes exact cwd without generated policy or env overrides', async () => {
   const manager = createFakeCliManager();
-  const adapter = new CliTextGenerationAdapter(manager, {
-    resolveProviderRuntime: () => ({
-      env: { CUSTOM_PROVIDER_ENV: 'configured' },
-      selectionKey: 'api-provider:configured',
-    }),
-    readOpenCodeConfig: () => ({
-      mcp: { crawl4ai: { type: 'local', command: ['crawl4ai'] } },
-    }),
-  });
+  const adapter = new CliTextGenerationAdapter(manager);
   const phases = [];
 
-  const generation = adapter.generate(
-    fastGenerationRequest(),
-    activeSignal,
-    (event) => {
-      if (event.type === 'phase') {
-        phases.push(event.phase);
-      }
+  const generation = adapter.generate(fastGenerationRequest(), activeSignal, (event) => {
+    if (event.type === 'phase') {
+      phases.push(event.phase);
     }
-  );
+  });
   await new Promise((resolve) => setImmediate(resolve));
   manager.events.fire({
     type: 'output',
@@ -302,23 +290,10 @@ test.skip('CLI text generation adapter passes exact cwd and isolated OpenCode po
 
   assert.equal(await generation, 'fix(commit): isolate runtime');
   assert.equal(manager.calls.length, 1);
-  const [, prompt, , , optionKey, env, options] = manager.calls[0];
-  const inlineConfig = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+  const [, prompt, options] = manager.calls[0];
   assert.equal(prompt, 'Generate a commit message');
-  assert.match(optionKey, /^commitMessage\|/);
-  assert.equal(env.CUSTOM_PROVIDER_ENV, 'configured');
-  assert.equal(inlineConfig.mcp.crawl4ai.enabled, false);
-  assert.deepEqual(inlineConfig.permission, { '*': 'deny' });
   assert.equal(options.cwd, '/workspace/repository-b');
-  assert.equal(options.attachBackgroundServer, false);
-  assert.deepEqual(options.promptArgs, ['run', '--format', 'json']);
-  assert.deepEqual(phases, [
-    'launch',
-    'wait-first-output',
-    'stream',
-    'cleanup',
-    'completed',
-  ]);
+  assert.deepEqual(phases, ['launch', 'wait-first-output', 'stream', 'cleanup', 'completed']);
 });
 
 test('CLI text generation adapter stops a session on first-output timeout', async () => {

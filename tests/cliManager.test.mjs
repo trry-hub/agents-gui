@@ -6,7 +6,9 @@ import { test } from 'node:test';
 const require = createRequire(import.meta.url);
 const Module = require('node:module');
 class VscodeEventEmitter extends EventEmitter {
-  fire(value) { this.emit('event', value); }
+  fire(value) {
+    this.emit('event', value);
+  }
   event(listener) {
     this.on('event', listener);
     return { dispose: () => this.off('event', listener) };
@@ -39,7 +41,9 @@ test('CliManager launches OpenCode with only inherited env, cwd, transport argv,
       queueMicrotask(() => child.emit('close', 0));
       return child;
     },
-    spawnProbeProcess() { throw new Error('unexpected probe'); },
+    spawnProbeProcess() {
+      throw new Error('unexpected probe');
+    },
     terminate() {},
     killTree() {},
   };
@@ -60,12 +64,62 @@ test('CliManager launches OpenCode with only inherited env, cwd, transport argv,
   assert.equal(launches[0].command, '/usr/local/bin/opencode');
   assert.deepEqual(launches[0].args, ['run', '--format', 'json', 'hello']);
   assert.equal(launches[0].cwd, '/workspace/repo');
+  const expectedPath = [
+    ...new Set(['/usr/local/bin', ...(process.env.PATH || '').split(':')].filter(Boolean)),
+  ].join(':');
+  assert.equal(launches[0].env.PATH, expectedPath);
+  for (const [name, value] of Object.entries(process.env)) {
+    if (name !== 'PATH') assert.equal(launches[0].env[name], value, name);
+  }
   for (const name of [
-    'AGENTS_HUB_API_MODEL', 'OPENAI_MODEL', 'ANTHROPIC_MODEL', 'GOOSE_MODEL',
-    'AIDER_MODEL', 'OPENCODE_DB', 'OMO_DISABLE_POSTHOG',
-    'OMO_SEND_ANONYMOUS_TELEMETRY', 'GEMINI_CLI_NO_RELAUNCH',
+    'AGENTS_HUB_API_MODEL',
+    'OPENAI_MODEL',
+    'ANTHROPIC_MODEL',
+    'GOOSE_MODEL',
+    'AIDER_MODEL',
+    'OPENCODE_DB',
+    'OMO_DISABLE_POSTHOG',
+    'OMO_SEND_ANONYMOUS_TELEMETRY',
+    'GEMINI_CLI_NO_RELAUNCH',
     'OPENCODE_CONFIG_CONTENT',
   ]) {
     assert.equal(launches[0].env[name], process.env[name]);
   }
+});
+
+test('CliManager forwards process streams and cleans up after error or close', async () => {
+  const child = fakeChild();
+  child.exitCode = null;
+  child.signalCode = null;
+  const runner = {
+    spawnPromptProcess() {
+      return child;
+    },
+    spawnProbeProcess() {
+      throw new Error('unexpected probe');
+    },
+    terminate() {},
+    killTree() {},
+  };
+  const manager = new CliManager({
+    processRunner: runner,
+    cliDiscovery: {
+      resolveCommandPath: async () => '/bin/opencode',
+      getProfilesWithStatus: async () => [],
+      evictCommandPath() {},
+    },
+    workspaceRoot: () => '/workspace',
+  });
+  const session = await manager.startPrompt('opencode', 'hello');
+  const events = [];
+  session.onEvent.event((event) => events.push(event));
+  child.stdout.emit('data', Buffer.from('out'));
+  child.stderr.emit('data', Buffer.from('err'));
+  child.emit('close', 0);
+  assert.deepEqual(events, [
+    { type: 'output', text: 'out', stream: 'stdout', transport: 'process' },
+    { type: 'output', text: 'err', stream: 'stderr', transport: 'process' },
+    { type: 'end', exitCode: 0 },
+  ]);
+  assert.deepEqual(manager.getActiveSessionIds(), []);
 });

@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { CliProfile } from './cliProfiles';
 import { getCliProfile } from './cliProfiles';
-import { withCliLookupPath } from './cliPathResolver';
+import { withCommandDirectoryPath } from './cliPathResolver';
 import { CliDiscovery } from './cliDiscovery';
 import { CliProcessRunner } from './cliProcessRunner';
 import type { AgentProfileStatusOptions } from './agentRuntime';
@@ -92,7 +92,7 @@ export class CliManager {
     const command =
       (await this.cliDiscovery.resolveCommandPath(profile.command)) ?? profile.command;
     const commandDir = path.isAbsolute(command) ? path.dirname(command) : undefined;
-    const env = withCliLookupPath(process.env, [commandDir]);
+    const env = withCommandDirectoryPath(process.env, commandDir);
     const args =
       profile.inputMode === 'argument' && initialInput
         ? [...profile.promptArgs, initialInput]

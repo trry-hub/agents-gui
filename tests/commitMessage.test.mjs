@@ -215,25 +215,36 @@ test('truncateCommitDiff keeps staged diff under the configured limit', () => {
 
 test('extension contributes SCM title actions for staged AI commit messages', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const commitCommand = manifest.contributes.commands.find((command) => command.command === 'agents-gui.generateCommitMessage');
-  const cancelCommand = manifest.contributes.commands.find((command) => command.command === 'agents-gui.cancelCommitMessageGeneration');
+  const commitCommand = manifest.contributes.commands.find(
+    (command) => command.command === 'agents-gui.generateCommitMessage'
+  );
+  const cancelCommand = manifest.contributes.commands.find(
+    (command) => command.command === 'agents-gui.cancelCommitMessageGeneration'
+  );
   const commands = manifest.contributes.commands.map((command) => command.command);
   const scmTitleActions = manifest.contributes.menus['scm/title'] ?? [];
   const scmIdleAction = scmTitleActions.find(
-    (item) => item.command === 'agents-gui.generateCommitMessage'
-      && item.when === 'scmProvider == git && scmProviderRootUri not in agents-gui.commitMessageGeneratingRoots'
+    (item) =>
+      item.command === 'agents-gui.generateCommitMessage' &&
+      item.when ===
+        'scmProvider == git && scmProviderRootUri not in agents-gui.commitMessageGeneratingRoots'
   );
   const scmCancelAction = scmTitleActions.find(
-    (item) => item.command === 'agents-gui.cancelCommitMessageGeneration'
-      && item.when === 'scmProvider == git && scmProviderRootUri in agents-gui.commitMessageGeneratingRoots'
+    (item) =>
+      item.command === 'agents-gui.cancelCommitMessageGeneration' &&
+      item.when ===
+        'scmProvider == git && scmProviderRootUri in agents-gui.commitMessageGeneratingRoots'
   );
-  const scmInputBoxCommands = manifest.contributes.menus['scm/inputBox']?.map((item) => item.command) ?? [];
+  const scmInputBoxCommands =
+    manifest.contributes.menus['scm/inputBox']?.map((item) => item.command) ?? [];
   const properties = manifest.contributes.configuration.properties;
 
   assert.ok(manifest.extensionDependencies.includes('vscode.git'));
   assert.ok(!manifest.enabledApiProposals?.includes('contribSourceControlInputBoxMenu'));
   assert.ok(manifest.activationEvents.includes('onCommand:agents-gui.generateCommitMessage'));
-  assert.ok(manifest.activationEvents.includes('onCommand:agents-gui.cancelCommitMessageGeneration'));
+  assert.ok(
+    manifest.activationEvents.includes('onCommand:agents-gui.cancelCommitMessageGeneration')
+  );
   assert.ok(manifest.activationEvents.includes('onCommand:agents-gui.setupCommitMessage'));
   assert.ok(commands.includes('agents-gui.generateCommitMessage'));
   assert.ok(commands.includes('agents-gui.cancelCommitMessageGeneration'));
@@ -247,14 +258,25 @@ test('extension contributes SCM title actions for staged AI commit messages', ()
   assert.ok(!scmInputBoxCommands.includes('agents-gui.generateCommitMessage'));
   assert.equal(scmIdleAction.group, 'navigation@-100');
   assert.match(scmIdleAction.when, /scmProvider == git/);
-  assert.match(scmIdleAction.when, /scmProviderRootUri not in agents-gui\.commitMessageGeneratingRoots/);
+  assert.match(
+    scmIdleAction.when,
+    /scmProviderRootUri not in agents-gui\.commitMessageGeneratingRoots/
+  );
   assert.ok(!scmIdleAction.when.includes('commitMessageStagedRoots'));
-  assert.ok(!scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading'));
+  assert.ok(
+    !scmTitleActions.some((item) => item.command === 'agents-gui.generateCommitMessage.loading')
+  );
   assert.equal(scmCancelAction.group, 'navigation@-100');
-  assert.match(scmCancelAction.when, /scmProviderRootUri in agents-gui\.commitMessageGeneratingRoots/);
+  assert.match(
+    scmCancelAction.when,
+    /scmProviderRootUri in agents-gui\.commitMessageGeneratingRoots/
+  );
   assert.equal(properties['agents-gui.commitMessage.provider'].enum, undefined);
   assert.equal(properties['agents-gui.commitMessage.provider'].default, 'default');
-  assert.match(properties['agents-gui.commitMessage.provider'].description, /commitMessage\.provider/);
+  assert.match(
+    properties['agents-gui.commitMessage.provider'].description,
+    /commitMessage\.provider/
+  );
   assert.ok(properties['agents-gui.commitMessage.language']);
   assert.ok(properties['agents-gui.commitMessage.maxDiffChars']);
 });
@@ -267,7 +289,10 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /repository\.state\.workingTreeChanges\?\./);
   assert.match(source, /repository\.diff\(true\)/);
   assert.match(source, /handleNoStagedChanges\(repository, locale\)/);
-  assert.match(source, /void vscode\.window\s*\.showInformationMessage\(this\.t\(locale, 'noStagedChanges'\), openSourceControl\)\s*\.then\(async \(choice\) =>/s);
+  assert.match(
+    source,
+    /void vscode\.window\s*\.showInformationMessage\(this\.t\(locale, 'noStagedChanges'\), openSourceControl\)\s*\.then\(async \(choice\) =>/s
+  );
   assert.match(source, /executeCommand\('git\.stageAll'\)/);
   assert.match(source, /executeCommand\('workbench\.view\.scm'\)/);
   assert.match(source, /const streamCommitMessage = \(message: string\) =>/);
@@ -277,7 +302,10 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /const inputMessage = repository\.inputBox\.value\.trim\(\)/);
   assert.match(source, /buildCommitMessagePrompt\(\{ diff, language, truncated, inputMessage \}\)/);
   assert.doesNotMatch(source, /this\.cleanCommitMessageOutput\(/);
-  assert.match(source, /generateCommitMessageWithCancellation\(\s*primaryProfile,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s);
+  assert.match(
+    source,
+    /generateCommitMessageWithCancellation\(\s*primaryProfile,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s
+  );
   assert.match(source, /repository\.inputBox\.value = '';\s*\},\s*inputMessage,/s);
   assert.match(source, /getRepository\(rootUri\)/);
   assert.match(source, /generateCommitMessageWithCancellation/);
@@ -294,14 +322,26 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /generatedWithFallback/);
   assert.match(source, /getInstalledProfiles\(\)/);
   assert.match(source, /const installedProfiles = await this\.getInstalledProfiles\(\);/);
-  assert.match(source, /if \(installedProfiles\.length === 0\) \{\s*await this\.promptProviderSetup\(locale, preferred\);\s*return undefined;\s*\}/s);
-  assert.match(source, /pickInstalledProfile\(\s*locale,\s*this\.t\(locale, 'chooseCommitCli'\),\s*false,\s*installedProfiles\s*\)/s);
-  assert.match(source, /private async promptProviderSetup\(locale: RuntimeLocale, preferred: CliProfile\): Promise<void>/);
+  assert.match(
+    source,
+    /if \(installedProfiles\.length === 0\) \{\s*await this\.promptProviderSetup\(locale, preferred\);\s*return undefined;\s*\}/s
+  );
+  assert.match(
+    source,
+    /pickInstalledProfile\(\s*locale,\s*this\.t\(locale, 'chooseCommitCli'\),\s*false,\s*installedProfiles\s*\)/s
+  );
+  assert.match(
+    source,
+    /private async promptProviderSetup\(locale: RuntimeLocale, preferred: CliProfile\): Promise<void>/
+  );
   assert.match(source, /await this\.openProviderSetup\(\);/);
   assert.match(source, /private async openProviderSetup\(\): Promise<void>/);
   assert.match(source, /executeCommand\('agents-gui\.openPanel'\)/);
   assert.match(source, /executeCommand\('agents-gui\.refreshProviders'\)/);
-  assert.match(source, /persistSelection \? 'useProviderForCommitMessage' : 'useOnceForCommitMessage'/);
+  assert.match(
+    source,
+    /persistSelection \? 'useProviderForCommitMessage' : 'useOnceForCommitMessage'/
+  );
   assert.match(source, /installedProfiles: CliProfile\[\]/);
   assert.match(source, /showQuickPick\(providerItems/);
   assert.match(source, /commitMessage'\)\s*\.update\('provider'/);
@@ -313,8 +353,14 @@ test('commit message command uses staged git diff and writes to repository input
   assert.doesNotMatch(source, /CUSTOM_MODEL_STATE_KEY/);
   assert.match(source, /COMMIT_MESSAGE_GENERATING_CONTEXT = 'agents-gui\.commitMessageGenerating'/);
   assert.match(source, /STAGED_CHANGE_ROOTS_CONTEXT = 'agents-gui\.commitMessageStagedRoots'/);
-  assert.match(source, /COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui\.commitMessageGeneratingRoots'/);
-  assert.match(source, /private readonly cancellationsByRoot = new Map<string, vscode\.CancellationTokenSource>\(\)/);
+  assert.match(
+    source,
+    /COMMIT_MESSAGE_GENERATING_ROOTS_CONTEXT = 'agents-gui\.commitMessageGeneratingRoots'/
+  );
+  assert.match(
+    source,
+    /private readonly cancellationsByRoot = new Map<string, vscode\.CancellationTokenSource>\(\)/
+  );
   assert.match(source, /repositoryRootKey = repository\.rootUri\.toString\(\)/);
   assert.match(source, /this\.cancellationsByRoot\.has\(repositoryRootKey\)/);
   assert.match(source, /this\.cancellationsByRoot\.set\(repositoryRootKey, cancellation\)/);
@@ -332,7 +378,10 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /ProgressLocation\.SourceControl/);
   assert.match(source, /let completedGeneration = false;/);
   assert.match(source, /if \(!completedGeneration && streamingRepository\)/);
-  assert.match(source, /cancel\(rootUri\?: vscode\.Uri \| \{ readonly rootUri\?: vscode\.Uri \}\): void/);
+  assert.match(
+    source,
+    /cancel\(rootUri\?: vscode\.Uri \| \{ readonly rootUri\?: vscode\.Uri \}\): void/
+  );
   assert.match(source, /this\.cancellationsByRoot\.get\(rootKey\)\?\.cancel\(\)/);
   assert.match(source, /for \(const cancellation of this\.cancellationsByRoot\.values\(\)\)/);
   assert.doesNotMatch(source, /diff\(false\)/);
@@ -357,7 +406,7 @@ test('commit message command depends on the text-generation use case instead of 
   assert.match(source, /resolveFallbackProviderIds:/);
 });
 
-test.skip('OpenCode server commit generation waits for completed text parts only', () => {
+/* Removed: managed OpenCode server commit generation is not part of native one-shot transport.
   const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
 
@@ -377,13 +426,16 @@ test.skip('OpenCode server commit generation waits for completed text parts only
   assert.match(source, /this\.pickString\(partRecord\.type\) === 'text'/);
   assert.match(source, /if \(textState\.completed\) \{/);
   assert.doesNotMatch(source, /\.map\(\(part\) => this\.pickString\(this\.objectRecord\(part\)\.text\) \?\? ''\)/);
-});
+}); */
 
 test('sidebar does not persist active model selection as its own model config', () => {
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const mediaSource = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
-  const protocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+  const protocolSource = readFileSync(
+    new URL('../src/webviewProtocol.ts', import.meta.url),
+    'utf8'
+  );
 
   assert.doesNotMatch(syncedStateSource, /MODEL_STATE_KEY = 'agents-gui\.modelByProvider'/);
   assert.doesNotMatch(protocolSource, /activeModelByProvider\?:/);
@@ -394,8 +446,14 @@ test('sidebar does not persist active model selection as its own model config', 
   assert.match(mediaSource, /let activeModelByProvider = \{\};/);
   assert.match(mediaSource, /activeModelByProvider = \{\};/);
   assert.doesNotMatch(mediaSource, /activeModelByProvider,\s*recentModelByProvider,/);
-  assert.match(mediaSource, /function persist\(\)[\s\S]*vscode\.setState[\s\S]*schedulePersistUserSelection\(\);/);
-  assert.match(mediaSource, /modelSelect\.addEventListener\('change'[\s\S]*persistUserSelection\(\);[\s\S]*renderAll\(\);/);
+  assert.match(
+    mediaSource,
+    /function persist\(\)[\s\S]*vscode\.setState[\s\S]*schedulePersistUserSelection\(\);/
+  );
+  assert.match(
+    mediaSource,
+    /modelSelect\.addEventListener\('change'[\s\S]*persistUserSelection\(\);[\s\S]*renderAll\(\);/
+  );
 });
 
 test('extension registers SCM title generation and cancel commands', () => {
@@ -406,7 +464,10 @@ test('extension registers SCM title generation and cancel commands', () => {
   assert.match(source, /setContext', 'agents-gui\.commitMessageStagedRoots', \[\]/);
   assert.match(source, /registerCommand\(\s*'agents-gui\.generateCommitMessage',/s);
   assert.match(source, /return commitMessageCommand\.run\(rootUri, token\)/);
-  assert.match(source, /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(rootUri\) =>/);
+  assert.match(
+    source,
+    /registerCommand\('agents-gui\.cancelCommitMessageGeneration', \(rootUri\) =>/
+  );
   assert.match(source, /commitMessageCommand\.cancel\(rootUri\)/);
   assert.match(source, /registerCommand\('agents-gui\.setupCommitMessage', \(\) =>/);
   assert.match(source, /executeCommand\('agents-gui\.openProviderSettings', 'commitMessage'\)/);

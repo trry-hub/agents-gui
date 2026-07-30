@@ -7,7 +7,11 @@ import {
   normalizeCommandPathOutput,
   withCliLookupPath,
 } from './cliPathResolver';
-import { parseOpenCodeDebugConfigOutput, parseOpenCodeModelsOutput } from './opencodeAgents';
+import {
+  type OpenCodeAgentDiscovery,
+  parseOpenCodeDebugConfigOutput,
+  parseOpenCodeModelsOutput,
+} from './opencodeAgents';
 
 export interface CliDiscoveryOptions {
   workspaceRoot(): string;
@@ -82,8 +86,8 @@ export class CliDiscovery {
     const command = await this.resolveCommandPath(profile.command);
     if (!command) return profile;
     const [agentDiscovery, models] = await Promise.all([
-      this.getOpenCodeAgentModes(command),
-      this.getOpenCodeModelOptions(command),
+      this.getOpenCodeAgentModes(command).catch((): OpenCodeAgentDiscovery => ({ modes: [] })),
+      this.getOpenCodeModelOptions(command).catch(() => []),
     ]);
     const agentModes =
       agentDiscovery.modes.length > 0
@@ -305,9 +309,9 @@ function selectConfiguredModel(
 }
 
 function normalizeCommandVersionOutput(output: string): string | undefined {
-  const line = output
-    .split(/\r?\n/)
-    .map((value) => value.trim())
-    .find(Boolean);
-  return line || undefined;
+  // eslint-disable-next-line no-control-regex
+  const ansiPattern = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
+  const clean = output.replace(ansiPattern, '');
+  const token = /\bv?\d+(?:\.\d+){0,3}(?:[-+][0-9A-Za-z.-]+)?\b/.exec(clean)?.[0];
+  return token?.replace(/^v/i, '');
 }

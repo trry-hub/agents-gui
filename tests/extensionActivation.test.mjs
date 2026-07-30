@@ -28,7 +28,10 @@ const openCodeLocalStateSource = readFileSync(
   new URL('../src/openCodeLocalState.ts', import.meta.url),
   'utf8'
 );
-const openCodePathsSource = readFileSync(new URL('../src/openCodePaths.ts', import.meta.url), 'utf8');
+const openCodePathsSource = readFileSync(
+  new URL('../src/openCodePaths.ts', import.meta.url),
+  'utf8'
+);
 const openCodeServerClientSource = readFileSync(
   new URL('../src/openCodeServerClient.ts', import.meta.url),
   'utf8'
@@ -94,10 +97,7 @@ test('test script uses cross-platform Node test discovery', () => {
 });
 
 test('release verification uses the serial Node test runner option', () => {
-  assert.match(
-    releaseVerifySource,
-    /args: \['run', 'test', '--', '--test-concurrency=1'\]/
-  );
+  assert.match(releaseVerifySource, /args: \['run', 'test', '--', '--test-concurrency=1'\]/);
   assert.doesNotMatch(releaseVerifySource, /--runInBand/);
 });
 
@@ -167,16 +167,16 @@ test('context summary protocol is correlated and host invalidations replace unso
     webviewProtocolSource,
     /command: 'contextSummary';\s*requestId: string;\s*cliId: string;\s*modelId: string;\s*summary: AssistantContextSummary/
   );
-  assert.match(
-    webviewProtocolSource,
-    /command: 'contextInvalidated'; cliId\?: string/
-  );
+  assert.match(webviewProtocolSource, /command: 'contextInvalidated'; cliId\?: string/);
   assert.equal(
     sendSummaryCalls.length,
     3,
     'sendContextSummary should only be declared, serve refreshContext, and continue its retry chain'
   );
-  assert.match(sidebarSource, /command: 'contextSummary',\s*requestId,\s*cliId,\s*modelId,\s*summary,/);
+  assert.match(
+    sidebarSource,
+    /command: 'contextSummary',\s*requestId,\s*cliId,\s*modelId,\s*summary,/
+  );
   assert.match(sidebarSource, /scheduleOpenCodeStatusRefresh\([\s\S]*requestId/);
   assert.match(sidebarSource, /command: 'contextInvalidated'/);
   assert.match(previewSource, /requestId:\s*message\.requestId/);
@@ -243,7 +243,10 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(webviewHtmlRendererSource, /export function readWebviewAssetManifest/);
   assert.match(webviewHtmlRendererSource, /'webview-assets\.json'/);
   assert.match(sidebarSource, /webviewAssetPaths\(this\.extensionUri\)/);
-  assert.match(webviewHtmlRendererSource, /getWebviewUri\([\s\S]*options\.extensionUri,[\s\S]*options\.webview/);
+  assert.match(
+    webviewHtmlRendererSource,
+    /getWebviewUri\([\s\S]*options\.extensionUri,[\s\S]*options\.webview/
+  );
   assert.match(agentRuntimeSource, /export interface AgentRuntime/);
   assert.match(agentRuntimeSource, /export class CliAgentRuntime implements AgentRuntime/);
   assert.doesNotMatch(agentRuntimeSource, /OpenCodeAgentCapability/);
@@ -271,7 +274,7 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
 });
 
-test.skip('commit generation is wired as a task-scoped application use case', () => {
+/* Removed server-policy assertion; one-shot commit generation is covered in textGeneration tests.
   assert.match(
     extensionSource,
     /import \{ CliTextGenerationAdapter \} from '\.\/cliTextGenerationAdapter';/
@@ -302,7 +305,7 @@ test.skip('commit generation is wired as a task-scoped application use case', ()
   assert.match(cliSource, /const cwd = options\.cwd\?\.trim\(\) \|\| this\.getWorkspaceRoot\(\)/);
   assert.match(architectureDoc, /task-runtime-control-plane\.md/);
   assert.match(taskRuntimeArchitectureDoc, /fast text generation/);
-});
+}); */
 
 test('interactive agent requests pass through the capability control plane', () => {
   assert.match(
@@ -354,7 +357,7 @@ test('attachment persistence stays behind a dedicated store', () => {
   assert.doesNotMatch(sidebarSource, /MAX_IMAGE_ATTACHMENT_BYTES/);
 });
 
-test.skip('OpenCode local state paths stay behind a dedicated adapter', () => {
+/* Discovery no longer reads OpenCode local model state for launch decisions.
   assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
   assert.match(openCodeLocalStateSource, /resolveOpenCodePaths/);
   assert.match(openCodeLocalStateSource, /resolveOpenCodePaths\(\s*this\.options\s*\)/);
@@ -365,7 +368,7 @@ test.skip('OpenCode local state paths stay behind a dedicated adapter', () => {
   assert.match(sidebarSource, /this\.openCodeLocalState\.updateModelVariant/);
   assert.doesNotMatch(cliDiscoverySource, /\.local', 'state', 'opencode'/);
   assert.doesNotMatch(sidebarSource, /\.local', 'state', 'opencode'/);
-});
+}); */
 
 test('extension smoke script covers command entrypoints and harnessed runtime flows', () => {
   assert.equal(
@@ -401,7 +404,7 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
   assert.match(releaseVerifySource, /'diff', '--cached', '--check'/);
 });
 
-test.skip('opencode server IO stays behind the server client adapter', () => {
+/* Managed OpenCode server IO is intentionally absent from CliManager.
   assert.match(cliSource, /new OpenCodeServerClient/);
   assert.match(
     cliSource,
@@ -417,13 +420,13 @@ test.skip('opencode server IO stays behind the server client adapter', () => {
   assert.match(openCodeServerClientSource, /export class OpenCodeServerClient/);
   assert.match(openCodeServerClientSource, /openEventStream/);
   assert.match(architectureDoc, /OpenCode HTTP, SSE, status, model discovery/);
-});
+}); */
 
-test.skip('CLI discovery stays behind a dedicated provider discovery adapter', () => {
-  assert.match(cliSource, /import \{ CliDiscovery, stableHash \} from '\.\/cliDiscovery';/);
-  assert.match(cliSource, /private readonly cliDiscovery = new CliDiscovery/);
+test('CLI discovery keeps command resolution and observational probes behind its adapter', () => {
+  assert.match(cliSource, /import \{ CliDiscovery \} from '\.\/cliDiscovery';/);
+  assert.match(cliSource, /private readonly cliDiscovery: CliManagerDiscovery/);
   assert.match(cliSource, /this\.cliDiscovery\.getProfilesWithStatus\(CLI_PROFILES, options\)/);
-  assert.match(cliSource, /this\.cliDiscovery\.expandProfileEnv/);
+  assert.doesNotMatch(cliSource, /expandProfileEnv/);
   assert.doesNotMatch(cliSource, /import \* as fs from 'fs';/);
   assert.doesNotMatch(cliSource, /import \* as os from 'os';/);
   assert.match(cliDiscoverySource, /export class CliDiscovery/);
@@ -434,22 +437,22 @@ test.skip('CLI discovery stays behind a dedicated provider discovery adapter', (
     cliDiscoverySource,
     /async getProfilesWithStatus\(\s*baseProfiles: CliProfile\[\],\s*options: CliProfileStatusOptions = \{\}/s
   );
-  assert.match(cliDiscoverySource, /expandProfileEnv/);
+  assert.doesNotMatch(cliDiscoverySource, /expandProfileEnv/);
   assert.match(cliDiscoverySource, /import \* as fs from 'fs';/);
-  assert.match(cliDiscoverySource, /import \* as os from 'os';/);
+  assert.doesNotMatch(cliDiscoverySource, /import \* as os from 'os';/);
   assert.match(architectureDoc, /CLI command resolution, installed\/version status/);
 });
 
-test.skip('CLI process lifecycle stays behind a dedicated process runner', () => {
+test('CLI process lifecycle keeps prompt/probe and tree termination behind a dedicated runner', () => {
   assert.match(cliSource, /import \{ CliProcessRunner \} from '\.\/cliProcessRunner';/);
-  assert.match(cliSource, /private readonly processRunner = new CliProcessRunner/);
+  assert.match(cliSource, /private readonly processRunner: CliProcessRunner/);
   assert.match(cliSource, /this\.processRunner\.spawnPromptProcess/);
-  assert.match(cliSource, /this\.processRunner\.spawnBackgroundProcess/);
+  assert.doesNotMatch(cliSource, /spawnBackgroundProcess/);
   assert.doesNotMatch(cliSource, /spawn\('taskkill'/);
   assert.doesNotMatch(cliSource, /process\.kill\(-proc\.pid/);
   assert.match(cliProcessRunnerSource, /export class CliProcessRunner/);
   assert.match(cliProcessRunnerSource, /spawnPromptProcess/);
-  assert.match(cliProcessRunnerSource, /spawnBackgroundProcess/);
+  assert.doesNotMatch(cliProcessRunnerSource, /spawnBackgroundProcess/);
   assert.match(cliProcessRunnerSource, /from 'cross-spawn'/);
   assert.match(cliProcessRunnerSource, /spawnProbeProcess/);
   assert.match(cliDiscoverySource, /this\.processRunner\.spawnProbeProcess/);
@@ -463,9 +466,18 @@ test.skip('CLI process lifecycle stays behind a dedicated process runner', () =>
 });
 
 test('activation runs local OpenCode cleanup without API runtime injection', () => {
-  assert.match(extensionSource, /await runOpenCodeCleanupOnce\(context\.globalState, openCodeCleanup\)/);
-  assert.doesNotMatch(extensionSource, /resolveApiProviderRuntime|readApiProviderSettings|readOpenCodeConfig/);
-  assert.doesNotMatch(sidebarSource, /OpenCodeConfigSync|sendApiProviderSettings|saveApiProviderSettings/);
+  assert.match(
+    extensionSource,
+    /await runOpenCodeCleanupOnce\(context\.globalState, openCodeCleanup\)/
+  );
+  assert.doesNotMatch(
+    extensionSource,
+    /resolveApiProviderRuntime|readApiProviderSettings|readOpenCodeConfig/
+  );
+  assert.doesNotMatch(
+    sidebarSource,
+    /OpenCodeConfigSync|sendApiProviderSettings|saveApiProviderSettings/
+  );
   assert.doesNotMatch(syncedStateSource, /openCodeNativePassthroughCleanup/);
 });
 
