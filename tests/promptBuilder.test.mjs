@@ -624,6 +624,71 @@ test('opencode debug config text exposes default agent without parsing full prom
   );
 });
 
+test('opencode JSON debug config uses a later top-level model over its default-agent model', () => {
+  const json = JSON.stringify(
+    {
+      default_agent: 'build',
+      agent: {
+        build: { model: 'default-agent/model' },
+      },
+      model: 'top-level/model',
+    },
+    null,
+    2
+  );
+  const ansiWrapped = json
+    .split('\n')
+    .map((line) => `\u001b[36m${line}\u001b[0m`)
+    .join('\n');
+
+  assert.equal(parseOpenCodeDebugConfigOutput(ansiWrapped).defaultModelId, 'top-level/model');
+});
+
+test('opencode JSON debug config uses the selected default-agent model with four-space indentation', () => {
+  const output = JSON.stringify(
+    {
+      default_agent: 'build',
+      agent: {
+        build: { model: 'default-agent/model' },
+        unrelated: { model: 'unrelated/model' },
+      },
+    },
+    null,
+    4
+  );
+
+  assert.equal(parseOpenCodeDebugConfigOutput(output).defaultModelId, 'default-agent/model');
+});
+
+test('opencode JSON debug config ignores non-default models with tab indentation', () => {
+  const output = JSON.stringify(
+    {
+      default_agent: 'build',
+      agent: {
+        build: {},
+        unrelated: { model: 'unrelated/model' },
+      },
+    },
+    null,
+    '\t'
+  );
+
+  assert.equal(parseOpenCodeDebugConfigOutput(output).defaultModelId, undefined);
+});
+
+test('opencode JSON debug config has no effective model when all sources are absent', () => {
+  const output = JSON.stringify(
+    {
+      agent: { build: {} },
+      default_agent: 'build',
+    },
+    null,
+    2
+  );
+
+  assert.equal(parseOpenCodeDebugConfigOutput(output).defaultModelId, undefined);
+});
+
 test('opencode debug config uses a top-level model over its default-agent model', () => {
   const discovery = parseOpenCodeDebugConfigOutput(
     [

@@ -35,11 +35,20 @@ export function parseOpenCodeConfigAgents(config: unknown): OpenCodeAgentDiscove
 }
 
 export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDiscovery {
+  const cleanOutput = output.replace(ANSI_PATTERN, '');
+  try {
+    return parseOpenCodeConfigAgents(JSON.parse(cleanOutput));
+  } catch {
+    return parsePartialOpenCodeDebugConfigOutput(cleanOutput);
+  }
+}
+
+function parsePartialOpenCodeDebugConfigOutput(cleanOutput: string): OpenCodeAgentDiscovery {
   const defaultAgentId = parseJsonStringCapture(
-    /^\s*"default_agent"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
+    /^\s*"default_agent"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(cleanOutput)?.[1]
   );
   const topLevelModelId = parseJsonStringCapture(
-    /^ {2}"model"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
+    /^ {2}"model"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(cleanOutput)?.[1]
   );
   const modes: CliAgentMode[] = [];
   let inAgentBlock = false;
@@ -53,8 +62,7 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
     current = undefined;
   };
 
-  for (const rawLine of output.split(/\r?\n/)) {
-    const line = rawLine.replace(ANSI_PATTERN, '');
+  for (const line of cleanOutput.split(/\r?\n/)) {
     if (!inAgentBlock) {
       if (/^ {2}"agent"\s*:\s*\{/.test(line)) inAgentBlock = true;
       continue;
