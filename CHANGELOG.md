@@ -1,5 +1,19 @@
 # 更新日志
 
+## [0.0.20] - 2026-07-30
+
+### Changed
+
+- 原样调用本机 CLI（本机安装的 CLI），认证、API、Provider、模型、权限、运行模式、
+  MCP、插件和会话策略均由 CLI 自身配置决定。
+- 删除 Agents GUI 的自定义 API Provider、模型、运行模式和权限覆盖入口。
+- SCM 提交信息只调用所选 CLI，不再自动切换到其他 CLI。
+- 首次升级会备份 OpenCode 配置，并仅清理旧版本写入且带标记的 Provider。
+
+### Fixed
+
+- 阻止小写 `error:`、HTTP 错误和模型错误进入 Git 提交信息输入框。
+
 ## v0.0.19 - 2026-07-28
 
 ### Windows 兼容性

@@ -2,7 +2,7 @@
   "name": "agents-gui",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "publisher": "agents-gui",
   "license": "MIT",
   "icon": "media/icon.png",

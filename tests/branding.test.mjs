@@ -4,6 +4,20 @@ import { existsSync } from 'node:fs';
 import test from 'node:test';
 import { inflateSync } from 'node:zlib';
 
+test('release metadata declares native CLI passthrough version 0.0.20', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+
+  assert.equal(manifest.version, '0.0.20');
+  assert.equal(lock.version, '0.0.20');
+  assert.equal(lock.packages[''].version, '0.0.20');
+  assert.match(readme, /本机 CLI.*自身.*认证.*模型/s);
+  assert.match(changelog, /## \[0\.0\.20\]/);
+  assert.match(changelog, /原样调用本机 CLI/);
+});
+
 test('agents-gui uses the three-node mark as the global logo', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');

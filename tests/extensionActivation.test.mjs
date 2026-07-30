@@ -238,14 +238,14 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(webviewProtocolSource, /export type WebviewToHostMessage/);
   assert.match(webviewProtocolSource, /export type HostToWebviewMessage/);
   assert.match(architectureDoc, /ports-and-adapters architecture/);
-  assert.match(architectureDoc, /AgentRuntime port/);
+  assert.match(architectureDoc, /AgentRuntime/);
   assert.match(architectureDoc, /src\/agentSessionController\.ts/);
   assert.match(architectureDoc, /src\/attachmentStore\.ts/);
   assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
 });
 
 
-test('interactive agent requests pass through the capability control plane', () => {
+test('architecture documents native CLI passthrough instead of a policy overlay', () => {
   assert.match(
     extensionSource,
     /import \{ createCliAgentCapabilityRegistry \} from '\.\/cliAgentCapabilities';/
@@ -263,8 +263,10 @@ test('interactive agent requests pass through the capability control plane', () 
   assert.doesNotMatch(agentCapabilitiesSource, /from ['"]vscode['"]/);
   assert.doesNotMatch(agentCapabilitiesSource, /CliManager/);
   assert.doesNotMatch(agentCapabilitiesSource, /child_process/);
-  assert.match(taskRuntimeArchitectureDoc, /capability registry/i);
-  assert.match(taskRuntimeArchitectureDoc, /ACP[\s\S]*native[\s\S]*CLI/i);
+  assert.match(taskRuntimeArchitectureDoc, /selected CLI only/i);
+  assert.match(taskRuntimeArchitectureDoc, /native one-shot prompt transport/i);
+  assert.match(taskRuntimeArchitectureDoc, /no automatic provider fallback/i);
+  assert.match(taskRuntimeArchitectureDoc, /no managed OpenCode server/i);
 });
 
 test('session lifecycle stays behind a dedicated controller', () => {
