@@ -348,6 +348,53 @@ test('McpManager reports OpenCode MCP management unavailable when cc-switch db i
   assert.equal(result.code, 'mcp_unavailable');
 });
 
+test('OpenCode MCP UI uses host snapshots and never persists a shadow disabled set', () => {
+  const main = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const sidebar = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const protocol = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+  const syncedState = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
+
+  for (const source of [main, sidebar, protocol, syncedState]) {
+    assert.doesNotMatch(source, /disabledMcpByProvider|DISABLED_MCP_STATE_KEY/);
+  }
+  assert.match(main, /mcpServersByCli\[cliId\]/);
+  assert.match(
+    main,
+    /command:\s*'toggleMcpServer',\s*cliId,\s*name:\s*normalized,\s*enabled:\s*entry\.enabled === false/s
+  );
+  assert.match(main, /mcpOperationErrorByCli\[cliId\]/);
+  assert.match(main, /openCodeDialogState\.applyMcpOperationResult\(/);
+  assert.match(
+    sidebar,
+    /handleToggleMcpServer[\s\S]*mcpManager\.setEnabled[\s\S]*handleLoadMcpServers\(\{ cliId \}\)/
+  );
+  const toggleHandler = sidebar.slice(
+    sidebar.indexOf('private async handleToggleMcpServer'),
+    sidebar.indexOf('private async updateProviderTitleContexts')
+  );
+  assert.doesNotMatch(
+    toggleHandler,
+    /if \(result\.ok\) \{\s*await this\.handleLoadMcpServers\(\{ cliId \}\)/
+  );
+
+  const dialogState = require('../media/openCodeDialogState.js');
+  const failed = dialogState.applyMcpOperationResult(
+    { codex: '' },
+    { cliId: 'opencode', ok: false, message: 'write failed' },
+    'codex',
+    'fallback failure'
+  );
+  assert.equal(failed.cliId, 'opencode');
+  assert.equal(failed.errors.opencode, 'write failed');
+  const recovered = dialogState.applyMcpOperationResult(
+    failed.errors,
+    { cliId: 'opencode', ok: true },
+    'codex',
+    'fallback failure'
+  );
+  assert.equal(recovered.errors.opencode, '');
+});
+
 test('ccSwitchDbPath resolves under HOME', () => {
   const resolved = ccSwitchDbPath();
   assert.ok(resolved.includes('.cc-switch'));

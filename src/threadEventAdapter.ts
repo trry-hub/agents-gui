@@ -34,6 +34,9 @@ interface ActiveTurnBinding {
 export interface ThreadEventAdapterOptions {
   now?: () => number;
   streamId?: string;
+  maxReplayEnvelopes?: number;
+  maxReplayBytes?: number;
+  maxReplayEnvelopeBytes?: number;
 }
 
 export interface ActiveRendererRun {
@@ -44,19 +47,28 @@ export interface ActiveRendererRun {
 }
 
 const MAX_REPLAY_ENVELOPES = 4096;
+const MAX_REPLAY_BYTES = 4 * 1024 * 1024;
+const MAX_REPLAY_ENVELOPE_BYTES = 512 * 1024;
 
 export class ThreadEventAdapter {
   private readonly now: () => number;
   private readonly streamId: string;
+  private readonly maxReplayEnvelopes: number;
+  private readonly maxReplayBytes: number;
+  private readonly maxReplayEnvelopeBytes: number;
   private readonly sequenceByThread = new Map<string, number>();
   private readonly activeTurnBySession = new Map<string, ActiveTurnBinding>();
   private readonly replayBuffer: ThreadEventEnvelope[] = [];
+  private replayEnvelopeBytes = 0;
   private turnCounter = 0;
   private feedbackCounter = 0;
 
   constructor(options: ThreadEventAdapterOptions = {}) {
     this.now = options.now ?? Date.now;
     this.streamId = clean(options.streamId) || randomUUID();
+    this.maxReplayEnvelopes = options.maxReplayEnvelopes ?? MAX_REPLAY_ENVELOPES;
+    this.maxReplayBytes = options.maxReplayBytes ?? MAX_REPLAY_BYTES;
+    this.maxReplayEnvelopeBytes = options.maxReplayEnvelopeBytes ?? MAX_REPLAY_ENVELOPE_BYTES;
   }
 
   accept(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {
@@ -88,9 +100,23 @@ export class ThreadEventAdapter {
         break;
     }
     if (envelopes.length > 0) {
-      this.replayBuffer.push(...envelopes);
-      if (this.replayBuffer.length > MAX_REPLAY_ENVELOPES) {
-        this.replayBuffer.splice(0, this.replayBuffer.length - MAX_REPLAY_ENVELOPES);
+      for (const envelope of envelopes) {
+        const envelopeBytes = Buffer.byteLength(JSON.stringify(envelope), 'utf8');
+        if (this.maxReplayBytes < 2 || envelopeBytes > this.maxReplayEnvelopeBytes) {
+          continue;
+        }
+        this.replayBuffer.push(envelope);
+        this.replayEnvelopeBytes += envelopeBytes;
+        while (
+          this.replayBuffer.length > 0 &&
+          (this.replayBuffer.length > this.maxReplayEnvelopes ||
+            this.serializedReplayBytes() > this.maxReplayBytes)
+        ) {
+          const removed = this.replayBuffer.shift();
+          if (removed) {
+            this.replayEnvelopeBytes -= Buffer.byteLength(JSON.stringify(removed), 'utf8');
+          }
+        }
       }
     }
     return envelopes;
@@ -107,6 +133,10 @@ export class ThreadEventAdapter {
       sessionId,
       turnId: binding.turnId,
     }));
+  }
+
+  private serializedReplayBytes(): number {
+    return 2 + this.replayEnvelopeBytes + Math.max(0, this.replayBuffer.length - 1);
   }
 
   private startTurn(message: LegacyLifecycleMessage): ThreadEventEnvelope[] {

@@ -399,6 +399,43 @@ test('CLI text generation adapter stops a session on first-output timeout', asyn
   assert.deepEqual(manager.stopped, ['opencode-1']);
 });
 
+test('CLI text generation adapter terminates stdout and stderr budget breaches', async () => {
+  for (const stream of ['stdout', 'stderr']) {
+    const manager = createFakeCliManager();
+    const adapter = new CliTextGenerationAdapter(manager, {
+      maxStdoutBytes: 32,
+      maxStderrBytes: 16,
+    });
+    const generation = adapter.generate(
+      fastGenerationRequest({
+        budgets: {
+          launchMs: 50,
+          firstOutputMs: 50,
+          idleMs: 30,
+          totalMs: 100,
+        },
+      }),
+      activeSignal
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    manager.events.fire({
+      type: 'output',
+      stream,
+      transport: 'process',
+      text: 'x'.repeat(stream === 'stdout' ? 33 : 17),
+    });
+
+    await assert.rejects(
+      () => generation,
+      (error) =>
+        error instanceof TextGenerationError &&
+        error.code === 'output-limit' &&
+        new RegExp(`${stream}.*limit`, 'i').test(error.message)
+    );
+    assert.deepEqual(manager.stopped, ['opencode-1']);
+  }
+});
+
 test('CLI text generation adapter stops a session when cancelled', async () => {
   const manager = createFakeCliManager();
   const cancellation = createCancellationSignal();

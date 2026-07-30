@@ -60,7 +60,6 @@ export type HostToWebviewMessage =
       defaultProviderId?: string;
       activeProviderId?: string;
       activeAgentModeByProvider?: Record<string, string>;
-      disabledMcpByProvider?: Record<string, string[]>;
       contextOptions?: Partial<AssistantContextOptions>;
       claudeTerminalBannerDismissed?: boolean;
       taskBoardDismissed?: boolean;

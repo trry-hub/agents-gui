@@ -79,15 +79,20 @@ function buildOpenCodeFreeformPrompt(request: AssistantPromptRequest): string {
   const hasAttachments = Boolean(request.attachments?.length);
   const hasContext = hasSubstantialContext(request.context);
   const hasHistory = Boolean(request.conversationHistory?.length);
+  const taskIntent = [
+    `Selected task intent: ${request.agentMode.label} (${request.agentMode.id}).`,
+    request.agentMode.instruction.trim(),
+  ].filter(Boolean);
 
   if (!hasAttachments && !hasContext && !hasHistory) {
-    if (!languageDirective) {
-      return message;
+    const lines = [message, '', ...taskIntent];
+    if (languageDirective) {
+      lines.push('', languageDirective);
     }
-    return `${message}\n\n${languageDirective}`;
+    return lines.join('\n');
   }
 
-  const lines: string[] = [message, ''];
+  const lines: string[] = [message, '', ...taskIntent, ''];
 
   const history = renderConversationHistory(request.conversationHistory);
   if (history) {

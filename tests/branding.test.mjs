@@ -96,6 +96,38 @@ test('release metadata declares native CLI passthrough version 0.0.20', () => {
   }
 });
 
+test('README reports native prompt transport and only implemented tokenizers', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const expectedRows = [
+    '| OpenCode | `opencode` | argument | 暂无 |',
+    '| Codex CLI | `codex` | argument | OpenAI o200k |',
+    '| Claude Code | `claude` | argument | Claude tokenizer |',
+    '| Gemini CLI | `gemini` | argument | 暂无 |',
+    '| Goose | `goose` | argument | 暂无 |',
+    '| Aider | `aider` | argument | 暂无 |',
+  ];
+
+  for (const row of expectedRows) {
+    assert.match(readme, new RegExp(row.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(readme, /tiktoken cl100k|Anthropic tokens/);
+});
+
+test('release packaging uses an exact local VSCE dependency', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
+
+  assert.equal(manifest.devDependencies['@vscode/vsce'], '2.32.0');
+  assert.equal(lock.packages[''].devDependencies['@vscode/vsce'], '2.32.0');
+  assert.equal(lock.packages['node_modules/@vscode/vsce'].version, '2.32.0');
+  assert.equal(manifest.scripts.package, 'npm run build && vsce package');
+  assert.equal(
+    manifest.scripts['publish:manual'],
+    'npm run package && vsce publish --packagePath agents-gui-${npm_package_version}.vsix'
+  );
+  assert.doesNotMatch(JSON.stringify(manifest.scripts), /\bnpx\b/);
+});
+
 test('agents-gui uses the three-node mark as the global logo', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');

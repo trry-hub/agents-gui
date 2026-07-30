@@ -9,6 +9,7 @@ const {
   buildCliLookupPath,
   mergePathEntries,
   normalizeCommandPathOutput,
+  withCommandDirectoryPath,
   withCliLookupPath,
 } = require('../.test-dist/cliPathResolver.js');
 
@@ -115,6 +116,40 @@ test('withCliLookupPath keeps POSIX PATH lookup case-sensitive', () => {
 
   assert.equal(env.PATH.split(':')[0], '/provider-override');
   assert.equal(env.Path, '/not-the-posix-path');
+});
+
+test('withCommandDirectoryPath prepends without normalizing inherited POSIX PATH bytes', () => {
+  const inheritedPath = ':/usr/bin:: /odd entry :/usr/bin:';
+  const env = withCommandDirectoryPath(
+    {
+      PATH: inheritedPath,
+      Path: '/case-sensitive-non-path',
+      EMPTY_VALUE: '',
+    },
+    '/resolved command',
+    'linux'
+  );
+
+  assert.equal(env.PATH, `/resolved command:${inheritedPath}`);
+  assert.equal(env.Path, '/case-sensitive-non-path');
+  assert.equal(env.EMPTY_VALUE, '');
+});
+
+test('withCommandDirectoryPath emits one Windows PATH key and preserves the selected value', () => {
+  const inheritedPath = 'C:\\Second;; C:\\Odd ;C:\\Second;';
+  const env = withCommandDirectoryPath(
+    {
+      Path: 'C:\\First',
+      PATH: inheritedPath,
+      FOO: 'bar',
+    },
+    'C:\\Resolved Command',
+    'win32'
+  );
+
+  assert.equal(env.PATH, `C:\\Resolved Command;${inheritedPath}`);
+  assert.equal(env.Path, undefined);
+  assert.equal(env.FOO, 'bar');
 });
 
 test('normalizeCommandPathOutput prefers native Windows executables over shims', () => {

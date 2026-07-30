@@ -40,6 +40,7 @@ import {
 } from './localization';
 import { getProviderExtensionBridge } from './providerExtensions';
 import { SettingsManager } from './settingsManager';
+import { SerializedRequestQueue } from './serializedRequestQueue';
 import type {
   HostToWebviewMessage,
   SetupCliProfile,
@@ -50,7 +51,6 @@ import {
   AGENT_MODE_STATE_KEY,
   CLAUDE_TERMINAL_BANNER_STATE_KEY,
   CONTEXT_OPTIONS_STATE_KEY,
-  DISABLED_MCP_STATE_KEY,
   LAST_PROVIDER_STATE_KEY,
   TASK_BOARD_DISMISSED_STATE_KEY,
 } from './syncedState';
@@ -75,7 +75,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private pendingRequests: AssistantWebviewRequest[] = [];
   private disposables: vscode.Disposable[] = [];
-  private readonly requestChainByCli = new Map<string, Promise<void>>();
+  private readonly requestQueue = new SerializedRequestQueue();
   private providerClientTerminals = new Map<string, ProviderClientTerminalState>();
   private latestContextRequestByCli = new Map<string, string>();
   private profilesById = new Map<string, CliProfile>();
@@ -379,8 +379,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       defaultProviderId,
       activeProviderId: storedProviderId,
       activeAgentModeByProvider: this.settingsManager.getStoredAgentModeState(this.profilesById),
-      disabledMcpByProvider:
-        this.settingsManager.getStoredStringArrayRecord(DISABLED_MCP_STATE_KEY),
       contextOptions: this.settingsManager.getStoredContextOptions(),
       claudeTerminalBannerDismissed: this.state?.get<boolean>(
         CLAUDE_TERMINAL_BANNER_STATE_KEY,
@@ -495,8 +493,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       message: result.message,
       code: result.code,
     });
+    await this.handleLoadMcpServers({ cliId });
     if (result.ok) {
-      await this.handleLoadMcpServers({ cliId });
       await this.invalidateContext(cliId);
     }
   }
@@ -524,8 +522,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       message: result.message,
       code: result.code,
     });
+    await this.handleLoadMcpServers({ cliId });
     if (result.ok) {
-      await this.handleLoadMcpServers({ cliId });
       await this.invalidateContext(cliId);
     }
   }
@@ -548,8 +546,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       message: result.message,
       code: result.code,
     });
+    await this.handleLoadMcpServers({ cliId });
     if (result.ok) {
-      await this.handleLoadMcpServers({ cliId });
       await this.invalidateContext(cliId);
     }
   }
@@ -600,7 +598,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       options,
       this.settingsManager.getContextLimits()
     );
-    const profile = getCliProfile(cliId) ?? getCliProfile(this.settingsManager.getDefaultCliId());
+    const defaultCliId = this.settingsManager.getDefaultCliId();
+    const profile =
+      this.profilesById.get(cliId) ??
+      getCliProfile(cliId) ??
+      this.profilesById.get(defaultCliId) ??
+      getCliProfile(defaultCliId);
     const configuredModelId = profile?.configuredModel?.id;
     const baseSummary = this.contextCollector.summarize(snapshot);
     const workspaceBranch = await this.getWorkspaceBranch(baseSummary.workspacePath);
@@ -676,25 +679,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
    */
   private async handleAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
     const cliId = this.settingsManager.resolveCliId(message);
-    const previous = this.requestChainByCli.get(cliId) ?? Promise.resolve();
-    const chained = previous.then(
+    await this.requestQueue.enqueue(
+      cliId,
       () => this.executeAssistantRequest(message),
-      (err) => {
-        // Report previous request error to webview, but still execute current request
-        if (err instanceof Error) {
-          this.postError(cliId, err.message, message.threadId);
-        }
-        return this.executeAssistantRequest(message);
+      (error) => {
+        const text =
+          error instanceof Error
+            ? error.message
+            : runtimeT(this.locale, 'error.startFailed', { provider: cliId });
+        this.postError(cliId, text, message.threadId);
       }
     );
-    this.requestChainByCli.set(cliId, chained);
-    try {
-      await chained;
-    } finally {
-      if (this.requestChainByCli.get(cliId) === chained) {
-        this.requestChainByCli.delete(cliId);
-      }
-    }
   }
 
   private async executeAssistantRequest(message: AssistantWebviewRequest): Promise<void> {
@@ -913,7 +908,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const payload = message as {
       activeProviderId?: unknown;
       activeAgentModeByProvider?: unknown;
-      disabledMcpByProvider?: unknown;
       contextOptions?: unknown;
       claudeTerminalBannerDismissed?: unknown;
       taskBoardDismissed?: unknown;
@@ -930,10 +924,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         payload.activeAgentModeByProvider,
         this.profilesById
       )
-    );
-    await this.state.update(
-      DISABLED_MCP_STATE_KEY,
-      normalizeStringArrayRecord(payload.disabledMcpByProvider)
     );
     await this.state.update(
       CONTEXT_OPTIONS_STATE_KEY,
@@ -1089,20 +1079,6 @@ function normalizeAction(action?: AssistantActionId): AssistantActionId {
     default:
       return 'freeform';
   }
-}
-
-function normalizeStringArrayRecord(value: unknown): Record<string, string[]> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-
-  const result: Record<string, string[]> = {};
-  for (const [key, rawValue] of Object.entries(value)) {
-    if (typeof key === 'string' && Array.isArray(rawValue)) {
-      result[key] = rawValue.filter((item): item is string => typeof item === 'string');
-    }
-  }
-  return result;
 }
 
 function normalizeContextOptions(value: unknown): Partial<AssistantContextOptions> {

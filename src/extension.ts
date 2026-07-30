@@ -8,7 +8,10 @@ import { CliTextGenerationAdapter } from './cliTextGenerationAdapter';
 import { CommitMessageCommand } from './commitMessageCommand';
 import { runExtensionSmokeProbe } from './extensionSmokeHarness';
 import { resolveRuntimeLocale, runtimeT } from './localization';
-import { OpenCodeConfigCleanupMigration, runOpenCodeCleanupOnce } from './openCodeConfigCleanup';
+import {
+  OpenCodeConfigCleanupMigration,
+  runOpenCodeCleanupActivationGate,
+} from './openCodeConfigCleanup';
 import { SYNCED_GLOBAL_STATE_KEYS } from './syncedState';
 import { GenerateCommitMessageUseCase } from './textGeneration';
 
@@ -16,12 +19,17 @@ export async function activate(context: vscode.ExtensionContext) {
   const locale = resolveRuntimeLocale(vscode.env.language);
   context.globalState.setKeysForSync(SYNCED_GLOBAL_STATE_KEYS);
   const openCodeCleanup = new OpenCodeConfigCleanupMigration();
-  try {
-    await runOpenCodeCleanupOnce(context.globalState, openCodeCleanup);
-  } catch (error) {
-    console.warn('[Agents GUI] Failed to clean legacy OpenCode provider configuration.', error);
-  }
-  const cliManager = new CliManager();
+  const disabledCliIds = await runOpenCodeCleanupActivationGate(
+    context.globalState,
+    openCodeCleanup,
+    async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      await vscode.window.showErrorMessage(
+        runtimeT(locale, 'error.openCodeCleanupFailed', { message })
+      );
+    }
+  );
+  const cliManager = new CliManager({ disabledCliIds });
   const agentRuntime = new CliAgentRuntime(cliManager);
   const agentCapabilityRegistry = createCliAgentCapabilityRegistry(CLI_PROFILES);
   const textGenerationAdapter = new CliTextGenerationAdapter(cliManager);

@@ -24,6 +24,19 @@ const INTERNAL_PROMPT_START_MARKERS = [
   'Response requirements:',
 ];
 
+export const MAX_CLI_JSON_BUFFER_BYTES = 1024 * 1024;
+
+export class CliOutputBufferLimitError extends Error {
+  readonly code = 'CLI_OUTPUT_BUFFER_LIMIT';
+
+  constructor(providerName: string) {
+    super(
+      `The incomplete ${providerName} JSON record exceeded the ${MAX_CLI_JSON_BUFFER_BYTES}-byte parser limit.`
+    );
+    this.name = 'CliOutputBufferLimitError';
+  }
+}
+
 export interface NormalizedCliOutputChunk {
   text: string;
   buffer: string;
@@ -72,6 +85,7 @@ export function normalizeCliOutputChunk(
   if (providerId === 'claude') {
     const parsed = normalizeClaudeJsonChunk(`${buffer}${text}`);
     if (parsed) {
+      assertJsonBufferWithinLimit(parsed.buffer, 'Claude');
       return parsed;
     }
     return { text: normalizeCliOutput(text, providerId), buffer: '' };
@@ -80,11 +94,18 @@ export function normalizeCliOutputChunk(
   if (providerId === 'opencode') {
     const parsed = normalizeOpenCodeJsonChunk(`${buffer}${text}`);
     if (parsed) {
+      assertJsonBufferWithinLimit(parsed.buffer, 'OpenCode');
       return parsed;
     }
   }
 
   return { text: normalizeCliOutput(text, providerId), buffer: '' };
+}
+
+function assertJsonBufferWithinLimit(buffer: string, providerName: string): void {
+  if (Buffer.byteLength(buffer, 'utf8') > MAX_CLI_JSON_BUFFER_BYTES) {
+    throw new CliOutputBufferLimitError(providerName);
+  }
 }
 
 export function flushCliOutputBuffer(buffer: string, providerId?: string): string {

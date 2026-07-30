@@ -117,7 +117,11 @@ test('flag-on lifecycle handlers update shell state without mutating legacy tran
   );
   assert.match(
     script,
-    /taskBySessionId\[run\.sessionId\]\s*=\s*task\.id/
+    /rememberTaskSession\(run\.sessionId,\s*task\.id\)/
+  );
+  assert.match(
+    script,
+    /function rememberTaskSession\(sessionId, taskId\)[\s\S]*taskBySessionId\[sessionId\] = taskId;/
   );
 });
 

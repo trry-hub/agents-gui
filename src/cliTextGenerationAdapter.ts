@@ -36,18 +36,27 @@ export interface CliTextGenerationManager {
 
 export interface CliTextGenerationAdapterOptions {
   now?: () => number;
+  maxStdoutBytes?: number;
+  maxStderrBytes?: number;
 }
+
+const DEFAULT_MAX_GENERATED_STDOUT_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_GENERATED_STDERR_BYTES = 512 * 1024;
 
 export class CliTextGenerationAdapter
   implements TextGenerationPort, TextGenerationProviderRegistry
 {
   private readonly now: () => number;
+  private readonly maxStdoutBytes: number;
+  private readonly maxStderrBytes: number;
 
   constructor(
     private readonly cliManager: CliTextGenerationManager,
     private readonly options: CliTextGenerationAdapterOptions = {}
   ) {
     this.now = options.now ?? Date.now;
+    this.maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_MAX_GENERATED_STDOUT_BYTES;
+    this.maxStderrBytes = options.maxStderrBytes ?? DEFAULT_MAX_GENERATED_STDERR_BYTES;
   }
 
   isAvailable(providerId: string): Promise<boolean> {
@@ -183,6 +192,8 @@ export class CliTextGenerationAdapter
       let output = '';
       let stderr = '';
       let buffer = '';
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
       let lastEmittedSafePrefix = '';
       let settled = false;
       let streaming = false;
@@ -207,6 +218,7 @@ export class CliTextGenerationAdapter
           | 'first-output-timeout'
           | 'idle-timeout'
           | 'total-timeout'
+          | 'output-limit'
           | 'provider-error',
         message: string,
         phase: 'wait-first-output' | 'stream'
@@ -238,13 +250,35 @@ export class CliTextGenerationAdapter
       disposables.push(
         session.onEvent.event((event) => {
           if (event.type === 'output' && event.stream === 'stdout') {
+            stdoutBytes += Buffer.byteLength(event.text, 'utf8');
+            if (stdoutBytes > this.maxStdoutBytes) {
+              fail(
+                'output-limit',
+                `AI provider stdout exceeded the ${this.maxStdoutBytes}-byte output limit.`,
+                streaming ? 'stream' : 'wait-first-output'
+              );
+              return;
+            }
             clearTimeout(firstOutputTimeout);
             if (!streaming) {
               streaming = true;
               this.emitPhase(observer, 'stream', startedAt);
             }
             resetIdleTimeout();
-            const normalized = normalizeCliOutputChunk(event.text, session.cliId, buffer);
+            let normalized;
+            try {
+              normalized = normalizeCliOutputChunk(event.text, session.cliId, buffer);
+            } catch (error) {
+              if (
+                error instanceof Error &&
+                'code' in error &&
+                error.code === 'CLI_OUTPUT_BUFFER_LIMIT'
+              ) {
+                fail('output-limit', error.message, streaming ? 'stream' : 'wait-first-output');
+                return;
+              }
+              throw error;
+            }
             buffer = normalized.buffer;
             output += normalized.text;
             const diagnosticLine = findProviderDiagnosticLine(output);
@@ -271,6 +305,15 @@ export class CliTextGenerationAdapter
           }
 
           if (event.type === 'output' && event.stream === 'stderr') {
+            stderrBytes += Buffer.byteLength(event.text, 'utf8');
+            if (stderrBytes > this.maxStderrBytes) {
+              fail(
+                'output-limit',
+                `AI provider stderr exceeded the ${this.maxStderrBytes}-byte output limit.`,
+                streaming ? 'stream' : 'wait-first-output'
+              );
+              return;
+            }
             stderr += normalizeCliOutput(event.text, session.cliId);
             return;
           }

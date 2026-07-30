@@ -171,7 +171,13 @@ test('persistence checkpoints running turns at most once per 500ms and flushes l
   let timerCallback;
   let timerDelay;
   const persisted = [];
-  const snapshots = [{ version: 2, marker: 1 }, { version: 2, marker: 2 }];
+  const snapshots = [1, 2].map((marker) => ({
+    version: 2,
+    threadsById: {},
+    threadOrderByProvider: {},
+    activeThreadByProvider: {},
+    appliedEnvelopeKeys: [`marker:${marker}`],
+  }));
   let snapshotIndex = 0;
   const coordinator = createPersistenceCoordinator({
     getSnapshot: () => snapshots[snapshotIndex],
@@ -206,5 +212,5 @@ test('persistence checkpoints running turns at most once per 500ms and flushes l
 
   coordinator.onEvent(delta(5, 'assistant', 'D'));
   coordinator.dispose();
-  assert.equal(persisted.at(-1), snapshots[1]);
+  assert.deepEqual(persisted.at(-1), snapshots[1]);
 });

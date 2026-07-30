@@ -5,6 +5,8 @@ import reducerModule from '../.test-dist/webview/conversationReducer.js';
 import storeModule from '../.test-dist/webview/conversationStore.js';
 
 const {
+  CONVERSATION_LIMITS,
+  boundConversationSnapshot,
   createEmptyConversationSnapshot,
   migrateLegacyConversations,
   projectConversationHistory,
@@ -130,6 +132,132 @@ test('delta before item start creates a running placeholder', () => {
   assert.equal(item.type, 'reasoning');
   assert.equal(item.status, 'running');
   assert.equal(item.content, 'inspect');
+});
+
+test('canonical conversation state bounds streamed content and hydrated persistence', () => {
+  assert.ok(CONVERSATION_LIMITS);
+  const store = createConversationStore();
+  startThreadAndTurn(store, 'turn-1');
+  store.dispatch(
+    envelope(3, {
+      type: 'item/assistantMessage/delta',
+      turnId: 'turn-1',
+      itemId: 'turn-1:assistant',
+      delta: 'x'.repeat(CONVERSATION_LIMITS.maxItemContentChars + 50),
+    })
+  );
+  const streamed =
+    store.getSnapshot().threadsById['thread-1'].turnsById['turn-1'].itemsById[
+      'turn-1:assistant'
+    ];
+  assert.equal(streamed.content.length, CONVERSATION_LIMITS.maxItemContentChars);
+
+  const huge = createEmptyConversationSnapshot();
+  huge.threadsById['thread-1'] = {
+    id: 'thread-1',
+    providerId: 'codex',
+    title: 't'.repeat(CONVERSATION_LIMITS.maxTitleChars + 50),
+    status: 'completed',
+    turnOrder: [],
+    turnsById: {},
+    updatedAt: 1,
+  };
+  huge.threadOrderByProvider.codex = ['thread-1'];
+  const adversarialPayload = 'q'.repeat(CONVERSATION_LIMITS.maxPersistedBytes + 1);
+  huge.appliedEnvelopeKeys = [
+    adversarialPayload,
+  ];
+  for (let index = 0; index < CONVERSATION_LIMITS.maxTurnsPerThread + 4; index += 1) {
+    const turnId = `turn-${index}`;
+    huge.threadsById['thread-1'].turnOrder.push(turnId);
+    huge.threadsById['thread-1'].turnsById[turnId] = {
+      id: turnId,
+      status: 'completed',
+      itemOrder: ['item'],
+      itemsById: {
+        item: {
+          id: 'item',
+          turnId,
+          type: 'assistant-message',
+          status: 'completed',
+          content: 'y'.repeat(CONVERSATION_LIMITS.maxItemContentChars + 50),
+          attachments: Array.from(
+            { length: CONVERSATION_LIMITS.maxAttachmentsPerItem + 4 },
+            () => ({
+              kind: 'image',
+              injected: adversarialPayload,
+            })
+          ),
+          choices: [
+            {
+              label: 'label',
+              prompt: adversarialPayload,
+            },
+          ],
+          activity: {
+            kind: 'tool',
+            detail: adversarialPayload,
+          },
+          startedAt: 1,
+        },
+      },
+      startedAt: 1,
+    };
+  }
+  const bounded = boundConversationSnapshot(huge);
+  assert.ok(
+    bounded.threadsById['thread-1'].turnOrder.length <=
+      CONVERSATION_LIMITS.maxTurnsPerThread
+  );
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(bounded), 'utf8') <=
+      CONVERSATION_LIMITS.maxPersistedBytes
+  );
+});
+
+test('stream deltas cap item content without full-snapshot compaction on every chunk', () => {
+  let compactions = 0;
+  const store = createConversationStore(createEmptyConversationSnapshot(), {
+    compactSnapshot(snapshot) {
+      compactions += 1;
+      return boundConversationSnapshot(snapshot);
+    },
+  });
+  assert.equal(compactions, 1);
+  startThreadAndTurn(store, 'turn-stream');
+  store.dispatch(
+    envelope(3, {
+      type: 'item/started',
+      item: {
+        id: 'turn-stream:assistant',
+        turnId: 'turn-stream',
+        type: 'assistant-message',
+        status: 'running',
+        content: '',
+        startedAt: 10,
+      },
+    })
+  );
+  const compactionsBeforeDelta = compactions;
+
+  store.dispatch(
+    envelope(4, {
+      type: 'item/assistantMessage/delta',
+      turnId: 'turn-stream',
+      itemId: 'turn-stream:assistant',
+      delta: 'x'.repeat(CONVERSATION_LIMITS.maxItemContentChars + 50_000),
+    })
+  );
+
+  assert.equal(compactions, compactionsBeforeDelta);
+  assert.equal(
+    store
+      .getSnapshot()
+      .threadsById['thread-1']
+      .turnsById['turn-stream']
+      .itemsById['turn-stream:assistant'].content.length,
+    CONVERSATION_LIMITS.maxItemContentChars
+  );
 });
 
 test('store ignores exact duplicate sequences but accepts a distinct late envelope', () => {

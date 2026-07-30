@@ -148,15 +148,9 @@ function findCommitMessageStart(
 ): { lineIndex: number; columnIndex: number } | undefined {
   const conventional =
     /\b(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]+\))?!?:\s+\S/;
-  const genericSubject = /^(?:revert:|merge\b|initial commit\b)/i;
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
-    const trimmed = line.trim();
-    if (genericSubject.test(trimmed)) {
-      return { lineIndex, columnIndex: line.indexOf(trimmed) };
-    }
-
     const match = conventional.exec(line);
     if (match) {
       return { lineIndex, columnIndex: match.index };

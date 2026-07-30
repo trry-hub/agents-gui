@@ -28,6 +28,7 @@ async function run() {
 
   assert.equal(result.startedPrompts, 2);
   assert.equal(result.sentInputs, 0);
+  assert.equal(result.contextWindowTokens, 321_000);
   assert.ok(result.stoppedSessions.some((sessionId) => sessionId.startsWith('smoke-opencode-')));
   assert.ok(result.outputTexts.some((text) => text.includes('smoke reply')));
 }

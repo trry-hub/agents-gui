@@ -120,12 +120,20 @@ export function withCommandDirectoryPath(
   commandDir: string | undefined,
   platform: NodeJS.Platform = process.platform
 ): NodeJS.ProcessEnv {
+  const delimiter = platform === 'win32' ? path.win32.delimiter : path.posix.delimiter;
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(sourceEnv)) {
     const isPathKey = platform === 'win32' ? key.toLowerCase() === 'path' : key === 'PATH';
     if (!isPathKey) env[key] = value;
   }
-  env.PATH = mergePathEntries([commandDir, readEnvValue(sourceEnv, 'PATH', platform)], platform);
+  const inheritedPath = readRawEnvValue(sourceEnv, 'PATH', platform);
+  if (commandDir !== undefined && inheritedPath !== undefined) {
+    env.PATH = `${commandDir}${delimiter}${inheritedPath}`;
+  } else if (commandDir !== undefined) {
+    env.PATH = commandDir;
+  } else if (inheritedPath !== undefined) {
+    env.PATH = inheritedPath;
+  }
   return env;
 }
 
@@ -148,6 +156,14 @@ export function normalizeCommandPathOutput(
 }
 
 function readEnvValue(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Platform): string {
+  return readRawEnvValue(env, name, platform)?.trim() ?? '';
+}
+
+function readRawEnvValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  platform: NodeJS.Platform
+): string | undefined {
   const key =
     platform === 'win32'
       ? Object.keys(env)
@@ -156,7 +172,7 @@ function readEnvValue(env: NodeJS.ProcessEnv, name: string, platform: NodeJS.Pla
       : Object.hasOwn(env, name)
         ? name
         : undefined;
-  return key ? String(env[key] || '').trim() : '';
+  return key !== undefined && typeof env[key] === 'string' ? env[key] : undefined;
 }
 
 function isCommandPath(value: string, platform: NodeJS.Platform): boolean {

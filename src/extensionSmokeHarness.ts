@@ -18,8 +18,11 @@ export interface ExtensionSmokeProbeResult {
   stoppedSessions: string[];
   stopAllCount: number;
   outputTexts: string[];
+  contextWindowTokens?: number;
   missing: string[];
 }
+
+const SMOKE_DISCOVERED_CONTEXT_WINDOW_TOKENS = 321_000;
 
 export async function runExtensionSmokeProbe(
   extensionUri: vscode.Uri,
@@ -111,14 +114,18 @@ export async function runExtensionSmokeProbe(
     'stopped',
   ];
   const missing = requiredCommands.filter((command) => !postedCommands.includes(command));
-  const correlatedContextSummary = postedMessages.some(
-    (message) =>
+  const correlatedContextSummary = postedMessages.find(
+    (message): message is Extract<HostToWebviewMessage, { command: 'contextSummary' }> =>
       message.command === 'contextSummary' &&
       message.requestId === 'smoke-context-1' &&
       message.cliId === 'opencode'
   );
   if (!correlatedContextSummary) {
     missing.push('correlated context summary');
+  } else if (
+    correlatedContextSummary.summary.contextWindowTokens !== SMOKE_DISCOVERED_CONTEXT_WINDOW_TOKENS
+  ) {
+    missing.push('discovered profile context window');
   }
   if (runtime.startedPrompts.length !== 2) {
     missing.push('two startPrompt calls');
@@ -142,6 +149,7 @@ export async function runExtensionSmokeProbe(
     stoppedSessions: runtime.stoppedSessions,
     stopAllCount: runtime.stopAllCount,
     outputTexts,
+    contextWindowTokens: correlatedContextSummary?.summary.contextWindowTokens,
     missing,
   };
 }
@@ -189,6 +197,11 @@ class SmokeAgentRuntime implements AgentRuntime {
       ...profile,
       installed: true,
       version: 'smoke',
+      contextWindowTokens: SMOKE_DISCOVERED_CONTEXT_WINDOW_TOKENS,
+      configuredModel: {
+        id: 'smoke/discovered-model',
+        label: 'Smoke discovered model',
+      },
     };
   }
 

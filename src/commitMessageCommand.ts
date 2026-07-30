@@ -90,6 +90,8 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     providerSelected: '{provider} will be used for Git commit messages.',
     providerSetupRequired:
       '{provider} is not installed. Install or configure a CLI to generate commit messages.',
+    invalidProviderConfiguration:
+      'Configured CLI "{provider}" is not supported. Fix the Agents GUI provider settings.',
     openSetup: 'Open Setup',
     copyInstallCommand: 'Copy Install Command',
     installCommandCopied: 'Install command copied.',
@@ -118,6 +120,7 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     openCommitSettingsDescription: '配置 CLI、语言和 diff 限制',
     providerSelected: '将使用 {provider} 生成 Git 提交信息。',
     providerSetupRequired: '{provider} 未安装。请安装或配置一个 CLI 后再生成提交信息。',
+    invalidProviderConfiguration: '配置的 CLI“{provider}”不受支持。请修正 Agents GUI 提供方设置。',
     openSetup: '打开配置',
     copyInstallCommand: '复制安装命令',
     installCommandCopied: '安装命令已复制。',
@@ -156,6 +159,8 @@ export class CommitMessageCommand {
     let repositoryRootKey: string | undefined;
     let streamingRepository: GitRepository | undefined;
     let originalInputValue = '';
+    let lastGeneratedInputValue: string | undefined;
+    let inputOwnershipLost = false;
     let completedGeneration = false;
 
     try {
@@ -203,8 +208,15 @@ export class CommitMessageCommand {
       streamingRepository = repository;
       originalInputValue = repository.inputBox.value;
       repository.inputBox.value = '';
+      lastGeneratedInputValue = '';
       const streamCommitMessage = (message: string) => {
+        if (inputOwnershipLost || repository.inputBox.value !== lastGeneratedInputValue) {
+          inputOwnershipLost = true;
+          return;
+        }
+
         repository.inputBox.value = message;
+        lastGeneratedInputValue = message;
       };
       const result = await this.generateCommitMessageWithCancellation(
         primaryProfile,
@@ -219,7 +231,10 @@ export class CommitMessageCommand {
       );
 
       completedGeneration = true;
-      repository.inputBox.value = result.message;
+      if (!inputOwnershipLost && repository.inputBox.value === lastGeneratedInputValue) {
+        repository.inputBox.value = result.message;
+        lastGeneratedInputValue = result.message;
+      }
       await vscode.commands.executeCommand('workbench.view.scm');
       const messageKey = truncated ? 'generatedTruncated' : 'generated';
       vscode.window.showInformationMessage(
@@ -228,7 +243,13 @@ export class CommitMessageCommand {
         })
       );
     } catch (error) {
-      if (!completedGeneration && streamingRepository) {
+      if (
+        !completedGeneration &&
+        streamingRepository &&
+        !inputOwnershipLost &&
+        lastGeneratedInputValue !== undefined &&
+        streamingRepository.inputBox.value === lastGeneratedInputValue
+      ) {
         streamingRepository.inputBox.value = originalInputValue;
       }
 
@@ -430,9 +451,8 @@ export class CommitMessageCommand {
   }
 
   private async resolveReadyProfile(locale: RuntimeLocale): Promise<CliProfile | undefined> {
-    const preferred = this.getDefaultProfile();
-
     if (this.usesAskCommitMessageProvider()) {
+      const preferred = getCliProfile(DEFAULT_CLI_ID) ?? CLI_PROFILES[0];
       const installedProfiles = await this.getInstalledProfiles();
       if (installedProfiles.length === 0) {
         await this.promptProviderSetup(locale, preferred);
@@ -445,6 +465,17 @@ export class CommitMessageCommand {
         false,
         installedProfiles
       );
+    }
+
+    const configuredProvider = this.getConfiguredProvider();
+    const preferred = this.getDefaultProfile();
+    if (!preferred) {
+      vscode.window.showErrorMessage(
+        this.t(locale, 'invalidProviderConfiguration', {
+          provider: configuredProvider,
+        })
+      );
+      return undefined;
     }
 
     if (await this.providerRegistry.isAvailable(preferred.id)) {
@@ -552,14 +583,9 @@ export class CommitMessageCommand {
     await vscode.commands.executeCommand('agents-gui.refreshProviders');
   }
 
-  private getDefaultProfile(): CliProfile {
+  private getDefaultProfile(): CliProfile | undefined {
     const configured = this.getConfiguredProvider();
-
-    return (
-      (configured ? getCliProfile(configured) : undefined) ??
-      getCliProfile(DEFAULT_CLI_ID) ??
-      CLI_PROFILES[0]
-    );
+    return getCliProfile(configured);
   }
 
   private getConfiguredProvider(): string {
@@ -572,9 +598,10 @@ export class CommitMessageCommand {
       return commitProvider;
     }
 
-    return vscode.workspace
+    const defaultProvider = vscode.workspace
       .getConfiguration('agents-gui')
       .get<string>('defaultProvider', DEFAULT_CLI_ID);
+    return defaultProvider?.trim() || DEFAULT_CLI_ID;
   }
 
   private getConfiguredCommitMessageProvider(): string {

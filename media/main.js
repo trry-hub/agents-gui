@@ -62,6 +62,7 @@
   const THINKING_CHEVRON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>';
   const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
+  const MAX_SESSION_BOOKKEEPING_ENTRIES = 256;
   const SESSION_HISTORY_MIN_WIDTH = 180;
   const SESSION_HISTORY_MAX_WIDTH = 480;
   const SESSION_HISTORY_DEFAULT_WIDTH = 220;
@@ -93,7 +94,6 @@
   let profilesLoading = true;
   let activeId = saved.activeId || '';
   let activeAgentModeByProvider = persistableAgentModeMap(saved.activeAgentModeByProvider);
-  let disabledMcpByProvider = saved.disabledMcpByProvider || {};
   let homeAgentSettings = { visibleAgentIds: [], agentOrder: [] };
   let commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
   let activeSettingsSection = 'agents';
@@ -102,6 +102,7 @@
   let mcpConfigPathByCli = {};
   let mcpSupportedByCli = {};
   let mcpReasonByCli = {};
+  let mcpOperationErrorByCli = {};
   let editingMcpServerName = '';
   let mcpServerFormDirty = false;
   let claudeTerminalBannerDismissed = Boolean(saved.claudeTerminalBannerDismissed);
@@ -157,6 +158,41 @@
   let openCodeDialogCommandEchoQuery = '';
   let openCodeDialogEchoCleanupPending = false;
   let openCodeDialogHistory = [];
+
+  function rememberStoppedSession(sessionId) {
+    if (!sessionId) {
+      return;
+    }
+    stoppedSessionIds.delete(sessionId);
+    stoppedSessionIds.add(sessionId);
+    while (stoppedSessionIds.size > MAX_SESSION_BOOKKEEPING_ENTRIES) {
+      stoppedSessionIds.delete(stoppedSessionIds.values().next().value);
+    }
+  }
+
+  function rememberTaskSession(sessionId, taskId) {
+    if (!sessionId || !taskId) {
+      return;
+    }
+    delete taskBySessionId[sessionId];
+    taskBySessionId[sessionId] = taskId;
+    const sessionIds = Object.keys(taskBySessionId);
+    for (const staleId of sessionIds.slice(0, -MAX_SESSION_BOOKKEEPING_ENTRIES)) {
+      delete taskBySessionId[staleId];
+    }
+  }
+
+  function rememberStreamTarget(sessionId, target) {
+    if (!sessionId || !target) {
+      return;
+    }
+    delete streamTargets[sessionId];
+    streamTargets[sessionId] = target;
+    const sessionIds = Object.keys(streamTargets);
+    for (const staleId of sessionIds.slice(0, -MAX_SESSION_BOOKKEEPING_ENTRIES)) {
+      delete streamTargets[staleId];
+    }
+  }
 
   const taskBoard = document.getElementById('taskBoard');
   const sessionHistory = document.getElementById('sessionHistory');
@@ -305,7 +341,6 @@
     vscode.setState({
       activeId,
       activeAgentModeByProvider: persistableAgentModeMap(activeAgentModeByProvider),
-      disabledMcpByProvider,
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
       conversationSnapshot: codexRendererEnabled
@@ -359,7 +394,6 @@
       command: 'saveSelectionState',
       activeProviderId: activeId,
       activeAgentModeByProvider: persistableAgentModeMap(activeAgentModeByProvider),
-      disabledMcpByProvider,
       contextOptions: defaultContextOptions(),
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
@@ -3150,7 +3184,8 @@
   }
 
   function openCodeMcpStatusLabel(entry) {
-    const status = String(entry?.status || 'unknown');
+    const runtimeStatus = entry?.runtimeStatus || {};
+    const status = String(runtimeStatus.status || 'unknown');
     if (status === 'connected') {
       return i18n.t('opencode.dialog.mcp.status.connected');
     }
@@ -3161,13 +3196,13 @@
       return i18n.t('opencode.dialog.mcp.disabled');
     }
     if (status === 'failed') {
-      return entry?.error || i18n.t('opencode.dialog.mcp.status.failed');
+      return runtimeStatus.error || i18n.t('opencode.dialog.mcp.status.failed');
     }
-    return entry?.error || status;
+    return runtimeStatus.error || status;
   }
 
   function openCodeMcpStatusKind(entry) {
-    const status = String(entry?.status || '');
+    const status = String(entry?.runtimeStatus?.status || '');
     if (status === 'connected') {
       return 'connected';
     }
@@ -3183,27 +3218,8 @@
     return '';
   }
 
-  function normalizedMcpMemory(value) {
-    return Array.isArray(value) ? value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean) : [];
-  }
-
-  function disabledMcpNames(cliId = activeId) {
-    return new Set(normalizedMcpMemory(disabledMcpByProvider[cliId]));
-  }
-
-  function isOpenCodeMcpDisabled(entry, cliId = activeId) {
-    const name = String(entry?.name || '').trim();
-    if (!name) {
-      return false;
-    }
-    if (String(entry?.status || '') === 'disabled') {
-      return true;
-    }
-    return disabledMcpNames(cliId).has(name);
-  }
-
   function openCodeMcpDialogStatusLabel(entry) {
-    const status = String(entry?.status || '').trim();
+    const status = String(entry?.runtimeStatus?.status || '').trim();
     if (!status) {
       return 'unknown';
     }
@@ -3230,7 +3246,8 @@
   }
 
   function openCodeMcpDialogOptions() {
-    const servers = Array.isArray(contextSummary?.mcpServers) ? contextSummary.mcpServers : [];
+    const cliId = activeId;
+    const servers = Array.isArray(mcpServersByCli[cliId]) ? mcpServersByCli[cliId] : [];
     const needle = openCodeDialogQuery.trim().toLowerCase();
     return servers
       .map((entry) => {
@@ -3238,7 +3255,7 @@
         if (!name) {
           return undefined;
         }
-        const enabled = !isOpenCodeMcpDisabled(entry);
+        const enabled = entry.enabled !== false;
         return {
           id: name,
           label: name,
@@ -3263,30 +3280,35 @@
     if (!cliId || !normalized) {
       return;
     }
-    const disabled = disabledMcpNames(cliId);
-    if (disabled.has(normalized)) {
-      disabled.delete(normalized);
-    } else {
-      disabled.add(normalized);
+    const entry = (mcpServersByCli[cliId] || []).find(
+      (server) => String(server?.name || '').trim() === normalized
+    );
+    if (!entry) {
+      return;
     }
-    disabledMcpByProvider[cliId] = Array.from(disabled);
-    persist();
+    mcpOperationErrorByCli[cliId] = '';
+    vscode.postMessage({
+      command: 'toggleMcpServer',
+      cliId,
+      name: normalized,
+      enabled: entry.enabled === false,
+    });
   }
 
   function openCodeMcpLines() {
-    const servers = contextSummary?.mcpServers;
+    const servers = mcpServersByCli[activeId];
     if (!Array.isArray(servers)) {
-      return [{ text: contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.unavailable') }];
+      return [{ text: i18n.t('opencode.dialog.mcp.loading') }];
     }
     if (servers.length === 0) {
-      return [{ text: contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.empty') }];
+      return [{ text: i18n.t('opencode.dialog.mcp.empty') }];
     }
 
     return servers.map((entry) => ({
-      status: isOpenCodeMcpDisabled(entry) ? 'disabled' : openCodeMcpStatusKind(entry),
+      status: entry.enabled === false ? 'disabled' : openCodeMcpStatusKind(entry),
       text: [
         entry.name,
-        isOpenCodeMcpDisabled(entry) ? i18n.t('opencode.dialog.mcp.disabled') : openCodeMcpStatusLabel(entry),
+        entry.enabled === false ? i18n.t('opencode.dialog.mcp.disabled') : openCodeMcpStatusLabel(entry),
       ].filter(Boolean).join(' '),
     }));
   }
@@ -3650,6 +3672,10 @@
     openCodeDialogOpenSequence += 1;
     openCodeDialogOpenedAt = Date.now();
     openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex(kind);
+    if (kind === 'mcp') {
+      mcpOperationErrorByCli[activeId] = '';
+      requestMcpServers(activeId);
+    }
     renderOpenCodeStatusDialog();
   }
 
@@ -3742,6 +3768,14 @@
   }
 
   function renderOpenCodeMcpDialogBody(body) {
+    const operationError = String(mcpOperationErrorByCli[activeId] || '').trim();
+    if (operationError) {
+      const error = document.createElement('div');
+      error.className = 'opencode-dialog-row is-error';
+      error.setAttribute('role', 'alert');
+      error.textContent = operationError;
+      body.appendChild(error);
+    }
     const filter = document.createElement('input');
     filter.className = 'opencode-dialog-filter';
     filter.type = 'text';
@@ -5264,7 +5298,7 @@
   function addMessage(cliId, role, text, meta, running, threadId, attachments) {
     const thread = ensureThread(cliId, threadId);
     const conversation = thread?.messages || [];
-    conversation.push({
+    const index = conversationStore.appendMessage(thread, {
       role,
       text,
       meta,
@@ -5278,7 +5312,7 @@
       renderMessages();
     }
     renderSessionHistory();
-    return { threadId: thread?.id || '', index: conversation.length - 1 };
+    return { threadId: thread?.id || '', index };
   }
 
   function appendShellFeedback(cliId, role, text, threadId) {
@@ -5298,23 +5332,22 @@
   function mergeStreamText(current, chunk) {
     const existing = normalizeMessageText(current);
     const incoming = normalizeMessageText(chunk);
+    let merged;
     if (!incoming) {
-      return existing || '';
-    }
-    if (!existing) {
-      return incoming;
-    }
-    if (incoming === existing) {
-      return existing;
-    }
-    if (incoming.startsWith(existing)) {
-      return incoming;
-    }
-    if (existing.endsWith(incoming) && incoming.length > 32) {
-      return existing;
+      merged = existing || '';
+    } else if (!existing) {
+      merged = incoming;
+    } else if (incoming === existing) {
+      merged = existing;
+    } else if (incoming.startsWith(existing)) {
+      merged = incoming;
+    } else if (existing.endsWith(incoming) && incoming.length > 32) {
+      merged = existing;
+    } else {
+      merged = `${existing}${incoming}`;
     }
 
-    return `${existing}${incoming}`;
+    return conversationStore.boundTextForMemory(merged);
   }
 
   function ensureStreamTarget(message) {
@@ -5331,7 +5364,7 @@
       true
     );
     target = { cliId: message.cliId, threadId: result.threadId, index: result.index, buffer: '' };
-    streamTargets[message.sessionId] = target;
+    rememberStreamTarget(message.sessionId, target);
     return target;
   }
 
@@ -5646,7 +5679,7 @@
         threadId: run.threadId,
         updatedAt: Date.now(),
       });
-      taskBySessionId[run.sessionId] = task.id;
+      rememberTaskSession(run.sessionId, task.id);
     }
     persist();
     renderAll();
@@ -6215,10 +6248,22 @@
     const kind = ['file', 'search', 'command', 'tool'].includes(activity.kind) ? activity.kind : 'tool';
     return {
       kind,
-      id: normalizeMessageText(activity.id).trim(),
-      name: normalizeMessageText(activity.name).trim(),
-      target: normalizeMessageText(activity.target).trim(),
-      detail: normalizeMessageText(activity.detail).trim(),
+      id: conversationStore.boundTextForMemory(
+        normalizeMessageText(activity.id).trim(),
+        256
+      ),
+      name: conversationStore.boundTextForMemory(
+        normalizeMessageText(activity.name).trim(),
+        512
+      ),
+      target: conversationStore.boundTextForMemory(
+        normalizeMessageText(activity.target).trim(),
+        2048
+      ),
+      detail: conversationStore.boundTextForMemory(
+        normalizeMessageText(activity.detail).trim(),
+        4096
+      ),
     };
   }
 
@@ -8277,9 +8322,6 @@
           activeAgentModeByProvider = hasAppliedPersistentSelection
             ? { ...storedAgentModes, ...activeAgentModeByProvider }
             : { ...activeAgentModeByProvider, ...storedAgentModes };
-          disabledMcpByProvider = hasAppliedPersistentSelection
-            ? { ...(message.disabledMcpByProvider || {}), ...disabledMcpByProvider }
-            : { ...disabledMcpByProvider, ...(message.disabledMcpByProvider || {}) };
           contextOptions = defaultContextOptions();
           if (!hasAppliedPersistentSelection) {
             claudeTerminalBannerDismissed = Boolean(message.claudeTerminalBannerDismissed);
@@ -8368,12 +8410,23 @@
         if (activeSettingsSection === 'mcp' && cliId === activeProviderId()) {
           renderMcpSettings();
         }
+        if (cliId === activeId) {
+          renderOpenCodeSidebar();
+          renderOpenCodeStatusDialog();
+        }
         break;
       }
       case 'mcpServerSaved': {
         const ok = message.ok === true;
         const messageText = typeof message.message === 'string' ? message.message.trim() : '';
-        const section = activeProviderId();
+        const operation = openCodeDialogState.applyMcpOperationResult(
+          mcpOperationErrorByCli,
+          message,
+          activeProviderId(),
+          i18n.t('mcpSettings.saveFailed')
+        );
+        mcpOperationErrorByCli = operation.errors;
+        const section = operation.cliId;
         if (ok) {
           setSettingsSaveStatus('mcp', 'success');
         } else {
@@ -8386,6 +8439,9 @@
             mcpServerError.hidden = false;
             mcpServerError.textContent = messageText;
           }
+        }
+        if (openCodeDialogKind === 'mcp' && section === activeId) {
+          renderOpenCodeStatusDialog();
         }
         if (typeof message.code === 'string') {
           // no-op, code surfaced via message
@@ -8427,7 +8483,7 @@
             message.text,
             message.agentMode
           ).id;
-          taskBySessionId[message.sessionId] = taskId;
+          rememberTaskSession(message.sessionId, taskId);
           updateTaskStatus(taskId, {
             status: 'running',
             sessionId: message.sessionId,
@@ -8455,12 +8511,12 @@
               true,
               threadId
             );
-            streamTargets[message.sessionId] = {
+            rememberStreamTarget(message.sessionId, {
               cliId: message.cliId,
               threadId,
               index: assistant.index,
               buffer: '',
-            };
+            });
           }
         }
         persist();
@@ -8486,7 +8542,7 @@
       case 'stopped':
         providerRunState.clearProviderRunState(providerRunStore, message.cliId);
         {
-          stoppedSessionIds.add(message.sessionId);
+          rememberStoppedSession(message.sessionId);
           updateTaskStatus(taskBySessionId[message.sessionId], { status: 'stopped' });
           delete taskBySessionId[message.sessionId];
           if (!codexRendererEnabled) {
@@ -8498,8 +8554,12 @@
         break;
       case 'error':
         providerRunState.clearProviderRunState(providerRunStore, message.cliId || activeId);
+        stoppedSessionIds.delete(message.sessionId);
         updateTaskStatus(taskBySessionId[message.sessionId], { status: 'failed' });
         delete taskBySessionId[message.sessionId];
+        if (!codexRendererEnabled) {
+          finishStreamTarget(message, { removeEmpty: false });
+        }
         if (codexRendererEnabled && message.threadId) {
           activeId = message.cliId || activeId;
           activeThreadByProvider[activeId] = message.threadId;

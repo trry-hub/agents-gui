@@ -129,7 +129,13 @@ export class ImageAttachmentStore {
     }
 
     const mimeType = match[1] || expectedMimeType;
-    const bytes = Buffer.from(match[2], 'base64');
+    const base64 = match[2];
+    const paddingBytes = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+    const decodedByteLength = Math.max(0, Math.floor((base64.length * 3) / 4) - paddingBytes);
+    if (decodedByteLength === 0 || decodedByteLength > this.maxAttachmentBytes) {
+      return undefined;
+    }
+    const bytes = Buffer.from(base64, 'base64');
     if (bytes.byteLength === 0 || bytes.byteLength > this.maxAttachmentBytes) {
       return undefined;
     }

@@ -1,5 +1,5 @@
 import type { ThreadEventEnvelope } from '../threadProtocol';
-import type { ConversationSnapshot } from './conversationReducer';
+import { boundConversationSnapshot, type ConversationSnapshot } from './conversationReducer';
 
 type TimerHandle = unknown;
 
@@ -41,7 +41,7 @@ export function createPersistenceCoordinator(
       return;
     }
     cancelTimer();
-    options.persist(options.getSnapshot());
+    options.persist(boundConversationSnapshot(options.getSnapshot()));
     lastPersistedAt = now();
   }
 

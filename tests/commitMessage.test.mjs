@@ -110,6 +110,17 @@ test('cleanGeneratedCommitMessage rejects reasoning prose without a conventional
   assert.equal(message, '');
 });
 
+test('cleanGeneratedCommitMessage rejects generic merge and initial-commit subjects', () => {
+  for (const subject of [
+    'Merge branch feature/native-passthrough',
+    'merge release into main',
+    'Initial Commit',
+    'initial commit for native passthrough',
+  ]) {
+    assert.equal(cleanGeneratedCommitMessage(subject), '', subject);
+  }
+});
+
 test('commit cleaner rejects provider and HTTP diagnostics', () => {
   for (const text of [
     'error: missing credentials',
@@ -428,7 +439,16 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /repository\.rootUri\.toString\(\)/);
   assert.match(source, /ProgressLocation\.SourceControl/);
   assert.match(source, /let completedGeneration = false;/);
-  assert.match(source, /if \(!completedGeneration && streamingRepository\)/);
+  assert.match(source, /let lastGeneratedInputValue: string \| undefined;/);
+  assert.match(source, /let inputOwnershipLost = false;/);
+  assert.match(
+    source,
+    /!completedGeneration &&\s*streamingRepository &&\s*!inputOwnershipLost/s
+  );
+  assert.match(
+    source,
+    /streamingRepository\.inputBox\.value === lastGeneratedInputValue/
+  );
   assert.match(
     source,
     /cancel\(rootUri\?: vscode\.Uri \| \{ readonly rootUri\?: vscode\.Uri \}\): void/

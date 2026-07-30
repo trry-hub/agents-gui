@@ -267,6 +267,53 @@ test('adapter buffers canonical lifecycle events for webview reload replay', () 
   assert.ok(replay.every(({ streamId }) => streamId === 'host-a'));
 });
 
+test('adapter replay is bounded by serialized bytes and excludes oversized envelopes', () => {
+  const maxReplayBytes = 700;
+  const adapter = new ThreadEventAdapter({
+    now: () => 42,
+    streamId: 'host-a',
+    maxReplayBytes,
+    maxReplayEnvelopeBytes: 300,
+  });
+  adapter.accept({
+    command: 'requestStarted',
+    cliId: 'codex',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'build',
+  });
+  const live = adapter.accept({
+    command: 'output',
+    cliId: 'codex',
+    sessionId: 'runtime-1',
+    text: 'x'.repeat(2_000),
+  });
+
+  assert.equal(live[0].event.delta.length, 2_000);
+  const replay = adapter.replayBuffered();
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(replay), 'utf8') <= maxReplayBytes,
+    'serialized replay exceeded its byte budget'
+  );
+  assert.ok(replay.every((envelope) => !JSON.stringify(envelope).includes('x'.repeat(400))));
+});
+
+test('adapter disables replay cleanly when its byte budget cannot fit an empty array', () => {
+  const adapter = new ThreadEventAdapter({
+    now: () => 42,
+    maxReplayBytes: 0,
+    maxReplayEnvelopeBytes: 300,
+  });
+  adapter.accept({
+    command: 'requestStarted',
+    cliId: 'codex',
+    threadId: 'thread-1',
+    sessionId: 'runtime-1',
+    text: 'build',
+  });
+  assert.deepEqual(adapter.replayBuffered(), []);
+});
+
 test('adapter exposes active runtime bindings for webview run-state recovery', () => {
   const adapter = new ThreadEventAdapter({ now: () => 42, streamId: 'host-a' });
   adapter.accept({

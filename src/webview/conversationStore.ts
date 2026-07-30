@@ -1,5 +1,7 @@
 import type { ThreadEventEnvelope } from '../threadProtocol';
 import {
+  boundConversationSnapshot,
+  CONVERSATION_LIMITS,
   createEmptyConversationSnapshot,
   migrateLegacyConversations,
   projectConversationHistory,
@@ -30,12 +32,19 @@ export interface ConversationStore {
   getThreadSummaries(): ReturnType<typeof projectThreadSummaries>;
 }
 
+export interface ConversationStoreOptions {
+  compactSnapshot?: (snapshot: ConversationSnapshot) => ConversationSnapshot;
+}
+
 export function createConversationStore(
-  initialSnapshot: ConversationSnapshot = createEmptyConversationSnapshot()
+  initialSnapshot: ConversationSnapshot = createEmptyConversationSnapshot(),
+  options: ConversationStoreOptions = {}
 ): ConversationStore {
-  let snapshot = initialSnapshot;
+  const compactSnapshot = options.compactSnapshot ?? boundConversationSnapshot;
+  let snapshot = compactSnapshot(initialSnapshot);
+  let estimatedSnapshotBytes = serializedByteLength(snapshot);
   const listeners = new Set<() => void>();
-  const initialSeen = normalizeSeenKeys(initialSnapshot.appliedEnvelopeKeys);
+  const initialSeen = normalizeSeenKeys(snapshot.appliedEnvelopeKeys);
   const seen = new Set<string>(initialSeen);
   const seenOrder: string[] = [...initialSeen];
 
@@ -46,7 +55,8 @@ export function createConversationStore(
   }
 
   function hydrate(next: ConversationSnapshot): void {
-    snapshot = next?.version === 2 ? next : createEmptyConversationSnapshot();
+    snapshot = compactSnapshot(next);
+    estimatedSnapshotBytes = serializedByteLength(snapshot);
     seen.clear();
     seenOrder.length = 0;
     for (const key of normalizeSeenKeys(snapshot.appliedEnvelopeKeys)) {
@@ -91,10 +101,24 @@ export function createConversationStore(
       if (next === snapshot) {
         return false;
       }
-      snapshot = {
+      const candidate = {
         ...next,
         appliedEnvelopeKeys: [...seenOrder],
       };
+      const canEstimateIncrementally =
+        isDelta(effectiveEnvelope) && deltaTargetsExistingItem(snapshot, effectiveEnvelope);
+      if (canEstimateIncrementally) {
+        estimatedSnapshotBytes += serializedByteLength(effectiveEnvelope) + 256;
+        if (estimatedSnapshotBytes > CONVERSATION_LIMITS.maxPersistedBytes) {
+          snapshot = compactSnapshot(candidate);
+          estimatedSnapshotBytes = serializedByteLength(snapshot);
+        } else {
+          snapshot = candidate;
+        }
+      } else {
+        snapshot = compactSnapshot(candidate);
+        estimatedSnapshotBytes = serializedByteLength(snapshot);
+      }
       notify();
       return true;
     },
@@ -103,18 +127,22 @@ export function createConversationStore(
       hydrate(migrateLegacyConversations(threadsByProvider, activeThreadByProvider));
     },
     ensureThread(providerId, threadId, title = 'New session', updatedAt = Date.now()) {
-      if (!providerId || !threadId || snapshot.threadsById[threadId]) {
+      if (
+        !isBoundedIdentifier(providerId, 128) ||
+        !isBoundedIdentifier(threadId, 512) ||
+        snapshot.threadsById[threadId]
+      ) {
         return;
       }
       const order = snapshot.threadOrderByProvider[providerId] ?? [];
-      snapshot = {
+      snapshot = compactSnapshot({
         ...snapshot,
         threadsById: {
           ...snapshot.threadsById,
           [threadId]: {
             id: threadId,
             providerId,
-            title,
+            title: String(title).slice(0, CONVERSATION_LIMITS.maxTitleChars),
             status: 'idle',
             turnOrder: [],
             turnsById: {},
@@ -128,7 +156,8 @@ export function createConversationStore(
         activeThreadByProvider: snapshot.activeThreadByProvider[providerId]
           ? snapshot.activeThreadByProvider
           : { ...snapshot.activeThreadByProvider, [providerId]: threadId },
-      };
+      });
+      estimatedSnapshotBytes = serializedByteLength(snapshot);
       notify();
     },
     setActiveThread(providerId, threadId) {
@@ -146,6 +175,11 @@ export function createConversationStore(
           [providerId]: threadId,
         },
       };
+      estimatedSnapshotBytes += serializedByteLength({ providerId, threadId }) + 32;
+      if (estimatedSnapshotBytes > CONVERSATION_LIMITS.maxPersistedBytes) {
+        snapshot = compactSnapshot(snapshot);
+        estimatedSnapshotBytes = serializedByteLength(snapshot);
+      }
       notify();
       return true;
     },
@@ -176,6 +210,7 @@ export function createConversationStore(
         },
         activeThreadByProvider,
       };
+      estimatedSnapshotBytes = serializedByteLength(snapshot);
       notify();
       return true;
     },
@@ -195,6 +230,14 @@ function normalizeSeenKeys(value: unknown): string[] {
   return value
     .filter((key): key is string => typeof key === 'string' && Boolean(key))
     .slice(-MAX_SEEN_ENVELOPES);
+}
+
+function serializedByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function isBoundedIdentifier(value: unknown, maxChars: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxChars;
 }
 
 function filterSeenDeltaSegments(
@@ -263,5 +306,30 @@ function isDelta(envelope: ThreadEventEnvelope): envelope is ThreadEventEnvelope
   return (
     envelope.event.type === 'item/assistantMessage/delta' ||
     envelope.event.type === 'item/reasoning/delta'
+  );
+}
+
+function deltaTargetsExistingItem(
+  snapshot: ConversationSnapshot,
+  envelope: ThreadEventEnvelope & {
+    event:
+      | {
+          type: 'item/assistantMessage/delta';
+          turnId: string;
+          itemId: string;
+          delta: string;
+        }
+      | {
+          type: 'item/reasoning/delta';
+          turnId: string;
+          itemId: string;
+          delta: string;
+        };
+  }
+): boolean {
+  return Boolean(
+    snapshot.threadsById[envelope.threadId]?.turnsById[envelope.event.turnId]?.itemsById[
+      envelope.event.itemId
+    ]
   );
 }

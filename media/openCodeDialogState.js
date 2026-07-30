@@ -39,5 +39,25 @@
     return list[clampActiveIndex(index, list)]?.id || '';
   }
 
-  return { activeOptionId, clampActiveIndex, commandAliases, initialActiveIndex, isCommandEcho, moveActiveIndex, normalizeCommandQuery };
+  function applyMcpOperationResult(errors, message, fallbackCliId, fallbackMessage) {
+    const cliId = String(message?.cliId || fallbackCliId || '').trim();
+    const nextErrors = { ...(errors || {}) };
+    if (cliId) {
+      nextErrors[cliId] = message?.ok === true
+        ? ''
+        : String(message?.message || fallbackMessage || '').trim();
+    }
+    return { cliId, errors: nextErrors };
+  }
+
+  return {
+    activeOptionId,
+    applyMcpOperationResult,
+    clampActiveIndex,
+    commandAliases,
+    initialActiveIndex,
+    isCommandEcho,
+    moveActiveIndex,
+    normalizeCommandQuery,
+  };
 });

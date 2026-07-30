@@ -14,6 +14,7 @@ type RuntimeMessageKey =
   | 'warning.starting'
   | 'error.unknownProvider'
   | 'error.activationFailed'
+  | 'error.openCodeCleanupFailed'
   | 'error.startFailed'
   | 'error.sendFailed'
   | 'error.missingSelection'
@@ -40,6 +41,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'warning.starting': 'Agents GUI is still starting. Try again in a moment.',
     'error.unknownProvider': 'Unknown provider: {provider}',
     'error.activationFailed': 'Agents GUI failed to activate: {message}',
+    'error.openCodeCleanupFailed':
+      'Agents GUI could not safely migrate the OpenCode configuration, so OpenCode is disabled for this window. Review the configuration file or its permissions, then reload the window. Details: {message}',
     'error.startFailed': 'Failed to start {provider}',
     'error.sendFailed': 'Failed to send input to CLI process',
     'error.missingSelection': 'Select code in the editor before running this action.',
@@ -66,6 +69,8 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'warning.starting': 'Agents GUI 正在启动，请稍后再试。',
     'error.unknownProvider': '未知提供方：{provider}',
     'error.activationFailed': 'Agents GUI 激活失败：{message}',
+    'error.openCodeCleanupFailed':
+      'Agents GUI 无法安全迁移 OpenCode 配置，因此已在此窗口禁用 OpenCode。请检查配置文件及其权限，然后重新加载窗口。详情：{message}',
     'error.startFailed': '启动 {provider} 失败',
     'error.sendFailed': '无法向 CLI 进程发送输入',
     'error.missingSelection': '请先在编辑器中选中代码，再运行这个动作。',

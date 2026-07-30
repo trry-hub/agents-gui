@@ -60,6 +60,7 @@ export type TextGenerationErrorCode =
   | 'first-output-timeout'
   | 'idle-timeout'
   | 'total-timeout'
+  | 'output-limit'
   | 'provider-error';
 
 export class TextGenerationError extends Error {

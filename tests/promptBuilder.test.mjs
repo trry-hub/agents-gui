@@ -18,6 +18,7 @@ const {
 } = require('../.test-dist/cliProfiles.js');
 const { countContextTokens } = require('../.test-dist/tokenCounter.js');
 const {
+  MAX_CLI_JSON_BUFFER_BYTES,
   filterPromptEchoChunk,
   flushCliOutputBuffer,
   normalizeCliOutput,
@@ -269,7 +270,7 @@ test('buildAssistantPrompt includes pasted image attachment file paths', () => {
   );
 });
 
-test('buildAssistantPrompt keeps OpenCode freeform chat raw when no IDE context is attached', () => {
+test('buildAssistantPrompt keeps OpenCode freeform chat compact when no IDE context is attached', () => {
   const prompt = buildAssistantPrompt({
     provider: { id: 'opencode', name: 'OpenCode' },
     mode: 'agent',
@@ -285,9 +286,50 @@ test('buildAssistantPrompt keeps OpenCode freeform chat raw when no IDE context 
     },
   });
 
-  assert.equal(prompt, '你能干什么');
+  assert.match(prompt, /^你能干什么/);
+  assert.match(prompt, /Selected task intent: Sisyphus - Ultraworker \(sisyphus\)\./);
+  assert.match(prompt, /Use provider-native behavior\./);
   assert.doesNotMatch(prompt, /You are an AI coding assistant embedded in VS Code/);
   assert.doesNotMatch(prompt, /No IDE context was attached/);
+});
+
+test('OpenCode freeform prompts preserve the selected task intent without changing transport argv', () => {
+  const promptArgsBefore = [...getCliProfile('opencode').promptArgs];
+  const request = {
+    provider: { id: 'opencode', name: 'OpenCode' },
+    mode: 'agent',
+    action: 'freeform',
+    message: 'inspect this repository',
+    context: { diagnostics: [] },
+  };
+  const buildPrompt = buildAssistantPrompt({
+    ...request,
+    agentMode: {
+      id: 'build',
+      label: 'Build',
+      instruction: 'Implement the requested change and verify it.',
+    },
+  });
+  const planPrompt = buildAssistantPrompt({
+    ...request,
+    agentMode: {
+      id: 'plan',
+      label: 'Plan',
+      instruction: 'Inspect the repository and propose a plan without editing.',
+    },
+  });
+
+  assert.match(buildPrompt, /^inspect this repository/);
+  assert.match(planPrompt, /^inspect this repository/);
+  assert.match(buildPrompt, /selected task intent:[^\n]*build/i);
+  assert.match(planPrompt, /selected task intent:[^\n]*plan/i);
+  assert.match(buildPrompt, /Implement the requested change and verify it/);
+  assert.match(planPrompt, /propose a plan without editing/);
+  assert.notEqual(buildPrompt, planPrompt);
+  assert.doesNotMatch(buildPrompt, /--(?:model|agent|mode)|Runtime selection from Agents GUI/);
+  assert.doesNotMatch(planPrompt, /--(?:model|agent|mode)|Runtime selection from Agents GUI/);
+  assert.deepEqual(getCliProfile('opencode').promptArgs, promptArgsBefore);
+  assert.deepEqual(promptArgsBefore, ['run', '--format', 'json']);
 });
 
 test('buildAssistantPrompt does not inject runtime selections into OpenCode prompts', () => {
@@ -1464,7 +1506,10 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(script, /body\.className = 'message-activity-body';/);
   assert.match(script, /appendActivityDetailRows\(body, normalizedEntries\);/);
   assert.match(script, /function appendActivityDetailRows\(body, entries\)/);
-  assert.match(script, /detail: normalizeMessageText\(activity\.detail\)\.trim\(\)/);
+  assert.match(
+    script,
+    /detail:\s*conversationStore\.boundTextForMemory\(\s*normalizeMessageText\(activity\.detail\)\.trim\(\),\s*4096\s*\)/s
+  );
   assert.match(script, /detailRow\.className = 'message-activity-detail-row';/);
   assert.match(script, /log\.className = 'message-activity-log';/);
   assert.match(script, /applyMessageDetailOpenState\(row, detailKey\);/);
@@ -2922,7 +2967,11 @@ test('webview does not revive stopped assistant placeholders when a later reques
   assert.match(script, /const stoppedSessionIds = new Set\(\);/);
   assert.match(script, /function finishStreamTarget\(message, \{ removeEmpty = true \} = \{\}\)/);
   assert.match(script, /item\.running = false;/);
-  assert.match(script, /stoppedSessionIds\.add\(message\.sessionId\);/);
+  assert.match(script, /rememberStoppedSession\(message\.sessionId\);/);
+  assert.match(
+    script,
+    /function rememberStoppedSession\(sessionId\)[\s\S]*stoppedSessionIds\.add\(sessionId\);/
+  );
   assert.match(script, /const wasStopped = stoppedSessionIds\.delete\(message\.sessionId\);/);
   assert.match(script, /Number\(message\.exitCode\) !== 0 && !wasStopped/);
 });
@@ -3206,6 +3255,133 @@ test('conversation store normalizes restored messages and serializes safe state'
   conversationStore.setActiveThread(threadsByProvider, activeThreadByProvider, 'codex', older);
   assert.equal(activeThreadByProvider.codex, 'older');
   assert.equal(conversationStore.latestThread(threadsByProvider.codex), created);
+});
+
+test('conversation store bounds in-memory messages, attachments, threads, and persisted bytes', () => {
+  const limits = conversationStore.LIMITS;
+  assert.ok(limits);
+  const oversizedMessage = {
+    role: 'assistant',
+    text: 'x'.repeat(limits.maxMessageTextChars + 17),
+    thinking: 'y'.repeat(limits.maxThinkingTextChars + 17),
+    attachments: Array.from(
+      { length: limits.maxAttachmentsPerMessage + 4 },
+      (_, index) => ({ kind: 'image', name: `image-${index}.png`, path: `/tmp/${index}` })
+    ),
+  };
+  const normalized = conversationStore.normalizeThreadMessages(
+    Array.from({ length: limits.maxMessagesPerThread + 4 }, () => oversizedMessage)
+  );
+
+  assert.equal(normalized.length, limits.maxMessagesPerThread);
+  assert.ok(normalized.every((message) => message.text.length <= limits.maxMessageTextChars));
+  assert.ok(
+    normalized.every((message) => message.thinking.length <= limits.maxThinkingTextChars)
+  );
+  assert.ok(
+    normalized.every(
+      (message) => message.attachments.length <= limits.maxAttachmentsPerMessage
+    )
+  );
+
+  const serialized = conversationStore.serializeThreadsForState({
+    codex: Array.from({ length: limits.maxThreadsPerProvider + 4 }, (_, index) => ({
+      id: `thread-${index}`,
+      updatedAt: limits.maxThreadsPerProvider + 4 - index,
+      messages: normalized,
+    })),
+  });
+  assert.ok(serialized.codex.length <= limits.maxThreadsPerProvider);
+  assert.ok(
+    new TextEncoder().encode(JSON.stringify(serialized)).byteLength <= limits.maxPersistedBytes
+  );
+  const adversarial = conversationStore.serializeThreadsForState({
+    codex: [
+      {
+        id: 'single',
+        injected: 'q'.repeat(limits.maxPersistedBytes + 1),
+        messages: [
+          {
+            role: 'assistant',
+            text: 'answer',
+            injected: 'q'.repeat(limits.maxPersistedBytes + 1),
+            attachments: [
+              'q'.repeat(limits.maxPersistedBytes + 1),
+              { kind: 'image', path: 'q'.repeat(limits.maxPersistedBytes + 1) },
+            ],
+            activity: {
+              entries: [{ kind: 'tool', detail: 'q'.repeat(limits.maxPersistedBytes + 1) }],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assert.ok(
+    new TextEncoder().encode(JSON.stringify(adversarial)).byteLength <=
+      limits.maxPersistedBytes
+  );
+
+  const thread = conversationStore.createThread('codex', []);
+  for (let index = 0; index < limits.maxMessagesPerThread + 4; index += 1) {
+    conversationStore.appendMessage(thread, {
+      role: 'assistant',
+      text: 'z'.repeat(limits.maxMessageTextChars + 1),
+    });
+  }
+  assert.equal(thread.messages.length, limits.maxMessagesPerThread);
+  assert.ok(thread.messages.every((message) => message.text.length <= limits.maxMessageTextChars));
+});
+
+test('conversation store drops primitive messages from append, normalize, create, and serialize paths', () => {
+  const validMessage = { role: 'user', text: 'bounded' };
+  const untrustedMessages = [null, 'oversized primitive', 42, true, validMessage];
+
+  assert.deepEqual(conversationStore.normalizeThreadMessages(untrustedMessages), [validMessage]);
+
+  const created = conversationStore.createThread('codex', untrustedMessages, {
+    now: 123,
+    id: 'thread-primitives',
+  });
+  assert.deepEqual(created.messages, [validMessage]);
+  assert.equal(conversationStore.appendMessage(created, 'another primitive'), -1);
+  assert.deepEqual(created.messages, [validMessage]);
+
+  const serialized = conversationStore.serializeThreadsForState({
+    codex: [{ id: 'thread-primitives', messages: untrustedMessages }],
+  });
+  assert.deepEqual(serialized.codex[0].messages, [{ ...validMessage, running: false }]);
+});
+
+test('legacy OpenCode activity normalization caps retained active-state fields', () => {
+  const source = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  for (const [field, limit] of [
+    ['id', 256],
+    ['name', 512],
+    ['target', 2048],
+    ['detail', 4096],
+  ]) {
+    assert.match(
+      source,
+      new RegExp(
+        `${field}:\\s*conversationStore\\.boundTextForMemory\\(\\s*normalizeMessageText\\(activity\\.${field}\\)\\.trim\\(\\),\\s*${limit}\\s*\\)`,
+        's'
+      )
+    );
+  }
+});
+
+test('legacy webview runtime uses bounded conversation and session bookkeeping helpers', () => {
+  const source = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.match(source, /conversationStore\.appendMessage\(thread,/);
+  assert.match(source, /function mergeStreamText[\s\S]*conversationStore\.boundTextForMemory/);
+  assert.match(source, /MAX_SESSION_BOOKKEEPING_ENTRIES\s*=\s*256/);
+  assert.match(source, /rememberStoppedSession\(message\.sessionId\)/);
+  assert.match(source, /rememberTaskSession\(message\.sessionId,\s*taskId\)/);
+  assert.doesNotMatch(source, /stoppedSessionIds\.add\(message\.sessionId\)/);
+  assert.doesNotMatch(source, /taskBySessionId\[message\.sessionId\]\s*=\s*taskId/);
 });
 
 test('session history derives thread states for multi-task groundwork', () => {
@@ -3761,6 +3937,20 @@ test('normalizeCliOutputChunk streams OpenCode JSON event deltas', () => {
     text: '好。',
     buffer: '',
   });
+});
+
+test('normalizeCliOutputChunk rejects an oversized incomplete JSON record', () => {
+  assert.equal(MAX_CLI_JSON_BUFFER_BYTES, 1024 * 1024);
+  const incomplete = `{"type":"message.part.delta","payload":"${'x'.repeat(
+    MAX_CLI_JSON_BUFFER_BYTES
+  )}`;
+
+  assert.throws(
+    () => normalizeCliOutputChunk(incomplete, 'opencode'),
+    (error) =>
+      error?.code === 'CLI_OUTPUT_BUFFER_LIMIT' &&
+      /incomplete OpenCode JSON record exceeded/i.test(error.message)
+  );
 });
 
 test('normalizeCliOutputChunk streams Claude Code partial text deltas', () => {

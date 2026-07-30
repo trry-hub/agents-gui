@@ -65,6 +65,84 @@ export interface ThreadSummary {
   turnCount: number;
 }
 
+export const CONVERSATION_LIMITS = Object.freeze({
+  maxThreadsPerProvider: 100,
+  maxTurnsPerThread: 100,
+  maxItemsPerTurn: 100,
+  maxItemContentChars: 200_000,
+  maxTitleChars: 500,
+  maxAttachmentsPerItem: 8,
+  maxPersistedBytes: 4 * 1024 * 1024,
+});
+
+function boundText(
+  value: unknown,
+  maxChars: number = CONVERSATION_LIMITS.maxItemContentChars
+): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+function boundActivity(activity: ThreadItem['activity']): ThreadItem['activity'] {
+  if (!activity || typeof activity !== 'object') {
+    return undefined;
+  }
+  return {
+    kind: ['file', 'search', 'command', 'tool'].includes(activity.kind) ? activity.kind : 'tool',
+    id: activity.id === undefined ? undefined : boundText(activity.id, 256),
+    name: activity.name === undefined ? undefined : boundText(activity.name, 512),
+    target: activity.target === undefined ? undefined : boundText(activity.target, 2_048),
+    detail: activity.detail === undefined ? undefined : boundText(activity.detail, 4_096),
+  };
+}
+
+function boundAttachments(attachments: unknown): unknown[] | undefined {
+  if (!Array.isArray(attachments)) {
+    return undefined;
+  }
+  return attachments
+    .filter((attachment) => attachment && typeof attachment === 'object')
+    .slice(0, CONVERSATION_LIMITS.maxAttachmentsPerItem)
+    .map((attachment) => {
+      const value = attachment as Record<string, unknown>;
+      return {
+        kind: boundText(value.kind, 32),
+        name: boundText(value.name, 256),
+        mimeType: boundText(value.mimeType, 128),
+        size: Number.isFinite(Number(value.size)) ? Number(value.size) : 0,
+        path: boundText(value.path, 2_048),
+      };
+    });
+}
+
+function boundItem(item: ThreadItem): ThreadItem {
+  return {
+    id: boundText(item.id, 512),
+    turnId: boundText(item.turnId, 512),
+    type: item.type,
+    status: item.status,
+    content:
+      item.content === undefined
+        ? undefined
+        : boundText(item.content, CONVERSATION_LIMITS.maxItemContentChars),
+    label: item.label === undefined ? undefined : boundText(item.label, 1_000),
+    meta: item.meta === undefined ? undefined : boundText(item.meta, 2_000),
+    attachments: boundAttachments(item.attachments),
+    choices: Array.isArray(item.choices)
+      ? item.choices.slice(0, 20).map((choice) => ({
+          label: boundText(choice?.label, 512),
+          prompt: boundText(choice?.prompt, 2_048),
+        }))
+      : undefined,
+    activity: boundActivity(item.activity),
+    startedAt: Number.isFinite(Number(item.startedAt)) ? Number(item.startedAt) : 0,
+    completedAt:
+      item.completedAt === undefined || !Number.isFinite(Number(item.completedAt))
+        ? undefined
+        : Number(item.completedAt),
+  };
+}
+
 export function createEmptyConversationSnapshot(): ConversationSnapshot {
   return {
     version: 2,
@@ -74,12 +152,95 @@ export function createEmptyConversationSnapshot(): ConversationSnapshot {
   };
 }
 
+export function boundConversationSnapshot(source: ConversationSnapshot): ConversationSnapshot {
+  if (!source || source.version !== 2) {
+    return createEmptyConversationSnapshot();
+  }
+  const bounded = createEmptyConversationSnapshot();
+  bounded.appliedEnvelopeKeys = Array.isArray(source.appliedEnvelopeKeys)
+    ? source.appliedEnvelopeKeys
+        .filter((key): key is string => typeof key === 'string')
+        .slice(-4096)
+        .map((key) => boundText(key, 512))
+    : undefined;
+
+  for (const [providerId, sourceOrder] of Object.entries(source.threadOrderByProvider ?? {})) {
+    if (!providerId || providerId.length > 128) {
+      continue;
+    }
+    const order = (Array.isArray(sourceOrder) ? sourceOrder : [])
+      .filter(
+        (threadId) =>
+          typeof threadId === 'string' &&
+          threadId.length <= 512 &&
+          Boolean(source.threadsById?.[threadId])
+      )
+      .slice(-CONVERSATION_LIMITS.maxThreadsPerProvider);
+    bounded.threadOrderByProvider[providerId] = [];
+    for (const threadId of order) {
+      const sourceThread = source.threadsById[threadId];
+      if (!sourceThread) continue;
+      const turnOrder = sourceThread.turnOrder
+        .filter(
+          (turnId) =>
+            typeof turnId === 'string' &&
+            turnId.length <= 512 &&
+            Boolean(sourceThread.turnsById[turnId])
+        )
+        .slice(-CONVERSATION_LIMITS.maxTurnsPerThread);
+      const turnsById: Record<string, TurnState> = {};
+      for (const turnId of turnOrder) {
+        const sourceTurn = sourceThread.turnsById[turnId];
+        const itemOrder = sourceTurn.itemOrder
+          .filter(
+            (itemId) =>
+              typeof itemId === 'string' &&
+              itemId.length <= 512 &&
+              Boolean(sourceTurn.itemsById[itemId])
+          )
+          .slice(-CONVERSATION_LIMITS.maxItemsPerTurn);
+        const itemsById: Record<string, ThreadItem> = {};
+        for (const itemId of itemOrder) {
+          itemsById[itemId] = boundItem(sourceTurn.itemsById[itemId]);
+        }
+        turnsById[turnId] = {
+          ...sourceTurn,
+          itemOrder,
+          itemsById,
+        };
+      }
+      bounded.threadsById[threadId] = {
+        ...sourceThread,
+        title: boundText(sourceThread.title, CONVERSATION_LIMITS.maxTitleChars),
+        turnOrder,
+        turnsById,
+      };
+      bounded.threadOrderByProvider[providerId].push(threadId);
+    }
+    const activeThreadId = source.activeThreadByProvider?.[providerId];
+    if (activeThreadId && bounded.threadsById[activeThreadId]) {
+      bounded.activeThreadByProvider[providerId] = activeThreadId;
+    } else if (bounded.threadOrderByProvider[providerId][0]) {
+      bounded.activeThreadByProvider[providerId] = bounded.threadOrderByProvider[providerId][0];
+    }
+  }
+
+  enforceSnapshotByteBudget(bounded);
+  return bounded;
+}
+
 export function reduceConversation(
   snapshot: ConversationSnapshot,
   envelope: ThreadEventEnvelope
 ): ConversationSnapshot {
   const event = envelope.event;
-  if (!event || typeof event.type !== 'string') {
+  if (
+    !event ||
+    typeof event.type !== 'string' ||
+    !isBoundedIdentifier(envelope.providerId, 128) ||
+    !isBoundedIdentifier(envelope.threadId, 512) ||
+    (envelope.streamId !== undefined && !isBoundedIdentifier(envelope.streamId, 128))
+  ) {
     return snapshot;
   }
 
@@ -90,14 +251,16 @@ export function reduceConversation(
           ...existing,
           providerId: envelope.providerId,
           title:
-            existing.turnOrder.length > 0 ? existing.title : event.thread.title || existing.title,
+            existing.turnOrder.length > 0
+              ? existing.title
+              : boundText(event.thread.title || existing.title, CONVERSATION_LIMITS.maxTitleChars),
           status: event.thread.status,
           updatedAt: event.thread.updatedAt,
         }
       : {
           id: envelope.threadId,
           providerId: envelope.providerId,
-          title: event.thread.title,
+          title: boundText(event.thread.title, CONVERSATION_LIMITS.maxTitleChars),
           status: event.thread.status,
           turnOrder: [],
           turnsById: {},
@@ -115,6 +278,9 @@ export function reduceConversation(
   }
 
   if (event.type === 'turn/started') {
+    if (!isBoundedIdentifier(event.turn.id, 512)) {
+      return snapshot;
+    }
     const thread = cloneThread(ensureThread(snapshot, envelope));
     const existingTurn = thread.turnsById[event.turn.id];
     thread.turnsById[event.turn.id] = existingTurn
@@ -128,6 +294,7 @@ export function reduceConversation(
         };
     if (!existingTurn) {
       thread.turnOrder = [...thread.turnOrder, event.turn.id];
+      trimTurns(thread);
     }
     thread.status = 'running';
     thread.updatedAt = event.turn.startedAt;
@@ -140,44 +307,59 @@ export function reduceConversation(
     event.type === 'item/activity/updated'
   ) {
     const item = event.item;
-    if (!item?.turnId || !item.id) {
+    if (!isBoundedIdentifier(item?.turnId, 512) || !isBoundedIdentifier(item?.id, 512)) {
       return snapshot;
     }
     const { thread, turn } = cloneAddress(snapshot, envelope, item.turnId, item.startedAt);
     const existed = Boolean(turn.itemsById[item.id]);
-    turn.itemsById[item.id] = item;
+    turn.itemsById[item.id] = boundItem(item);
     if (!existed) {
       turn.itemOrder = [...turn.itemOrder, item.id];
+      trimItems(turn);
     }
     thread.turnsById[turn.id] = turn;
     return withThread(snapshot, thread, true);
   }
 
   if (event.type === 'item/assistantMessage/delta' || event.type === 'item/reasoning/delta') {
-    if (!event.turnId || !event.itemId || !event.delta) {
+    if (
+      !isBoundedIdentifier(event.turnId, 512) ||
+      !isBoundedIdentifier(event.itemId, 512) ||
+      !event.delta
+    ) {
       return snapshot;
     }
     const { thread, turn } = cloneAddress(snapshot, envelope, event.turnId, 0);
     const existing = turn.itemsById[event.itemId];
     const item: ThreadItem = existing
-      ? { ...existing, content: `${existing.content ?? ''}${event.delta}` }
+      ? {
+          ...existing,
+          content: boundText(
+            `${existing.content ?? ''}${event.delta}`,
+            CONVERSATION_LIMITS.maxItemContentChars
+          ),
+        }
       : {
           id: event.itemId,
           turnId: event.turnId,
           type: event.type === 'item/reasoning/delta' ? 'reasoning' : 'assistant-message',
           status: 'running',
-          content: event.delta,
+          content: boundText(event.delta, CONVERSATION_LIMITS.maxItemContentChars),
           startedAt: turn.startedAt,
         };
     turn.itemsById[event.itemId] = item;
     if (!existing) {
       turn.itemOrder = [...turn.itemOrder, event.itemId];
+      trimItems(turn);
     }
     thread.turnsById[turn.id] = turn;
     return withThread(snapshot, thread, true);
   }
 
   if (event.type === 'turn/completed') {
+    if (!isBoundedIdentifier(event.turnId, 512)) {
+      return snapshot;
+    }
     const existingThread = snapshot.threadsById[envelope.threadId];
     const existingTurn = existingThread?.turnsById[event.turnId];
     if (!existingThread || !existingTurn) {
@@ -309,7 +491,7 @@ export function migrateLegacyConversations(
     }
   }
 
-  return snapshot;
+  return boundConversationSnapshot(snapshot);
 }
 
 export function projectConversationHistory(
@@ -482,20 +664,136 @@ function cloneThread(thread: ThreadState): ThreadState {
   };
 }
 
+function trimTurns(thread: ThreadState): void {
+  if (thread.turnOrder.length <= CONVERSATION_LIMITS.maxTurnsPerThread) {
+    return;
+  }
+  const removed = thread.turnOrder.slice(
+    0,
+    thread.turnOrder.length - CONVERSATION_LIMITS.maxTurnsPerThread
+  );
+  thread.turnOrder = thread.turnOrder.slice(-CONVERSATION_LIMITS.maxTurnsPerThread);
+  for (const turnId of removed) {
+    delete thread.turnsById[turnId];
+  }
+}
+
+function trimItems(turn: TurnState): void {
+  if (turn.itemOrder.length <= CONVERSATION_LIMITS.maxItemsPerTurn) {
+    return;
+  }
+  const removed = turn.itemOrder.slice(
+    0,
+    turn.itemOrder.length - CONVERSATION_LIMITS.maxItemsPerTurn
+  );
+  turn.itemOrder = turn.itemOrder.slice(-CONVERSATION_LIMITS.maxItemsPerTurn);
+  for (const itemId of removed) {
+    delete turn.itemsById[itemId];
+  }
+}
+
+function snapshotByteLength(snapshot: ConversationSnapshot): number {
+  return new TextEncoder().encode(JSON.stringify(snapshot)).byteLength;
+}
+
+function enforceSnapshotByteBudget(snapshot: ConversationSnapshot): void {
+  while (snapshotByteLength(snapshot) > CONVERSATION_LIMITS.maxPersistedBytes) {
+    const providerWithExtraThread = Object.entries(snapshot.threadOrderByProvider).find(
+      ([, order]) => order.length > 1
+    );
+    if (providerWithExtraThread) {
+      const [providerId, order] = providerWithExtraThread;
+      const removed = order.shift();
+      if (removed) delete snapshot.threadsById[removed];
+      if (snapshot.activeThreadByProvider[providerId] === removed) {
+        snapshot.activeThreadByProvider[providerId] = order[0];
+      }
+      continue;
+    }
+
+    const allThreadEntries = Object.entries(snapshot.threadOrderByProvider).flatMap(
+      ([providerId, order]) => order.map((threadId) => ({ providerId, threadId }))
+    );
+    if (allThreadEntries.length > 1) {
+      const { providerId, threadId } = allThreadEntries[0];
+      snapshot.threadOrderByProvider[providerId] = snapshot.threadOrderByProvider[
+        providerId
+      ].filter((id) => id !== threadId);
+      delete snapshot.threadsById[threadId];
+      if (snapshot.activeThreadByProvider[providerId] === threadId) {
+        const replacement = snapshot.threadOrderByProvider[providerId][0];
+        if (replacement) {
+          snapshot.activeThreadByProvider[providerId] = replacement;
+        } else {
+          delete snapshot.activeThreadByProvider[providerId];
+        }
+      }
+      continue;
+    }
+
+    const threadWithExtraTurn = Object.values(snapshot.threadsById).find(
+      (thread) => thread.turnOrder.length > 1
+    );
+    if (threadWithExtraTurn) {
+      const removed = threadWithExtraTurn.turnOrder.shift();
+      if (removed) delete threadWithExtraTurn.turnsById[removed];
+      continue;
+    }
+
+    const turnWithExtraItem = Object.values(snapshot.threadsById)
+      .flatMap((thread) => Object.values(thread.turnsById))
+      .find((turn) => turn.itemOrder.length > 1);
+    if (turnWithExtraItem) {
+      const removed = turnWithExtraItem.itemOrder.shift();
+      if (removed) delete turnWithExtraItem.itemsById[removed];
+      continue;
+    }
+
+    const finalItem = Object.values(snapshot.threadsById)
+      .flatMap((thread) => Object.values(thread.turnsById))
+      .flatMap((turn) => Object.values(turn.itemsById))[0];
+    if (finalItem) {
+      finalItem.content = '';
+      finalItem.meta = undefined;
+      finalItem.label = undefined;
+      finalItem.attachments = undefined;
+      finalItem.choices = undefined;
+      finalItem.activity = undefined;
+      snapshot.appliedEnvelopeKeys = [];
+      if (snapshotByteLength(snapshot) <= CONVERSATION_LIMITS.maxPersistedBytes) {
+        break;
+      }
+    }
+
+    snapshot.threadsById = {};
+    snapshot.threadOrderByProvider = {};
+    snapshot.activeThreadByProvider = {};
+    snapshot.appliedEnvelopeKeys = [];
+    break;
+  }
+}
+
 function withThread(
   snapshot: ConversationSnapshot,
   thread: ThreadState,
   setActive: boolean
 ): ConversationSnapshot {
   const currentOrder = snapshot.threadOrderByProvider[thread.providerId] ?? [];
-  const order = currentOrder.includes(thread.id) ? currentOrder : [...currentOrder, thread.id];
+  const order = (
+    currentOrder.includes(thread.id) ? currentOrder : [...currentOrder, thread.id]
+  ).slice(-CONVERSATION_LIMITS.maxThreadsPerProvider);
   const activeThreadByProvider =
     setActive && !snapshot.activeThreadByProvider[thread.providerId]
       ? { ...snapshot.activeThreadByProvider, [thread.providerId]: thread.id }
       : snapshot.activeThreadByProvider;
   return {
     ...snapshot,
-    threadsById: { ...snapshot.threadsById, [thread.id]: thread },
+    threadsById: Object.fromEntries(
+      Object.entries({ ...snapshot.threadsById, [thread.id]: thread }).filter(
+        ([threadId, candidate]) =>
+          candidate.providerId !== thread.providerId || order.includes(threadId)
+      )
+    ),
     threadOrderByProvider:
       order === currentOrder
         ? snapshot.threadOrderByProvider
@@ -516,4 +814,8 @@ function finiteNumber(value: unknown): number | undefined {
 
 function clean(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isBoundedIdentifier(value: unknown, maxChars: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxChars;
 }

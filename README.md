@@ -29,7 +29,7 @@
 - **Git 提交信息生成**：在 VS Code 源代码管理视图中，根据暂存区 diff 生成符合 Conventional Commits 的提交信息。
 - **中英文界面**：扩展命令、设置项和 Webview 均支持简体中文与英文。
 - **供应商扩展桥接**：可从侧边栏直接打开 OpenCode、Codex、Claude Code、Gemini CLI 等配套 VS Code 扩展。
-- **Token 统计**：支持 Anthropic tokenizer 和 OpenAI cl100k 统计，并提供按供应商回退的估算能力。
+- **Token 统计**：Claude Code 使用 Claude tokenizer，Codex CLI 使用 OpenAI o200k；其他 CLI 暂不声明静态 tokenizer。
 
 ---
 
@@ -89,12 +89,12 @@ Agents GUI 会接入 VS Code 原生源代码管理视图：
 
 | Agent | 配置 ID | 原生单次提示词传输 | Token 统计 |
 |-------|--------|------------------|------------|
-| OpenCode | `opencode` | argument | Anthropic tokens |
-| Codex CLI | `codex` | argument | tiktoken cl100k |
-| Claude Code | `claude` | argument | Anthropic tokens |
+| OpenCode | `opencode` | argument | 暂无 |
+| Codex CLI | `codex` | argument | OpenAI o200k |
+| Claude Code | `claude` | argument | Claude tokenizer |
 | Gemini CLI | `gemini` | argument | 暂无 |
-| Goose | `goose` | stdin | 暂无 |
-| Aider | `aider` | argument | tiktoken cl100k |
+| Goose | `goose` | argument | 暂无 |
+| Aider | `aider` | argument | 暂无 |
 
 ---
 

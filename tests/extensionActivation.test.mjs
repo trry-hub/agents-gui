@@ -142,6 +142,15 @@ test('refresh providers title action reloads the full sidebar state', () => {
 
 test('context summary protocol is correlated and host invalidations replace unsolicited summaries', () => {
   const sendSummaryCalls = sidebarSource.match(/sendContextSummary\(/g) || [];
+  const sendContextSummaryStart = sidebarSource.indexOf('  private async sendContextSummary(');
+  const sendContextSummaryEnd = sidebarSource.indexOf(
+    '\n  private async ',
+    sendContextSummaryStart + 1
+  );
+  const sendContextSummarySource = sidebarSource.slice(
+    sendContextSummaryStart,
+    sendContextSummaryEnd
+  );
   const previewSource = readFileSync(
     new URL('../scripts/preview-webview.mjs', import.meta.url),
     'utf8'
@@ -164,6 +173,10 @@ test('context summary protocol is correlated and host invalidations replace unso
   assert.match(
     sidebarSource,
     /command: 'contextSummary',\s*requestId,\s*cliId,\s*summary,/
+  );
+  assert.match(
+    sendContextSummarySource,
+    /const profile =\s*this\.profilesById\.get\(cliId\) \?\?\s*getCliProfile\(cliId\)/s
   );
   assert.match(sidebarSource, /configuredModelId = profile\?\.configuredModel\?\.id/);
   assert.doesNotMatch(sidebarSource, /scheduleOpenCodeStatusRefresh/);
@@ -335,7 +348,10 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
 test('CLI discovery keeps command resolution and observational probes behind its adapter', () => {
   assert.match(cliSource, /import \{ CliDiscovery \} from '\.\/cliDiscovery';/);
   assert.match(cliSource, /private readonly cliDiscovery: CliManagerDiscovery/);
-  assert.match(cliSource, /this\.cliDiscovery\.getProfilesWithStatus\(CLI_PROFILES, options\)/);
+  assert.match(
+    cliSource,
+    /this\.cliDiscovery\.getProfilesWithStatus\(\s*CLI_PROFILES\.filter\(/s
+  );
   assert.doesNotMatch(cliSource, /expandProfileEnv/);
   assert.doesNotMatch(cliSource, /import \* as fs from 'fs';/);
   assert.doesNotMatch(cliSource, /import \* as os from 'os';/);
@@ -378,8 +394,18 @@ test('CLI process lifecycle keeps prompt/probe and tree termination behind a ded
 test('activation runs local OpenCode cleanup without API runtime injection', () => {
   assert.match(
     extensionSource,
-    /await runOpenCodeCleanupOnce\(context\.globalState, openCodeCleanup\)/
+    /await runOpenCodeCleanupActivationGate\(\s*context\.globalState,\s*openCodeCleanup,/s
   );
+  assert.match(extensionSource, /const disabledCliIds = await runOpenCodeCleanupActivationGate/);
+  assert.match(extensionSource, /new CliManager\(\{ disabledCliIds \}\)/);
+  assert.match(extensionSource, /error\.openCodeCleanupFailed/);
+  assert.doesNotMatch(
+    extensionSource,
+    /Failed to clean legacy OpenCode provider configuration/
+  );
+  assert.match(cliSource, /disabledCliIds\?: ReadonlySet<string>/);
+  assert.match(cliSource, /if \(this\.disabledCliIds\.has\(profileId\)\) return false;/);
+  assert.match(cliSource, /CLI_PROFILES\.filter\(\(profile\) => !this\.disabledCliIds\.has\(profile\.id\)\)/);
   assert.doesNotMatch(
     extensionSource,
     /resolveApiProviderRuntime|readApiProviderSettings|readOpenCodeConfig/
