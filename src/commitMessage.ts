@@ -90,6 +90,11 @@ export function cleanGeneratedCommitMessage(
   text: string,
   _options: CleanCommitMessageOptions = {}
 ): string {
+  const diagnostic =
+    /^(?:error|api error):\s|\b(?:request failed|bad request \(\d{3}\)|http\s*\d{3}|unsupported model|available models for this provider)\b/i;
+  if (diagnostic.test(text.trim())) {
+    return '';
+  }
   const fenced = extractFirstFence(text);
   const source = fenced ?? text;
   const lines = source
@@ -121,7 +126,8 @@ function extractFirstFence(text: string): string | undefined {
 function findCommitMessageStart(
   lines: string[]
 ): { lineIndex: number; columnIndex: number } | undefined {
-  const conventional = /\b[a-z]+(?:\([^)]+\))?!?:\s+\S/;
+  const conventional =
+    /\b(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([^)]+\))?!?:\s+\S/;
   const genericSubject = /^(?:revert:|merge\b|initial commit\b)/i;
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {

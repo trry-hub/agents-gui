@@ -3,7 +3,6 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildOpenCodeFastGenerationEnv } = require('../.test-dist/openCodeTaskPolicy.js');
 const {
   GenerateCommitMessageUseCase,
   TextGenerationError,
@@ -94,13 +93,6 @@ function fastGenerationRequest(overrides = {}) {
     providerId: 'opencode',
     prompt: 'Generate a commit message',
     cwd: '/workspace/repository-b',
-    capabilities: {
-      tools: 'disabled',
-      mcp: 'disabled',
-      projectConfig: 'disabled',
-      plugins: 'disabled',
-      persistence: 'ephemeral',
-    },
     budgets: {
       launchMs: 100,
       firstOutputMs: 100,
@@ -111,53 +103,7 @@ function fastGenerationRequest(overrides = {}) {
   };
 }
 
-test('OpenCode fast generation disables global and inline MCP configuration', () => {
-  const baseEnv = {
-    EXISTING_VALUE: 'keep-me',
-    OPENCODE_CONFIG_CONTENT: JSON.stringify({
-      provider: { custom: { npm: '@ai-sdk/openai-compatible' } },
-      mcp: {
-        inline: { type: 'remote', url: 'https://example.com/mcp' },
-      },
-    }),
-  };
-  const globalConfig = {
-    plugin: ['external-plugin'],
-    mcp: {
-      global: { type: 'local', command: ['node', 'server.js'] },
-      inline: { type: 'remote', url: 'https://global.example.com/mcp' },
-    },
-  };
-
-  const result = buildOpenCodeFastGenerationEnv(baseEnv, globalConfig);
-  const inlineConfig = JSON.parse(result.OPENCODE_CONFIG_CONTENT);
-
-  assert.equal(result.EXISTING_VALUE, 'keep-me');
-  assert.equal(inlineConfig.mcp.global.enabled, false);
-  assert.equal(inlineConfig.mcp.inline.enabled, false);
-  assert.equal(inlineConfig.mcp.inline.url, 'https://example.com/mcp');
-  assert.deepEqual(inlineConfig.permission, { '*': 'deny' });
-  assert.deepEqual(inlineConfig.plugin, []);
-  assert.ok(inlineConfig.provider.custom);
-  assert.equal(result.OPENCODE_DISABLE_PROJECT_CONFIG, '1');
-  assert.equal(result.OPENCODE_PURE, '1');
-  assert.equal(result.OPENCODE_DISABLE_AUTOUPDATE, '1');
-  assert.equal(result.OPENCODE_DISABLE_AUTOCOMPACT, '1');
-  assert.equal(result.OPENCODE_DISABLE_MODELS_FETCH, '1');
-});
-
-test('OpenCode fast generation tolerates invalid pre-existing inline config', () => {
-  const result = buildOpenCodeFastGenerationEnv(
-    { OPENCODE_CONFIG_CONTENT: '{not-json' },
-    { mcp: { memory: { enabled: true } } }
-  );
-  const inlineConfig = JSON.parse(result.OPENCODE_CONFIG_CONTENT);
-
-  assert.deepEqual(inlineConfig.mcp.memory, { enabled: false });
-  assert.deepEqual(inlineConfig.permission, { '*': 'deny' });
-});
-
-test('commit generation use case applies the fast-lane policy and exact repository root', async () => {
+test('commit generation uses the selected local CLI and exact repository root', async () => {
   const requests = [];
   const generator = {
     async generate(request) {
@@ -168,8 +114,7 @@ test('commit generation use case applies the fast-lane policy and exact reposito
   const useCase = new GenerateCommitMessageUseCase(generator);
 
   const result = await useCase.execute({
-    primaryProviderId: 'opencode',
-    resolveFallbackProviderIds: async () => ['codex'],
+    providerId: 'opencode',
     prompt: 'Generate a commit message',
     repositoryRoot: '/workspace/repository-b',
     language: 'en',
@@ -180,59 +125,68 @@ test('commit generation use case applies the fast-lane policy and exact reposito
 
   assert.equal(result.message, 'feat(runtime): isolate commit generation');
   assert.equal(result.providerId, 'opencode');
-  assert.equal(result.fallbackFrom, undefined);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].task, 'commit-message');
   assert.equal(requests[0].cwd, '/workspace/repository-b');
-  assert.deepEqual(requests[0].capabilities, {
-    tools: 'disabled',
-    mcp: 'disabled',
-    projectConfig: 'disabled',
-    plugins: 'disabled',
-    persistence: 'ephemeral',
-  });
+  assert.equal('capabilities' in requests[0], false);
   assert.equal(requests[0].budgets.firstOutputMs, 45_000);
   assert.equal(requests[0].budgets.totalMs, 90_000);
 });
 
-test('commit generation use case falls back after invalid provider output', async () => {
-  const requests = [];
-  const attempts = [];
-  const generator = {
+test('commit generation invokes only the selected local CLI when it fails', async () => {
+  const calls = [];
+  const useCase = new GenerateCommitMessageUseCase({
     async generate(request) {
-      requests.push(request);
-      return request.providerId === 'opencode'
-        ? 'I inspected the diff and will now generate a message.'
-        : 'fix(commit): bypass agent tool startup';
+      calls.push(request.providerId);
+      throw new TextGenerationError('provider-error', 'selected CLI failed', request.providerId);
     },
-  };
-  const useCase = new GenerateCommitMessageUseCase(generator);
-
-  const result = await useCase.execute({
-    primaryProviderId: 'opencode',
-    resolveFallbackProviderIds: async () => ['opencode', 'codex'],
-    prompt: 'Generate a commit message',
-    repositoryRoot: '/workspace/repository-b',
-    language: 'en',
-    diff: 'diff --git a/a.ts b/a.ts\n+export const value = 1;',
-    inputMessage: '',
-    signal: activeSignal,
-    onAttemptStart: (providerId) => attempts.push(providerId),
   });
 
-  assert.deepEqual(
-    requests.map((request) => request.providerId),
-    ['opencode', 'codex']
+  await assert.rejects(
+    useCase.execute({
+      providerId: 'claude',
+      prompt: 'prompt',
+      repositoryRoot: '/repo',
+      language: 'en',
+      diff: 'diff',
+      inputMessage: '',
+      signal: activeSignal,
+    }),
+    /selected CLI failed/
   );
-  assert.deepEqual(attempts, ['opencode', 'codex']);
-  assert.equal(result.message, 'fix(commit): bypass agent tool startup');
-  assert.equal(result.providerId, 'codex');
-  assert.equal(result.fallbackFrom, 'opencode');
+  assert.deepEqual(calls, ['claude']);
 });
 
-test('commit generation cancellation never attempts a fallback provider', async () => {
+test('commit generation never streams diagnostic output into SCM', async () => {
+  const partials = [];
+  const useCase = new GenerateCommitMessageUseCase({
+    async generate(_request, _signal, observer) {
+      observer?.({
+        type: 'output',
+        text: 'error: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.',
+      });
+      return 'error: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.';
+    },
+  });
+
+  await assert.rejects(
+    useCase.execute({
+      providerId: 'goose',
+      prompt: 'prompt',
+      repositoryRoot: '/repo',
+      language: 'en',
+      diff: 'diff',
+      inputMessage: '',
+      signal: activeSignal,
+      onPartial: (message) => partials.push(message),
+    }),
+    (error) => error.code === 'invalid-output'
+  );
+  assert.deepEqual(partials, []);
+});
+
+test('commit generation cancellation never starts another CLI', async () => {
   const requests = [];
-  let fallbackResolved = false;
   const generator = {
     async generate(request) {
       requests.push(request);
@@ -244,11 +198,7 @@ test('commit generation cancellation never attempts a fallback provider', async 
   await assert.rejects(
     () =>
       useCase.execute({
-        primaryProviderId: 'opencode',
-        resolveFallbackProviderIds: async () => {
-          fallbackResolved = true;
-          return ['codex'];
-        },
+        providerId: 'opencode',
         prompt: 'Generate a commit message',
         repositoryRoot: '/workspace/repository-b',
         language: 'en',
@@ -259,7 +209,6 @@ test('commit generation cancellation never attempts a fallback provider', async 
     (error) => error instanceof TextGenerationError && error.code === 'cancelled'
   );
 
-  assert.equal(fallbackResolved, false);
   assert.equal(requests.length, 1);
 });
 
@@ -298,10 +247,7 @@ test('CLI text generation adapter passes exact cwd without generated policy or e
 
 test('CLI text generation adapter stops a session on first-output timeout', async () => {
   const manager = createFakeCliManager();
-  const adapter = new CliTextGenerationAdapter(manager, {
-    resolveProviderRuntime: () => ({ env: {}, selectionKey: 'api-provider:none' }),
-    readOpenCodeConfig: () => ({}),
-  });
+  const adapter = new CliTextGenerationAdapter(manager);
 
   await assert.rejects(
     () =>
@@ -328,10 +274,7 @@ test('CLI text generation adapter stops a session on first-output timeout', asyn
 test('CLI text generation adapter stops a session when cancelled', async () => {
   const manager = createFakeCliManager();
   const cancellation = createCancellationSignal();
-  const adapter = new CliTextGenerationAdapter(manager, {
-    resolveProviderRuntime: () => ({ env: {}, selectionKey: 'api-provider:none' }),
-    readOpenCodeConfig: () => ({}),
-  });
+  const adapter = new CliTextGenerationAdapter(manager);
 
   const generation = adapter.generate(fastGenerationRequest(), cancellation.signal);
   await new Promise((resolve) => setImmediate(resolve));

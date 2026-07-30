@@ -109,6 +109,18 @@ test('cleanGeneratedCommitMessage rejects reasoning prose without a conventional
   assert.equal(message, '');
 });
 
+test('commit cleaner rejects provider and HTTP diagnostics', () => {
+  for (const text of [
+    'error: missing credentials',
+    'Error: request failed',
+    'error: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.',
+    'api error: 401 unauthorized',
+    'HTTP 503 upstream failure: fix(api): retry the request',
+  ]) {
+    assert.equal(cleanGeneratedCommitMessage(text), '');
+  }
+});
+
 test('cleanGeneratedCommitMessage extracts an embedded conventional subject after prose', () => {
   const message = cleanGeneratedCommitMessage(
     [
@@ -306,11 +318,11 @@ test('commit message command uses staged git diff and writes to repository input
     source,
     /generateCommitMessageWithCancellation\(\s*primaryProfile,\s*prompt,\s*repository\.rootUri\.fsPath,\s*language,\s*diff,\s*streamCommitMessage,/s
   );
-  assert.match(source, /repository\.inputBox\.value = '';\s*\},\s*inputMessage,/s);
+  assert.match(source, /streamCommitMessage,\s*inputMessage,/s);
   assert.match(source, /getRepository\(rootUri\)/);
   assert.match(source, /generateCommitMessageWithCancellation/);
   assert.match(source, /this\.commitMessageUseCase\.execute\(\{/);
-  assert.match(source, /resolveFallbackProviderIds:/);
+  assert.doesNotMatch(source, /resolveFallbackProviderIds/);
   assert.match(source, /onPartial: \(message\) => onPartial\(message\)/);
   assert.match(source, /getConfiguredProvider\(\)/);
   assert.match(source, /ASK_COMMIT_MESSAGE_PROVIDER = 'ask'/);
@@ -318,8 +330,8 @@ test('commit message command uses staged git diff and writes to repository input
   assert.match(source, /chooseCommitCli/);
   assert.match(source, /useOnceForCommitMessage/);
   assert.match(source, /resolveReadyProfile\(locale\)/);
-  assert.match(source, /resolveFallbackGenerationProfiles\(/);
-  assert.match(source, /generatedWithFallback/);
+  assert.doesNotMatch(source, /resolveFallbackGenerationProfiles/);
+  assert.doesNotMatch(source, /generatedWithFallback/);
   assert.match(source, /getInstalledProfiles\(\)/);
   assert.match(source, /const installedProfiles = await this\.getInstalledProfiles\(\);/);
   assert.match(
@@ -402,8 +414,9 @@ test('commit message command depends on the text-generation use case instead of 
   assert.doesNotMatch(source, /startPrompt\(/);
   assert.match(source, /this\.commitMessageUseCase\.execute\(\{/);
   assert.match(source, /repositoryRoot: repositoryRoot/);
-  assert.match(source, /primaryProviderId: primaryProfile\.id/);
-  assert.match(source, /resolveFallbackProviderIds:/);
+  assert.match(source, /providerId: primaryProfile\.id/);
+  assert.doesNotMatch(source, /resolveFallbackProviderIds/);
+  assert.doesNotMatch(source, /fallbackFrom/);
 });
 
 

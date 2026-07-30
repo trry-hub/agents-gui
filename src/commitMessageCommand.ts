@@ -58,7 +58,6 @@ type RuntimeLocale = 'en' | 'zh-CN';
 interface CommitMessageGenerationResult {
   message: string;
   profile: CliProfile;
-  fallbackFrom?: CliProfile;
 }
 
 const DEFAULT_CLI_ID = 'opencode';
@@ -97,10 +96,6 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     emptyOutput: 'The CLI did not return a commit message.',
     generated: 'Commit message generated from staged changes.',
     generatedTruncated: 'Commit message generated from truncated staged changes.',
-    generatedWithFallback:
-      'Commit message generated with {provider} after {fallbackProvider} was unavailable.',
-    generatedTruncatedWithFallback:
-      'Commit message generated from truncated staged changes with {provider} after {fallbackProvider} was unavailable.',
     cancelled: 'Commit message generation was cancelled.',
     failed: 'Failed to generate commit message: {message}',
   },
@@ -129,9 +124,6 @@ const MESSAGES: Record<RuntimeLocale, Record<string, string>> = {
     emptyOutput: 'CLI 没有返回提交信息。',
     generated: '已根据暂存区变更生成提交信息。',
     generatedTruncated: '已根据截断后的暂存区变更生成提交信息。',
-    generatedWithFallback: '已在 {fallbackProvider} 不可用后，降级使用 {provider} 生成提交信息。',
-    generatedTruncatedWithFallback:
-      '已根据截断后的暂存区变更生成提交信息，并在 {fallbackProvider} 不可用后降级使用 {provider}。',
     cancelled: '已取消生成提交信息。',
     failed: '生成提交信息失败：{message}',
   },
@@ -221,9 +213,6 @@ export class CommitMessageCommand {
         language,
         diff,
         streamCommitMessage,
-        () => {
-          repository.inputBox.value = '';
-        },
         inputMessage,
         cancellation.token,
         externalToken
@@ -232,17 +221,10 @@ export class CommitMessageCommand {
       completedGeneration = true;
       repository.inputBox.value = result.message;
       await vscode.commands.executeCommand('workbench.view.scm');
-      const messageKey = result.fallbackFrom
-        ? truncated
-          ? 'generatedTruncatedWithFallback'
-          : 'generatedWithFallback'
-        : truncated
-          ? 'generatedTruncated'
-          : 'generated';
+      const messageKey = truncated ? 'generatedTruncated' : 'generated';
       vscode.window.showInformationMessage(
         this.t(locale, messageKey, {
           provider: result.profile.name,
-          fallbackProvider: result.fallbackFrom?.name ?? '',
         })
       );
     } catch (error) {
@@ -561,23 +543,6 @@ export class CommitMessageCommand {
     return results.filter((result) => result.installed).map((result) => result.profile);
   }
 
-  private async resolveFallbackGenerationProfiles(
-    primaryProfile: CliProfile
-  ): Promise<CliProfile[]> {
-    const seen = new Set<string>([primaryProfile.id]);
-    const profiles: CliProfile[] = [];
-    for (const profile of await this.getInstalledProfiles()) {
-      if (seen.has(profile.id)) {
-        continue;
-      }
-
-      seen.add(profile.id);
-      profiles.push(profile);
-    }
-
-    return profiles;
-  }
-
   private async openCommitMessageSettings(): Promise<void> {
     await vscode.commands.executeCommand('agents-gui.openProviderSettings', 'commitMessage');
   }
@@ -646,7 +611,6 @@ export class CommitMessageCommand {
     language: CommitMessageLanguage,
     diff: string,
     onPartial: (message: string) => void,
-    onAttemptStart: () => void,
     inputMessage: string,
     token: vscode.CancellationToken,
     externalToken?: vscode.CancellationToken
@@ -658,11 +622,7 @@ export class CommitMessageCommand {
           signal: TextGenerationCancellationSignal
         ): Promise<CommitMessageGenerationResult> => {
           const generation = await this.commitMessageUseCase.execute({
-            primaryProviderId: primaryProfile.id,
-            resolveFallbackProviderIds: async () =>
-              (await this.resolveFallbackGenerationProfiles(primaryProfile)).map(
-                (profile) => profile.id
-              ),
+            providerId: primaryProfile.id,
             prompt,
             repositoryRoot: repositoryRoot,
             language,
@@ -670,16 +630,11 @@ export class CommitMessageCommand {
             inputMessage,
             signal,
             onPartial: (message) => onPartial(message),
-            onAttemptStart: () => onAttemptStart(),
           });
           const profile = getCliProfile(generation.providerId) ?? primaryProfile;
-          const fallbackFrom = generation.fallbackFrom
-            ? getCliProfile(generation.fallbackFrom)
-            : undefined;
           return {
             message: generation.message,
             profile,
-            ...(fallbackFrom ? { fallbackFrom } : {}),
           };
         };
 

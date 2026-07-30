@@ -245,10 +245,16 @@ export class CliTextGenerationAdapter
             const normalized = normalizeCliOutputChunk(event.text, session.cliId, buffer);
             buffer = normalized.buffer;
             output += normalized.text;
-            observer?.({
-              type: 'output',
-              text: normalizeCliOutput(output, session.cliId),
-            });
+            const normalizedOutput = normalizeCliOutput(output, session.cliId);
+            if (isProviderErrorOutput(normalizedOutput)) {
+              fail(
+                'provider-error',
+                normalizedOutput.trim().replace(/^(?:error|api error):\s*/i, ''),
+                streaming ? 'stream' : 'wait-first-output'
+              );
+              return;
+            }
+            observer?.({ type: 'output', text: normalizedOutput });
             return;
           }
 
@@ -374,5 +380,5 @@ function isLikelyCliError(text: string): boolean {
 }
 
 function isProviderErrorOutput(text: string): boolean {
-  return /^Error:\s+\S/.test(text.trim());
+  return /^(?:error|api error):\s+\S/i.test(text.trim());
 }

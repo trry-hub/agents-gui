@@ -389,6 +389,22 @@ test('activation runs local OpenCode cleanup without API runtime injection', () 
   assert.doesNotMatch(syncedStateSource, /openCodeNativePassthroughCleanup/);
 });
 
+test('SCM text generation launches only the selected native CLI without policy injection', () => {
+  assert.equal(existsSync(new URL('../src/openCodeTaskPolicy.ts', import.meta.url)), false);
+  assert.match(
+    cliTextGenerationAdapterSource,
+    /startPrompt\(profile\.id, request\.prompt, \{\s*cwd: request\.cwd,?\s*\}\)/s
+  );
+  assert.doesNotMatch(
+    cliTextGenerationAdapterSource,
+    /resolveApiProviderRuntime|readOpenCodeConfig|OPENCODE_|capabilities|permission|agentMode|plugin/
+  );
+  assert.doesNotMatch(
+    textGenerationSource,
+    /resolveFallbackProviderIds|fallbackFrom|COMMIT_MESSAGE_CAPABILITY_POLICY|capabilities/
+  );
+});
+
 test('packaged build avoids tokenizer wasm runtime assets', () => {
   assert.doesNotMatch(esbuildScript, /tiktoken/);
   assert.doesNotMatch(esbuildScript, /dist\/tiktoken_bg\.wasm/);
