@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { resolveOpenCodePaths, type OpenCodePathOptions } from './openCodePaths';
 
 const SYNC_MARKER = '__agents_gui_synced';
