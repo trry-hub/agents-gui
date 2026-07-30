@@ -258,10 +258,12 @@ test('CliDiscovery exposes the configured OpenCode model as observation without 
   assert.equal(profile.env, undefined);
 });
 
-test('version normalization strips ANSI, requires a dotted version, and bounds prerelease text', () => {
+test('version normalization accepts a bounded ANSI dotted version and rejects malformed tokens', () => {
   assert.equal(normalizeCommandVersionOutput('\u001b[32mOpenCode v1.2.3-beta.1\u001b[0m'), '1.2.3-beta.1');
   assert.equal(normalizeCommandVersionOutput('release 42'), undefined);
-  assert.equal(normalizeCommandVersionOutput(`v1.2.3-${'a'.repeat(65)}`), '1.2.3');
+  assert.equal(normalizeCommandVersionOutput(`v${'1'.repeat(17)}.2`), undefined);
+  assert.equal(normalizeCommandVersionOutput('1.2.3.4.5'), undefined);
+  assert.equal(normalizeCommandVersionOutput(`v1.2.3-${'a'.repeat(65)}`), undefined);
 });
 
 async function waitForWindowsPidToExit(pid, timeoutMs = 5000) {
@@ -424,7 +426,10 @@ test('CliDiscovery bounds version probe output and tree-terminates the oversized
   await Promise.resolve();
   const probe = harness.probes[0].child;
   try {
-    probe.stdout.emit('data', Buffer.alloc(32_769, 'x'));
+    probe.stdout.emit(
+      'data',
+      Buffer.concat([Buffer.from('OpenCode 1.2.3\n'), Buffer.alloc(32_769, 'x')])
+    );
     assert.equal(await result, undefined);
     assert.deepEqual(harness.taskkillArgs, [['/pid', '100', '/T']]);
   } finally {

@@ -827,7 +827,8 @@ test('CLI profiles retain normalized detected version status', () => {
   );
   assert.match(discoverySource, /private getCommandVersion\(profile: CliProfile\)/);
   assert.match(discoverySource, /profile\.versionArgs \?\? \['--version'\]/);
-  assert.match(discoverySource, /token\?\.replace\(\/\^v\/i, ''\)/);
+  assert.match(discoverySource, /MAX_COMMAND_VERSION_TOKEN_LENGTH/);
+  assert.match(discoverySource, /const candidates = clean\.matchAll/);
 });
 
 test('context summary carries lightweight token usage estimates without bundled tokenizer runtimes', () => {

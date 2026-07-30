@@ -47,6 +47,10 @@ function expectedLaunchPath(commandDir, inheritedPath, platform = process.platfo
     .join(delimiter);
 }
 
+function isPathEnvironmentKey(name, platform = process.platform) {
+  return platform === 'win32' ? name.toLowerCase() === 'path' : name === 'PATH';
+}
+
 test('CliManager launches OpenCode with only inherited env, cwd, transport argv, and prompt', async () => {
   const launches = [];
   const child = fakeChild();
@@ -82,7 +86,7 @@ test('CliManager launches OpenCode with only inherited env, cwd, transport argv,
   const expectedPath = expectedLaunchPath('/usr/local/bin', process.env.PATH);
   assert.equal(launches[0].env.PATH, expectedPath);
   for (const [name, value] of Object.entries(process.env)) {
-    if (name !== 'PATH') assert.equal(launches[0].env[name], value, name);
+    if (!isPathEnvironmentKey(name)) assert.equal(launches[0].env[name], value, name);
   }
   for (const name of [
     'AGENTS_HUB_API_MODEL',
@@ -98,12 +102,16 @@ test('CliManager launches OpenCode with only inherited env, cwd, transport argv,
   ]) {
     assert.equal(launches[0].env[name], process.env[name]);
   }
+  assert.equal(isPathEnvironmentKey('Path', 'win32'), true);
+  assert.equal(isPathEnvironmentKey('PATH', 'win32'), true);
+  assert.equal(isPathEnvironmentKey('Path', 'linux'), false);
 });
 
 test('CliManager forwards process streams and cleans up on normal close', async () => {
   const child = fakeChild();
   child.exitCode = null;
   child.signalCode = null;
+  const treeTerminations = [];
   const runner = {
     spawnPromptProcess() {
       return child;
@@ -112,7 +120,7 @@ test('CliManager forwards process streams and cleans up on normal close', async 
       throw new Error('unexpected probe');
     },
     terminate() {},
-    killTree() {},
+    killTree: (proc, signal) => treeTerminations.push({ proc, signal }),
   };
   const manager = new CliManager({
     processRunner: runner,
@@ -134,6 +142,7 @@ test('CliManager forwards process streams and cleans up on normal close', async 
     { type: 'output', text: 'err', stream: 'stderr', transport: 'process' },
     { type: 'end', exitCode: 0 },
   ]);
+  assert.deepEqual(treeTerminations, [{ proc: child, signal: 'SIGTERM' }]);
   assert.deepEqual(manager.getActiveSessionIds(), []);
 });
 

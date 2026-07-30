@@ -23,6 +23,9 @@ export interface CliProfileStatusOptions {
 }
 const PROFILE_STATUS_CACHE_MS = 300_000;
 const COMMAND_VERSION_OUTPUT_LIMIT = 32_768;
+const MAX_COMMAND_VERSION_TOKEN_LENGTH = 128;
+const MAX_COMMAND_VERSION_COMPONENT_DIGITS = 16;
+const MAX_COMMAND_VERSION_SUFFIX_LENGTH = 64;
 
 export class CliDiscovery {
   private commandPathCache = new Map<string, string>();
@@ -238,6 +241,7 @@ export class CliDiscovery {
     return new Promise((resolve, reject) => {
       const proc = this.processRunner.spawnProbeProcess(command, args, options);
       let output = '';
+      let outputBytes = 0;
       let settled = false;
       const finish = (value: { code: number | null; output: string }, error?: Error) => {
         if (settled) return;
@@ -256,11 +260,13 @@ export class CliDiscovery {
           }, timeoutMs)
         : undefined;
       const append = (data: Buffer) => {
-        output += data.toString();
-        if (output.length > outputLimit) {
+        if (data.byteLength > outputLimit - outputBytes) {
           this.processRunner.terminate(proc);
           finish({ code: null, output });
+          return;
         }
+        output += data.toString();
+        outputBytes += data.byteLength;
       };
       proc.stdout?.on('data', append);
       proc.stderr?.on('data', append);
@@ -314,6 +320,14 @@ export function normalizeCommandVersionOutput(output: string): string | undefine
   // eslint-disable-next-line no-control-regex
   const ansiPattern = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
   const clean = output.replace(ansiPattern, '');
-  const token = /\bv?\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]{1,64})?\b/.exec(clean)?.[0];
-  return token?.replace(/^v/i, '');
+  const candidates = clean.matchAll(/\b(?:v\d|\d)[0-9A-Za-z.+-]*\b/g);
+  for (const candidate of candidates) {
+    const token = candidate[0].replace(/^v/i, '');
+    if (token.length > MAX_COMMAND_VERSION_TOKEN_LENGTH) continue;
+    const component = `\\d{1,${MAX_COMMAND_VERSION_COMPONENT_DIGITS}}`;
+    const suffix = `[0-9A-Za-z.-]{1,${MAX_COMMAND_VERSION_SUFFIX_LENGTH}}`;
+    if (new RegExp(`^${component}(?:\\.${component}){1,3}(?:[-+]${suffix})?$`).test(token))
+      return token;
+  }
+  return undefined;
 }
