@@ -19,7 +19,6 @@ type RuntimeMessageKey =
   | 'error.missingSelection'
   | 'error.missingActiveFile'
   | 'warning.noOutput'
-  | 'warning.apiProviderMissingKey'
   | 'providerExtension.notConfigured'
   | 'providerExtension.notInstalled'
   | 'providerExtension.openFailed'
@@ -47,8 +46,6 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'error.missingActiveFile': 'Open a file in the editor before running this action.',
     'warning.noOutput':
       '{provider} is still running but has not produced output for {seconds}s. This usually means the CLI is waiting on auth, network, or a permission prompt.',
-    'warning.apiProviderMissingKey':
-      'API provider {provider} references {envName}, but that environment variable is not available to VS Code.',
     'providerExtension.notConfigured': 'No VS Code extension bridge is configured for {provider}.',
     'providerExtension.notInstalled':
       '{extension} is not installed. Opening the Extensions search.',
@@ -75,8 +72,6 @@ const RUNTIME_MESSAGES: Record<RuntimeLocale, Record<RuntimeMessageKey, string>>
     'error.missingActiveFile': '请先在编辑器中打开一个文件，再运行这个动作。',
     'warning.noOutput':
       '{provider} 已运行 {seconds} 秒但还没有任何输出，通常是 CLI 正在等待登录、网络或权限提示。',
-    'warning.apiProviderMissingKey':
-      'API 供应商 {provider} 引用了 {envName}，但 VS Code 当前环境中没有这个环境变量。',
     'providerExtension.notConfigured': '{provider} 还没有配置对应的 VS Code 扩展入口。',
     'providerExtension.notInstalled': '尚未安装 {extension}，已打开扩展搜索。',
     'providerExtension.openFailed': '无法打开 {extension}。',

@@ -1,13 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { ApiProviderClient } from './apiProviderClient';
-import {
-  sanitizeApiProviderSettings,
-  resolveApiProviderRuntime,
-  type ApiProviderProtocol,
-  type ApiProviderRuntimeConfig,
-} from './apiProviders';
 import {
   AssistantActionId,
   AssistantContextOptions,
@@ -55,7 +48,6 @@ import {
 } from './localization';
 import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
 import { OpenCodeLocalState } from './openCodeLocalState';
-import { OpenCodeConfigSync } from './openCodeConfigSync';
 import { getProviderExtensionBridge } from './providerExtensions';
 import { SettingsManager } from './settingsManager';
 import type {
@@ -79,12 +71,10 @@ import {
 } from './syncedState';
 
 interface SidebarProviderOptions {
-  apiProviderClient?: ApiProviderClient;
   attachmentStore?: ImageAttachmentStore;
   contextCollector?: AssistantContextCollector;
   extensionMode?: vscode.ExtensionMode;
   openCodeLocalState?: OpenCodeLocalState;
-  openCodeConfigSync?: OpenCodeConfigSync;
   openCodeCapability?: OpenCodeAgentCapability;
   agentCapabilityRegistry?: AgentCapabilityRegistry;
   state?: vscode.Memento;
@@ -117,9 +107,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly extensionMode: vscode.ExtensionMode;
   private readonly openCodeCapability?: OpenCodeAgentCapability;
   private readonly openCodeLocalState: OpenCodeLocalState;
-  private readonly openCodeConfigSync: OpenCodeConfigSync;
   private readonly attachmentStore: ImageAttachmentStore;
-  private readonly apiProviderClient: ApiProviderClient;
   private readonly agentCapabilityRegistry: AgentCapabilityRegistry;
   private readonly cliSetup: CliSetupController;
   private readonly mcpManager: McpManager;
@@ -137,7 +125,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.agentCapabilityRegistry =
       options.agentCapabilityRegistry ?? createCliAgentCapabilityRegistry(CLI_PROFILES);
     this.state = options.state;
-    this.apiProviderClient = options.apiProviderClient ?? new ApiProviderClient();
     this.cliSetup = new CliSetupController(
       this.locale,
       (cliId) => this.profilesById.get(cliId) ?? getCliProfile(cliId)
@@ -149,7 +136,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
     this.openCodeCapability = options.openCodeCapability;
     this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
-    this.openCodeConfigSync = options.openCodeConfigSync ?? new OpenCodeConfigSync();
     this.attachmentStore =
       options.attachmentStore ??
       new ImageAttachmentStore({
@@ -188,11 +174,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.html = this.getHtml(webviewView.webview);
     void this.sendHomeAgentSettings();
-    void this.sendApiProviderSettings();
     void this.sendCommitMessageSettings();
-    // Sync API provider config into opencode.json in the background. It skips
-    // when the config is already correct, so it won't slow down startup.
-    void this.syncOpenCodeConfig();
     void this.flushPendingRequests();
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewToHostMessage) => {
@@ -207,11 +189,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'saveHomeAgentSettings':
           await this.saveSettingsWithResult('agents', () =>
             this.saveHomeAgentSettings(message.settings)
-          );
-          break;
-        case 'saveApiProviderSettings':
-          await this.saveSettingsWithResult('apiProviders', () =>
-            this.saveApiProviderSettings(message.settings)
           );
           break;
         case 'saveCommitMessageSettings':
@@ -230,12 +207,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'toggleMcpServer':
           await this.handleToggleMcpServer(message);
-          break;
-        case 'refreshApiProviderSettings':
-          await this.sendApiProviderSettings();
-          break;
-        case 'fetchApiProviderModels':
-          await this.fetchApiProviderModels(message);
           break;
         case 'stop':
           this.handleStop(this.settingsManager.resolveCliId(message));
@@ -422,7 +393,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await this.postToWebview({ command: 'refreshStarted' });
     await this.sendProfiles({ force: true });
     await this.sendHomeAgentSettings();
-    await this.sendApiProviderSettings();
     await this.sendCommitMessageSettings();
   }
 
@@ -430,7 +400,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await vscode.commands.executeCommand('agents-gui.sidebar.focus');
     this.view?.show(true);
     await this.sendHomeAgentSettings();
-    await this.sendApiProviderSettings();
     await this.sendCommitMessageSettings();
     await this.handleLoadMcpServers({ cliId: this.settingsManager.getDefaultCliId() });
     await this.postToWebview({ command: 'openProviderSettings', section });
@@ -481,10 +450,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async sendProfiles(options: AgentProfileStatusOptions = {}): Promise<void> {
-    // Note: we don't await openCodeConfigSyncPromise here. The sync now skips
-    // when the config is already correct (hasSyncedProvider check), so the
-    // common path is a no-op. When a real write is needed, it runs in the
-    // background — the background server picks it up on next attach.
     const profiles = await this.agentRuntime.getProfilesWithStatus(options);
     const installedProfiles = profiles.filter((profile) => profile.installed);
     this.profilesById.clear();
@@ -534,52 +499,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
   }
 
-  /**
-   * Sync the current API provider settings into opencode.json.
-   * Called on webview init and after settings save so OpenCode reads the
-   * right provider natively. Best-effort: errors are logged, not thrown.
-   *
-   * The returned promise is also stored so that profile detection can wait
-   * for it before starting the background server.
-   */
-  private syncPromise: Promise<void> = Promise.resolve();
-
-  private get openCodeConfigSyncPromise(): Promise<void> {
-    return this.syncPromise;
-  }
-
-  private syncOpenCodeConfig(): Promise<void> {
-    const run = async () => {
-      try {
-        const settings = this.settingsManager.getApiProviderSettings(this.profilesById);
-        await this.openCodeConfigSync.sync(settings);
-      } catch (error) {
-        console.warn('[agents-gui] Failed to sync OpenCode config on init:', error);
-      }
-    };
-    this.syncPromise = run();
-    return this.syncPromise;
-  }
-
-  private async sendApiProviderSettings(): Promise<void> {
-    const settings = this.settingsManager.getApiProviderSettings(this.profilesById);
-    const envStatusByProviderId = Object.fromEntries(
-      settings.customProviders.map((provider) => [
-        provider.id,
-        {
-          apiKeyEnv: provider.apiKeyEnv,
-          apiKeyEnvAvailable: !provider.apiKeyEnv || Boolean(process.env[provider.apiKeyEnv]),
-        },
-      ])
-    );
-
-    this.postToWebview({
-      command: 'apiProviderSettings',
-      settings,
-      envStatusByProviderId,
-    });
-  }
-
   private async sendHomeAgentSettings(): Promise<void> {
     this.postToWebview({
       command: 'homeAgentSettings',
@@ -595,7 +514,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async saveSettingsWithResult(
-    section: 'agents' | 'apiProviders' | 'commitMessage',
+    section: 'agents' | 'commitMessage',
     save: () => Promise<void>
   ): Promise<void> {
     try {
@@ -626,79 +545,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     await config.update('agentOrder', settings.agentOrder, vscode.ConfigurationTarget.Global);
     await this.sendHomeAgentSettings();
     await this.sendProfiles();
-  }
-
-  private async saveApiProviderSettings(rawSettings: unknown): Promise<void> {
-    const sanitized = sanitizeApiProviderSettings(rawSettings);
-    const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
-
-    await Promise.all([
-      config.update(
-        'customProviders',
-        sanitized.customProviders,
-        vscode.ConfigurationTarget.Global
-      ),
-      config.update(
-        'defaultProviderId',
-        sanitized.defaultProviderId,
-        vscode.ConfigurationTarget.Global
-      ),
-      config.update(
-        'agentProviderByCliId',
-        sanitized.agentProviderByCliId,
-        vscode.ConfigurationTarget.Global
-      ),
-    ]);
-
-    // Sync the active API provider into opencode.json so the OpenCode CLI reads
-    // it natively (like cc-switch). Best-effort: failures are logged but do not
-    // block the VS Code settings from being saved.
-    await this.syncOpenCodeConfig();
-
-    await this.sendApiProviderSettings();
-  }
-
-  private async fetchApiProviderModels(message: {
-    requestId?: unknown;
-    provider?: {
-      protocol?: unknown;
-      baseUrl?: unknown;
-      apiKey?: unknown;
-      apiKeyEnv?: unknown;
-    };
-  }): Promise<void> {
-    const requestId = typeof message.requestId === 'number' ? message.requestId : 0;
-    try {
-      const provider =
-        message.provider && typeof message.provider === 'object' ? message.provider : {};
-      const protocol: ApiProviderProtocol =
-        provider.protocol === 'anthropic' ? 'anthropic' : 'openai';
-      const baseUrl = typeof provider.baseUrl === 'string' ? provider.baseUrl.trim() : '';
-      const explicitApiKey = typeof provider.apiKey === 'string' ? provider.apiKey.trim() : '';
-      const apiKeyEnv =
-        typeof provider.apiKeyEnv === 'string'
-          ? provider.apiKeyEnv.trim().replace(/[^A-Za-z0-9_]/g, '')
-          : '';
-      const apiKey = explicitApiKey || (apiKeyEnv ? process.env[apiKeyEnv] || '' : '');
-      if (!baseUrl) {
-        throw new Error('Base URL is required');
-      }
-
-      const models = await this.apiProviderClient.listModels({ protocol, baseUrl, apiKey });
-      this.postToWebview({
-        command: 'apiProviderModelsResult',
-        requestId,
-        ok: true,
-        models,
-      });
-    } catch (error) {
-      this.postToWebview({
-        command: 'apiProviderModelsResult',
-        requestId,
-        ok: false,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   private async saveCommitMessageSettings(rawSettings: unknown): Promise<void> {
@@ -1043,11 +889,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       message.customModel,
       message.modelVariant
     );
-    const apiProviderRuntime = resolveApiProviderRuntime(
-      this.settingsManager.getApiProviderSettings(this.profilesById),
-      cliId,
-      process.env
-    );
     const optionArgs = buildCliOptionArgs(profile, {
       model: modelOption.id,
       customModel: message.customModel,
@@ -1060,7 +901,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       modelOption.custom ? (message.customModel ?? '').trim() : '',
       runtimeMode.id,
       permissionMode.id,
-      apiProviderRuntime.selectionKey,
     ].join('|');
     let session = this.sessionController.active(cliId);
     const canReuseSession = this.sessionController.canReuse(session, agentMode.id, optionKey);
@@ -1156,7 +996,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         agentArgs,
         agentMode.id,
         optionKey,
-        apiProviderRuntime.env,
+        undefined,
         continueSessionId ? { continueSessionId } : {}
       );
 
@@ -1202,7 +1042,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       actionLabel: runtimeActionLabel(this.locale, action),
       attachments,
       contextSummary,
-      apiProviderWarning: this.formatApiProviderWarning(apiProviderRuntime),
     });
     this.sessionController.armNoOutputNotice(session);
 
@@ -1234,18 +1073,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sessionId: result.session?.id,
       ok: result.ok,
       text: result.ok ? undefined : runtimeT(this.locale, 'error.sendFailed'),
-    });
-  }
-
-  private formatApiProviderWarning(runtime: ApiProviderRuntimeConfig): string | undefined {
-    const warning = runtime.warnings[0];
-    if (!warning) {
-      return undefined;
-    }
-
-    return runtimeT(this.locale, 'warning.apiProviderMissingKey', {
-      provider: warning.providerName,
-      envName: warning.envName,
     });
   }
 

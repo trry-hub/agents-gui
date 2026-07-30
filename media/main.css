@@ -1632,16 +1632,6 @@ body.is-api-settings-open .composer {
   cursor: pointer;
 }
 
-.api-provider-list-pane {
-  min-width: 0;
-  display: grid;
-  grid-template-rows: max-content minmax(0, 1fr) max-content;
-  gap: 8px;
-  padding: 12px;
-  border-right: 1px solid var(--assistant-border);
-  background: color-mix(in srgb, var(--assistant-panel) 42%, transparent);
-}
-
 .api-settings-section-title,
 .api-settings-row-title {
   color: var(--assistant-muted);
@@ -1651,16 +1641,6 @@ body.is-api-settings-open .composer {
   text-transform: uppercase;
 }
 
-.api-provider-list {
-  min-height: 0;
-  display: grid;
-  align-content: start;
-  gap: 4px;
-  overflow: auto;
-}
-
-.api-provider-list-item,
-.api-provider-add,
 .api-link-button,
 .api-primary-button,
 .api-secondary-button,
@@ -1673,56 +1653,11 @@ body.is-api-settings-open .composer {
   cursor: pointer;
 }
 
-.api-provider-list-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  gap: 6px;
-  align-items: center;
-  padding: 5px 7px;
-  text-align: left;
-}
-
-.api-provider-list-item span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.api-provider-list-item.is-active {
-  border-color: color-mix(in srgb, var(--assistant-accent) 60%, var(--assistant-border));
-  background: color-mix(in srgb, var(--assistant-accent) 10%, var(--assistant-surface));
-}
-
-.api-provider-list-item.is-disabled {
-  color: var(--assistant-muted);
-}
-
-.api-provider-status {
-  color: var(--assistant-muted);
-  font-size: 10px;
-}
-
-.api-provider-add,
 .api-primary-button,
 .api-secondary-button,
 .api-danger-button {
   min-width: 0;
   padding: 0 10px;
-}
-
-.api-provider-form {
-  min-width: 0;
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  overflow: auto;
-  padding: 14px 16px 16px;
-}
-
-.api-provider-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
 }
 
 .api-field-wide {
@@ -1779,14 +1714,6 @@ body.is-api-settings-open .composer {
 
 .api-model-status[data-state="error"] {
   color: var(--vscode-errorForeground, #f85149);
-}
-
-.api-provider-enabled {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--vscode-foreground);
-  font-size: 12px;
 }
 
 .api-settings-section {
@@ -1849,7 +1776,6 @@ body.is-api-settings-open .composer {
 }
 
 .api-env-remove:hover,
-.api-provider-add:hover,
 .api-link-button:hover,
 .api-secondary-button:hover,
 .api-danger-button:hover {
@@ -1929,29 +1855,6 @@ body.is-api-settings-open .composer {
   .api-settings-body {
     grid-template-columns: minmax(0, 1fr);
     overflow: visible;
-  }
-
-  .api-provider-list-pane {
-    min-height: 128px;
-    grid-template-rows: max-content minmax(40px, max-content) max-content;
-    border-right: 0;
-    border-bottom: 1px solid var(--assistant-border);
-  }
-
-  .api-provider-list {
-    max-height: 88px;
-  }
-
-  .api-provider-form {
-    overflow: visible;
-    padding: 12px;
-  }
-
-  .api-provider-grid,
-  .api-model-row,
-  .api-extra-env-row,
-  .api-agent-binding {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .api-agent-binding-label {
@@ -6657,22 +6560,6 @@ textarea:disabled {
     overflow: visible;
   }
 
-  .api-provider-list-pane {
-    grid-template-rows: max-content max-content max-content;
-    border-right: 0;
-    border-bottom: 1px solid var(--assistant-border);
-  }
-
-  .api-provider-list {
-    display: flex;
-    overflow-x: auto;
-  }
-
-  .api-provider-list-item {
-    min-width: 130px;
-  }
-
-  .api-provider-grid,
   .api-model-row,
   .api-extra-env-row,
   .api-agent-binding {

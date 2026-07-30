@@ -1,9 +1,4 @@
 import * as vscode from 'vscode';
-import {
-  resolveApiProviderRuntime,
-  sanitizeApiProviderSettings,
-  type CustomApiProviderConfig,
-} from './apiProviders';
 import { SidebarProvider } from './sidebarProvider';
 import { CliManager } from './cliManager';
 import { CliAgentRuntime } from './agentRuntime';
@@ -14,23 +9,24 @@ import { CliOpenCodeAgentCapability } from './openCodeAgentCapability';
 import { CommitMessageCommand } from './commitMessageCommand';
 import { runExtensionSmokeProbe } from './extensionSmokeHarness';
 import { resolveRuntimeLocale, runtimeT } from './localization';
-import { OpenCodeConfigSync } from './openCodeConfigSync';
+import { OpenCodeConfigCleanupMigration, runOpenCodeCleanupOnce } from './openCodeConfigCleanup';
 import { SYNCED_GLOBAL_STATE_KEYS } from './syncedState';
 import { GenerateCommitMessageUseCase } from './textGeneration';
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const locale = resolveRuntimeLocale(vscode.env.language);
   context.globalState.setKeysForSync(SYNCED_GLOBAL_STATE_KEYS);
+  const openCodeCleanup = new OpenCodeConfigCleanupMigration();
+  try {
+    await runOpenCodeCleanupOnce(context.globalState, openCodeCleanup);
+  } catch (error) {
+    console.warn('[Agents GUI] Failed to clean legacy OpenCode provider configuration.', error);
+  }
   const cliManager = new CliManager();
   const agentRuntime = new CliAgentRuntime(cliManager);
   const agentCapabilityRegistry = createCliAgentCapabilityRegistry(CLI_PROFILES);
   const openCodeCapability = new CliOpenCodeAgentCapability(cliManager);
-  const openCodeConfig = new OpenCodeConfigSync();
-  const textGenerationAdapter = new CliTextGenerationAdapter(cliManager, {
-    resolveProviderRuntime: (providerId) =>
-      resolveApiProviderRuntime(readApiProviderSettings(), providerId, process.env),
-    readOpenCodeConfig: () => openCodeConfig.readConfig(),
-  });
+  const textGenerationAdapter = new CliTextGenerationAdapter(cliManager);
   const generateCommitMessage = new GenerateCommitMessageUseCase(textGenerationAdapter);
   const commitMessageCommand = new CommitMessageCommand(
     textGenerationAdapter,
@@ -214,13 +210,4 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   // cleanup handled by disposables
-}
-
-function readApiProviderSettings() {
-  const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
-  return sanitizeApiProviderSettings({
-    customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
-    defaultProviderId: config.get<string>('defaultProviderId', ''),
-    agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
-  });
 }

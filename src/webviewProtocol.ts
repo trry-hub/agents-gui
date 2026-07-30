@@ -5,12 +5,11 @@ import type {
   AssistantOpenCodeNativeCommandResult,
   AssistantWebviewRequest,
 } from './assistantTypes';
-import type { ApiProviderSettings } from './apiProviders';
 import type { CliAuthAction, CliProfile } from './cliProfiles';
 import type { ThreadEventEnvelope } from './threadProtocol';
 import type { ActiveRendererRun } from './threadEventAdapter';
 
-export type SettingsSection = 'agents' | 'apiProviders' | 'commitMessage' | 'mcp' | string;
+export type SettingsSection = 'agents' | 'commitMessage' | 'mcp' | string;
 
 export interface SetupCliProfile {
   id: string;
@@ -30,19 +29,7 @@ export type WebviewToHostMessage =
   | ({ command: 'send' | 'quickAction' } & AssistantWebviewRequest)
   | { command: 'openSettings'; section?: SettingsSection }
   | { command: 'saveHomeAgentSettings'; settings?: unknown }
-  | { command: 'saveApiProviderSettings'; settings?: unknown }
   | { command: 'saveCommitMessageSettings'; settings?: unknown }
-  | { command: 'refreshApiProviderSettings' }
-  | {
-      command: 'fetchApiProviderModels';
-      requestId?: unknown;
-      provider?: {
-        protocol?: unknown;
-        baseUrl?: unknown;
-        apiKey?: unknown;
-        apiKeyEnv?: unknown;
-      };
-    }
   | { command: 'loadMcpServers'; cliId?: string }
   | { command: 'saveMcpServer'; cliId?: string; server?: unknown }
   | { command: 'deleteMcpServer'; cliId?: string; name?: string }
@@ -95,18 +82,6 @@ export type HostToWebviewMessage =
       taskBoardDismissed?: boolean;
     } & Record<string, unknown>)
   | { command: 'refreshStarted' }
-  | ({
-      command: 'apiProviderSettings';
-      settings: ApiProviderSettings;
-      envStatusByProviderId?: Record<string, { apiKeyEnv: string; apiKeyEnvAvailable: boolean }>;
-    } & Record<string, unknown>)
-  | {
-      command: 'apiProviderModelsResult';
-      requestId?: unknown;
-      ok: boolean;
-      models?: string[];
-      message?: string;
-    }
   | { command: 'settingsSaveResult'; section: SettingsSection; ok: boolean; message?: string }
   | { command: 'homeAgentSettings'; settings: unknown }
   | { command: 'commitMessageSettings'; settings: unknown }

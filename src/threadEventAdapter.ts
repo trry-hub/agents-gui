@@ -20,7 +20,6 @@ interface LegacyLifecycleMessage {
   actionLabel?: string;
   agentModeLabel?: string;
   agentMode?: string;
-  apiProviderWarning?: string;
   ok?: boolean;
 }
 
@@ -159,19 +158,6 @@ export class ThreadEventAdapter {
       content: '',
       startedAt,
     };
-    const warning = clean(message.apiProviderWarning);
-    const warningItem: ThreadItem | undefined = warning
-      ? {
-          id: `${turnId}:warning`,
-          turnId,
-          type: 'system-message',
-          status: 'completed',
-          content: warning,
-          startedAt,
-          completedAt: startedAt,
-        }
-      : undefined;
-
     return [
       ...previousCompletion,
       this.envelope(binding, {
@@ -190,9 +176,6 @@ export class ThreadEventAdapter {
       }),
       this.envelope(binding, { type: 'item/started', item: userItem }),
       this.envelope(binding, { type: 'item/started', item: assistantItem }),
-      ...(warningItem
-        ? [this.envelope(binding, { type: 'item/started' as const, item: warningItem })]
-        : []),
     ];
   }
 

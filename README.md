@@ -82,9 +82,6 @@ Agents GUI 会接入 VS Code 原生源代码管理视图：
 | `agents-gui.context.maxFileChars` | `12000` | 当前文件上下文最大字符数 |
 | `agents-gui.context.maxSelectionChars` | `8000` | 选区上下文最大字符数 |
 | `agents-gui.context.maxDiagnostics` | `12` | 附加诊断的最大数量 |
-| `agents-gui.apiProviders.customProviders` | `[]` | 自定义 API 供应商配置 |
-| `agents-gui.apiProviders.defaultProviderId` | `""` | 全局默认自定义 API 供应商 |
-| `agents-gui.apiProviders.agentProviderByCliId` | `{}` | 每个 Agent 的自定义 API 供应商覆盖配置 |
 | `agents-gui.home.visibleAgentIds` | `[]` | 首页标题区展示的 Agent |
 | `agents-gui.home.agentOrder` | `[]` | 首页标题区 Agent 展示顺序 |
 | `agents-gui.commitMessage.provider` | `"default"` | Git 提交信息生成使用的 CLI，支持 `default`、`ask` 或 CLI 配置 ID |

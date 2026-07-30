@@ -4,14 +4,11 @@ import assert from 'node:assert/strict';
 
 const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
 const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
 const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
 const cliDiscoverySource = readFileSync(new URL('../src/cliDiscovery.ts', import.meta.url), 'utf8');
 const cliProcessRunnerSource = readFileSync(
   new URL('../src/cliProcessRunner.ts', import.meta.url),
-  'utf8'
-);
-const apiProviderClientSource = readFileSync(
-  new URL('../src/apiProviderClient.ts', import.meta.url),
   'utf8'
 );
 const agentRuntimeSource = readFileSync(new URL('../src/agentRuntime.ts', import.meta.url), 'utf8');
@@ -144,7 +141,7 @@ test('refresh providers title action reloads the full sidebar state', () => {
   );
   assert.match(
     sidebarSource,
-    /async refreshProviders\(\): Promise<void> \{[\s\S]*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);[\s\S]*await this\.sendProfiles\(\{ force: true \}\);[\s\S]*await this\.sendHomeAgentSettings\(\);[\s\S]*await this\.sendApiProviderSettings\(\);[\s\S]*await this\.sendCommitMessageSettings\(\);[\s\S]*\}/
+    /async refreshProviders\(\): Promise<void> \{[\s\S]*await this\.postToWebview\(\{ command: 'refreshStarted' \}\);[\s\S]*await this\.sendProfiles\(\{ force: true \}\);[\s\S]*await this\.sendHomeAgentSettings\(\);[\s\S]*await this\.sendCommitMessageSettings\(\);[\s\S]*\}/
   );
   assert.doesNotMatch(
     sidebarSource.slice(
@@ -285,7 +282,7 @@ test('commit generation is wired as a task-scoped application use case', () => {
   );
   assert.match(
     extensionSource,
-    /const textGenerationAdapter = new CliTextGenerationAdapter\(cliManager,/
+    /const textGenerationAdapter = new CliTextGenerationAdapter\(cliManager\);/
   );
   assert.match(
     extensionSource,
@@ -465,21 +462,11 @@ test('CLI process lifecycle stays behind a dedicated process runner', () => {
   assert.match(architectureDoc, /CLI process spawning/);
 });
 
-test('custom API provider model fetching stays behind a provider client adapter', () => {
-  assert.match(sidebarSource, /import \{ ApiProviderClient \} from '\.\/apiProviderClient';/);
-  assert.match(sidebarSource, /private readonly apiProviderClient: ApiProviderClient/);
-  assert.match(
-    sidebarSource,
-    /this\.apiProviderClient\.listModels\(\{ protocol, baseUrl, apiKey \}\)/
-  );
-  assert.doesNotMatch(sidebarSource, /import \* as http from 'http';/);
-  assert.doesNotMatch(sidebarSource, /import \* as https from 'https';/);
-  assert.doesNotMatch(sidebarSource, /function requestJson/);
-  assert.match(apiProviderClientSource, /export class ApiProviderClient/);
-  assert.match(apiProviderClientSource, /import \* as http from 'http';/);
-  assert.match(apiProviderClientSource, /import \* as https from 'https';/);
-  assert.match(apiProviderClientSource, /headers\['anthropic-version'\] = '2023-06-01'/);
-  assert.match(architectureDoc, /custom API provider model-list HTTP calls/);
+test('activation runs local OpenCode cleanup without API runtime injection', () => {
+  assert.match(extensionSource, /await runOpenCodeCleanupOnce\(context\.globalState, openCodeCleanup\)/);
+  assert.doesNotMatch(extensionSource, /resolveApiProviderRuntime|readApiProviderSettings|readOpenCodeConfig/);
+  assert.doesNotMatch(sidebarSource, /OpenCodeConfigSync|sendApiProviderSettings|saveApiProviderSettings/);
+  assert.doesNotMatch(syncedStateSource, /openCodeNativePassthroughCleanup/);
 });
 
 test('packaged build avoids tokenizer wasm runtime assets', () => {

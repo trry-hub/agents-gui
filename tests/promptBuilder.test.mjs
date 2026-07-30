@@ -47,12 +47,6 @@ const {
   parseOpenCodeProviderModels,
   parseOpenCodeModelMetadata,
 } = require('../.test-dist/opencodeAgents.js');
-const {
-  sanitizeApiProviderSettings,
-  resolveApiProviderRuntime,
-  API_PROVIDER_INHERIT,
-} = require('../.test-dist/apiProviders.js');
-const { ApiProviderClient } = require('../.test-dist/apiProviderClient.js');
 const { normalizeMessageText, stripInlineMarkdown } = require('../media/messageText.js');
 const inlineMarkdown = require('../media/inlineMarkdown.js');
 const { extractMessageChoiceLineKeys, extractMessageChoices } = require('../media/messageChoices.js');
@@ -2287,7 +2281,7 @@ test('custom option menus keep hidden native selects out of the tab order', () =
   }
 });
 
-test('manifest exposes title actions and custom API provider settings', () => {
+test('manifest exposes title actions and general settings', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -2304,21 +2298,6 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(titleActions, /view == agents-gui\.sidebar/);
   assert.match(titleActions, /agents-gui\.refreshProviders/);
   assert.match(titleActions, /agents-gui\.openProviderSettings/);
-  assert.ok(properties['agents-gui.apiProviders.customProviders']);
-  assert.ok(properties['agents-gui.apiProviders.defaultProviderId']);
-  assert.ok(properties['agents-gui.apiProviders.agentProviderByCliId']);
-  assert.equal(
-    properties['agents-gui.apiProviders.customProviders'].items.properties.apiKey.type,
-    'string'
-  );
-  assert.deepEqual(
-    properties['agents-gui.apiProviders.customProviders'].items.properties.protocol.enum,
-    ['openai', 'anthropic']
-  );
-  assert.equal(
-    properties['agents-gui.apiProviders.customProviders'].items.properties.models.items.type,
-    'string'
-  );
   assert.ok(properties['agents-gui.home.visibleAgentIds']);
   assert.ok(properties['agents-gui.home.agentOrder']);
   assert.equal(manifest.scripts['package:vsix'], 'npm run package');
@@ -2328,61 +2307,34 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(manifest.scripts['publish:manual'], /vsce publish --packagePath agents-gui-\$\{npm_package_version\}\.vsix/);
   assert.ok(properties['agents-gui.commitMessage.provider']);
   assert.match(html, /id="settingsNavAgents"/);
-  assert.match(html, /id="settingsNavApiProviders"/);
   assert.match(html, /id="settingsNavCommitMessage"/);
   assert.match(html, /class="settings-nav-icon"/);
   assert.match(html, /class="settings-nav-label"[^>]*data-i18n="settings\.agents"/);
-  assert.match(html, /class="settings-nav-label"[^>]*data-i18n="settings\.apiProviders"/);
   assert.match(html, /class="settings-nav-label"[^>]*data-i18n="settings\.commitMessage"/);
   assert.match(html, /id="homeAgentList"/);
   assert.match(html, /id="commitMessageProviderSelect"/);
   assert.match(html, /id="commitMessageLanguageSelect"/);
   assert.match(html, /id="commitMessageMaxDiffChars"/);
-  assert.match(html, /id="apiProviderSettingsPage"/);
   assert.doesNotMatch(html, /aria-modal="true"/);
   assert.match(html, /id="homeAgentsSaveStatus"[^>]*aria-live="polite"/);
-  assert.match(html, /id="apiProviderSaveStatus"[^>]*aria-live="polite"/);
   assert.match(html, /id="commitMessageSaveStatus"[^>]*aria-live="polite"/);
-  assert.match(html, /id="apiProviderApiKey"[^>]*type="password"/);
-  assert.match(html, /id="apiProviderProtocol"/);
-  assert.match(html, /id="apiProviderFetchModels"/);
-  assert.match(html, /id="apiProviderModelOptions"/);
-  assert.match(html, /id="apiProviderApiKeyEnv"[^>]*type="hidden"/);
-  assert.match(script, /const apiProviderApiKey = document\.getElementById\('apiProviderApiKey'\)/);
-  assert.match(script, /const apiProviderProtocol = document\.getElementById\('apiProviderProtocol'\)/);
-  assert.match(script, /command:\s*'fetchApiProviderModels'/);
-  assert.match(script, /apiKeyEnv:\s*sanitizeEnvName\(apiProviderApiKeyEnv\?\.value \|\| provider\.apiKeyEnv \|\| ''\)/);
-  assert.match(script, /case 'apiProviderModelsResult':/);
-  assert.match(sidebarSource, /case 'fetchApiProviderModels':/);
-  assert.match(sidebarSource, /const apiKey = explicitApiKey \|\| \(apiKeyEnv \? process\.env\[apiKeyEnv\] \|\| '' : ''\);/);
-  assert.match(sidebarSource, /this\.apiProviderClient\.listModels\(\{ protocol, baseUrl, apiKey \}\)/);
-  assert.doesNotMatch(sidebarSource, /headers\['anthropic-version'\] = '2023-06-01'/);
-  assert.match(script, /apiKey: String\(provider\.apiKey \|\| ''\)/);
-  assert.match(script, /apiKey: apiProviderApiKey\?\.value\.trim\(\) \|\| ''/);
   assert.match(script, /function visibleInstalledProfiles\(\)/);
   assert.match(script, /function configurableAgentProfiles\(\)/);
   assert.match(script, /function orderedInstalledProfiles\(\)/);
   assert.match(script, /function renderHomeAgentSettings\(\)/);
   assert.match(script, /function renderCommitMessageSettings\(\)/);
-  assert.match(script, /appendApiProviderOption\(commitMessageProviderSelect, 'ask', i18n\.t\('commitSettings\.providerAsk'\)\)/);
   assert.match(script, /const knownProviderIds = new Set\(\[\s*'default',\s*'ask',\s*\.\.\.installedProfiles\(\)\.map\(\(profile\) => profile\.id\),\s*\]\);/s);
-  assert.match(script, /const knownCliIds = profilesLoading\s*\?\s*undefined\s*:\s*new Set\(configurableAgentProfiles\(\)\.map\(\(profile\) => profile\.id\)\);/);
-  assert.match(script, /const availableProfiles = configurableAgentProfiles\(\);[\s\S]*availableProfiles\.forEach\(\(profile\) => \{/);
-  assert.match(script, /apiProviderSettings = normalizeApiProviderSettings\(apiProviderSettings\);/);
   assert.match(script, /function saveCommitMessageSettings\(\)/);
   assert.match(script, /function setSettingsSaveStatus\(section,\s*state,\s*message\)/);
   assert.match(script, /const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;/);
   assert.match(script, /case 'settingsSaveResult':/);
   assert.match(script, /setSettingsSaveStatus\('agents',\s*'saving'\)/);
-  assert.match(script, /setSettingsSaveStatus\('apiProviders',\s*'saving'\)/);
   assert.match(script, /setSettingsSaveStatus\('commitMessage',\s*'saving'\)/);
   assert.match(script, /function moveHomeAgent\(/);
   assert.match(script, /data-home-agent-move/);
   assert.match(script, /agentOrder/);
   assert.match(settingsManagerSource, /config\.get<string\[]>\('agentOrder', \[]\)/);
   assert.match(sidebarSource, /config\.update\('agentOrder', settings\.agentOrder/);
-  assert.match(settingsManagerSource, /filterApiProviderSettingsForInstalledAgents/);
-  assert.match(settingsManagerSource, /profilesById\.has\(cliId\)/);
   assert.match(sidebarSource, /saveCommitMessageSettings/);
   assert.match(sidebarSource, /command:\s*'settingsSaveResult'/);
   assert.match(sidebarSource, /section,\s*ok:\s*true/);
@@ -2410,12 +2362,29 @@ test('manifest exposes title actions and custom API provider settings', () => {
   assert.match(css, /@container \(max-width:\s*700px\)\s*\{[\s\S]*?\.settings-nav-label\s*\{[\s\S]*?display:\s*none;/s);
   assert.match(css, /@container \(max-width:\s*700px\)\s*\{[\s\S]*?\.api-settings-body\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.home-agent-sort\s*\{/);
-  assert.match(script, /saveApiProviderSettings/);
   assert.match(script, /saveHomeAgentSettings/);
   assert.match(script, /saveCommitMessageSettings/);
   assert.match(script, /commitMessageSettings/);
-  assert.match(script, /refreshApiProviderSettings/);
   assert.match(script, /openProviderSettings/);
+});
+
+test('native passthrough removes the custom API provider surface', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const sidebar = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const protocol = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+  const settings = readFileSync(new URL('../src/settingsManager.ts', import.meta.url), 'utf8');
+  const properties = manifest.contributes.configuration.properties;
+
+  assert.equal(properties['agents-gui.apiProviders.customProviders'], undefined);
+  assert.equal(properties['agents-gui.apiProviders.defaultProviderId'], undefined);
+  assert.equal(properties['agents-gui.apiProviders.agentProviderByCliId'], undefined);
+  assert.doesNotMatch(html, /settingsNavApiProviders|settingsSectionApiProviders|apiProviderForm/);
+  assert.doesNotMatch(script, /apiProviderSettings|fetchApiProviderModels|saveApiProviderSettings/);
+  assert.doesNotMatch(sidebar, /ApiProvider|apiProvider|OpenCodeConfigSync|\.sync\(/);
+  assert.doesNotMatch(protocol, /apiProvider|ApiProvider/);
+  assert.doesNotMatch(settings, /apiProvider|ApiProvider/);
 });
 
 test('webview settings reset and reorder controls have durable local feedback', () => {
@@ -2441,135 +2410,6 @@ test('webview commit-message settings reset persists the exact defaults', () => 
   assert.match(script, /renderCommitMessageSettings\(\);\s*setSettingsSaveStatus\('commitMessage', 'saving'\);/s);
   assert.match(script, /vscode\.postMessage\(\{ command: 'saveCommitMessageSettings', settings: commitMessageSettings \}\);/);
   assert.match(script, /commitMessageReset\?\.addEventListener\('click', resetCommitMessageSettings\);/);
-});
-
-test('custom API provider settings can sync explicit keys without leaking them', () => {
-  const settings = sanitizeApiProviderSettings({
-    customProviders: [
-      {
-        id: 'Open Router',
-        name: 'OpenRouter',
-        protocol: 'openai',
-        baseUrl: 'https://openrouter.ai/api/v1',
-        apiKey: 'sk-should-sync',
-        apiKeyEnv: 'OPENROUTER_API_KEY',
-        model: 'anthropic/claude-sonnet',
-        models: ['anthropic/claude-sonnet', 'anthropic/claude-sonnet', 'openai/gpt-4o'],
-        extraEnv: {
-          OPENAI_BASE_URL: 'https://legacy.example/v1',
-          OPENAI_API_KEY: 'legacy-key',
-          'bad-name': 'ignored',
-        },
-        enabled: true,
-      },
-      {
-        id: 'disabled',
-        name: 'Disabled',
-        apiKeyEnv: 'DISABLED_KEY',
-        enabled: false,
-      },
-    ],
-    defaultProviderId: 'open-router',
-    agentProviderByCliId: {
-      opencode: 'open-router',
-      claude: API_PROVIDER_INHERIT,
-      codex: 'disabled',
-    },
-  });
-
-  assert.equal(settings.customProviders[0].id, 'open-router');
-  assert.equal(settings.customProviders[0].protocol, 'openai');
-  assert.equal(settings.customProviders[0].apiKey, 'sk-should-sync');
-  assert.equal(settings.customProviders[0].apiKeyEnv, 'OPENROUTER_API_KEY');
-  assert.deepEqual(settings.customProviders[0].models, ['anthropic/claude-sonnet', 'openai/gpt-4o']);
-  assert.equal(settings.customProviders[0].extraEnv.OPENAI_BASE_URL, 'https://legacy.example/v1');
-  assert.equal(settings.customProviders[0].extraEnv.badname, 'ignored');
-  assert.equal(settings.defaultProviderId, 'open-router');
-  assert.equal(settings.agentProviderByCliId.opencode, 'open-router');
-  assert.equal(settings.agentProviderByCliId.claude, API_PROVIDER_INHERIT);
-  assert.equal(settings.agentProviderByCliId.codex, undefined);
-
-  const runtime = resolveApiProviderRuntime(settings, 'opencode', {
-    OPENROUTER_API_KEY: 'actual-secret',
-  });
-  assert.equal(runtime.env.AGENTS_HUB_API_BASE_URL, 'https://openrouter.ai/api/v1');
-  assert.equal(runtime.env.AGENTS_HUB_API_PROTOCOL, 'openai');
-  assert.equal(runtime.env.AGENTS_HUB_API_MODEL, 'anthropic/claude-sonnet');
-  assert.equal(runtime.env.AGENTS_HUB_API_KEY, 'sk-should-sync');
-  assert.equal(runtime.env.OPENAI_API_KEY, 'sk-should-sync');
-  assert.equal(runtime.env.OPENAI_MODEL, 'anthropic/claude-sonnet');
-  assert.equal(runtime.env.OPENAI_BASE_URL, 'https://openrouter.ai/api/v1');
-  assert.equal(runtime.selectionKey.includes('sk-should-sync'), false);
-  assert.equal(runtime.selectionKey.includes('actual-secret'), false);
-  assert.equal(runtime.warnings.length, 0);
-
-  const aiderRuntime = resolveApiProviderRuntime(settings, 'aider', {});
-  assert.equal(aiderRuntime.env.AIDER_OPENAI_API_BASE, 'https://openrouter.ai/api/v1');
-  assert.equal(aiderRuntime.env.AIDER_OPENAI_API_KEY, 'sk-should-sync');
-  assert.equal(aiderRuntime.env.AIDER_MODEL, 'openai/anthropic/claude-sonnet');
-
-  const gooseRuntime = resolveApiProviderRuntime(settings, 'goose', {});
-  assert.equal(gooseRuntime.env.GOOSE_PROVIDER, 'openai');
-  assert.equal(gooseRuntime.env.GOOSE_MODEL, 'anthropic/claude-sonnet');
-  assert.equal(gooseRuntime.env.OPENAI_HOST, 'https://openrouter.ai/api');
-
-  const fallback = sanitizeApiProviderSettings({
-    customProviders: [{
-      id: 'fallback',
-      name: 'Fallback',
-      apiKeyEnv: 'OPENROUTER_API_KEY',
-      enabled: true,
-    }],
-    defaultProviderId: 'fallback',
-  });
-  assert.equal(
-    resolveApiProviderRuntime(fallback, 'opencode', { OPENROUTER_API_KEY: 'actual-secret' }).env.AGENTS_HUB_API_KEY,
-    'actual-secret'
-  );
-
-  const missing = resolveApiProviderRuntime(fallback, 'opencode', {});
-  assert.equal(missing.provider.name, 'Fallback');
-  assert.equal(missing.env.AGENTS_HUB_API_KEY, undefined);
-  assert.equal(missing.warnings[0].code, 'missingApiKeyEnv');
-});
-
-test('custom API provider client fetches and normalizes provider models', async () => {
-  const requests = [];
-  const server = http.createServer((request, response) => {
-    requests.push({
-      url: request.url,
-      headers: request.headers,
-    });
-    response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({
-      data: [
-        { id: 'zeta-model' },
-        { name: 'alpha-model' },
-        'beta-model',
-        { id: 'alpha-model' },
-      ],
-    }));
-  });
-
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const address = server.address();
-    assert.equal(typeof address, 'object');
-    const baseUrl = `http://127.0.0.1:${address.port}/v1/`;
-    const models = await new ApiProviderClient().listModels({
-      protocol: 'anthropic',
-      baseUrl,
-      apiKey: 'secret-key',
-    });
-
-    assert.deepEqual(models, ['alpha-model', 'beta-model', 'zeta-model']);
-    assert.equal(requests[0].url, '/v1/models');
-    assert.equal(requests[0].headers['x-api-key'], 'secret-key');
-    assert.equal(requests[0].headers['anthropic-version'], '2023-06-01');
-    assert.equal(requests[0].headers.authorization, undefined);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
 });
 
 test('webview toolbar icons and composer controls stay visually centered', () => {
@@ -2719,7 +2559,7 @@ test('webview refreshes context after a concrete provider is active', () => {
   );
   assert.match(script, /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/);
   assert.match(script, /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/);
-  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*vscode\.postMessage\(\{ command: 'refreshApiProviderSettings' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*mountCodexRenderer\(\);[\s\S]*renderAll\(\);/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*mountCodexRenderer\(\);[\s\S]*renderAll\(\);/);
 });
 
 test('all model selection paths refresh context and custom input commits cannot stay stale', () => {
@@ -2766,7 +2606,7 @@ test('webview only applies the latest correlated context summary for the active 
   assert.match(script, /if \(!matches\) \{\s*break;\s*\}/);
   assert.match(script, /contextSummaryPending = false;\s*contextSummary = message\.summary;/);
   assert.doesNotMatch(
-    script.slice(script.indexOf("case 'contextSummary':"), script.indexOf("case 'apiProviderSettings':")),
+    script.slice(script.indexOf("case 'contextSummary':"), script.indexOf("case 'openCodeNativeCommandResult':")),
     /latestContextRequest = null/
   );
 });
@@ -3486,7 +3326,7 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(script, /case 'themes':/);
   assert.match(script, /showOpenCodeStatusDialog\('themes', \{ commandQuery: sourceQuery \}\)/);
   assert.match(script, /case 'connect':/);
-  assert.match(script, /openSettingsPage\('apiProviders'\)/);
+  assert.doesNotMatch(script, /openSettingsPage\('apiProviders'\)/);
   assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
   assert.match(script, /function renderOpenCodeGroupedOptionDialogBody\(body, kind\)/);
   assert.match(script, /const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState\.optionDialogKinds\(\);/);

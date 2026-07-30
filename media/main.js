@@ -147,12 +147,8 @@
   let customModelByProvider = saved.customModelByProvider || {};
   let activeRuntimeByProvider = saved.activeRuntimeByProvider || {};
   let activePermissionByProvider = saved.activePermissionByProvider || {};
-  let apiProviderSettings = { customProviders: [], defaultProviderId: '', agentProviderByCliId: {} };
   let homeAgentSettings = { visibleAgentIds: [], agentOrder: [] };
   let commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
-  let apiProviderEnvStatusById = {};
-  let editingApiProviderId = '';
-  let apiProviderModelFetchRequestId = 0;
   let activeSettingsSection = 'agents';
   const settingsSaveStatusTimers = {};
   let mcpServersByCli = {};
@@ -273,15 +269,13 @@
   const composerSettingsBtn = document.getElementById('composerSettingsBtn');
   const newChatBtn = document.getElementById('newChatBtn');
   const reloadBtn = document.getElementById('reloadBtn');
-  const apiSettingsPage = document.getElementById('apiProviderSettingsPage');
-  const apiSettingsBack = document.getElementById('apiProviderSettingsClose');
+  const apiSettingsPage = document.querySelector('.api-settings-page');
+  const apiSettingsBack = document.querySelector('.api-settings-back');
   const settingsNav = document.getElementById('settingsNav');
   const settingsNavAgents = document.getElementById('settingsNavAgents');
-  const settingsNavApiProviders = document.getElementById('settingsNavApiProviders');
   const settingsNavCommitMessage = document.getElementById('settingsNavCommitMessage');
   const settingsNavMcp = document.getElementById('settingsNavMcp');
   const settingsSectionAgents = document.getElementById('settingsSectionAgents');
-  const settingsSectionApiProviders = document.getElementById('settingsSectionApiProviders');
   const settingsSectionCommitMessage = document.getElementById('settingsSectionCommitMessage');
   const settingsSectionMcp = document.getElementById('settingsSectionMcp');
   const mcpConfigPath = document.getElementById('mcpConfigPath');
@@ -319,27 +313,6 @@
   const commitMessageReset = document.getElementById('commitMessageReset');
   const commitMessageSave = document.getElementById('commitMessageSave');
   const commitMessageSaveStatus = document.getElementById('commitMessageSaveStatus');
-  const apiProviderList = document.getElementById('apiProviderList');
-  const apiProviderAdd = document.getElementById('apiProviderAdd');
-  const apiProviderForm = document.getElementById('apiProviderForm');
-  const apiProviderName = document.getElementById('apiProviderName');
-  const apiProviderProtocol = document.getElementById('apiProviderProtocol');
-  const apiProviderBaseUrl = document.getElementById('apiProviderBaseUrl');
-  const apiProviderApiKey = document.getElementById('apiProviderApiKey');
-  const apiProviderApiKeyEnv = document.getElementById('apiProviderApiKeyEnv');
-  const apiProviderModel = document.getElementById('apiProviderModel');
-  const apiProviderModelOptions = document.getElementById('apiProviderModelOptions');
-  const apiProviderFetchModels = document.getElementById('apiProviderFetchModels');
-  const apiProviderModelStatus = document.getElementById('apiProviderModelStatus');
-  const apiProviderEnabled = document.getElementById('apiProviderEnabled');
-  const apiProviderExtraEnv = document.getElementById('apiProviderExtraEnv');
-  const apiProviderAddEnv = document.getElementById('apiProviderAddEnv');
-  const apiProviderDefaultSelect = document.getElementById('apiProviderDefaultSelect');
-  const apiProviderAgentBindings = document.getElementById('apiProviderAgentBindings');
-  const apiProviderSettingsError = document.getElementById('apiProviderSettingsError');
-  const apiProviderSaveStatus = document.getElementById('apiProviderSaveStatus');
-  const apiProviderDelete = document.getElementById('apiProviderDelete');
-  const apiProviderCancel = document.getElementById('apiProviderCancel');
   const SLASH_COMMANDS = slashCommands.createBaseSlashCommands((key, params) => i18n.t(key, params));
   let slashMatches = [];
   let slashActiveIndex = 0;
@@ -1544,16 +1517,13 @@
     if (!apiSettingsPage) {
       return;
     }
-    activeSettingsSection = ['agents', 'apiProviders', 'commitMessage', 'mcp'].includes(section) ? section : 'agents';
-    if (!editingApiProviderId) {
-      editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
-    }
+    activeSettingsSection = ['agents', 'commitMessage', 'mcp'].includes(section)
+      ? section
+      : 'agents';
     renderSettingsPage();
     apiSettingsPage.hidden = false;
     document.body.classList.add('is-api-settings-open');
-    const focusTarget = activeSettingsSection === 'apiProviders'
-      ? apiProviderName
-      : activeSettingsSection === 'commitMessage'
+    const focusTarget = activeSettingsSection === 'commitMessage'
         ? commitMessageProviderSelect
         : activeSettingsSection === 'mcp'
           ? mcpServerList?.querySelector('.api-provider-list-item') || mcpServerAdd
@@ -1564,12 +1534,16 @@
     }
   }
 
+  function closeSettingsPage() {
+    if (apiSettingsPage) {
+      apiSettingsPage.hidden = true;
+    }
+    document.body.classList.remove('is-api-settings-open');
+  }
+
   function renderSettingsPage() {
     renderSettingsSection();
     switch (activeSettingsSection) {
-      case 'apiProviders':
-        renderApiProviderSettings();
-        break;
       case 'commitMessage':
         renderCommitMessageSettings();
         break;
@@ -1584,22 +1558,16 @@
 
   function renderSettingsSection() {
     const isAgents = activeSettingsSection === 'agents';
-    const isApiProviders = activeSettingsSection === 'apiProviders';
     const isCommitMessage = activeSettingsSection === 'commitMessage';
     const isMcp = activeSettingsSection === 'mcp';
     settingsNavAgents?.classList.toggle('is-active', isAgents);
-    settingsNavApiProviders?.classList.toggle('is-active', isApiProviders);
     settingsNavCommitMessage?.classList.toggle('is-active', isCommitMessage);
     settingsNavMcp?.classList.toggle('is-active', isMcp);
     settingsNavAgents?.setAttribute('aria-current', isAgents ? 'page' : 'false');
-    settingsNavApiProviders?.setAttribute('aria-current', isApiProviders ? 'page' : 'false');
     settingsNavCommitMessage?.setAttribute('aria-current', isCommitMessage ? 'page' : 'false');
     settingsNavMcp?.setAttribute('aria-current', isMcp ? 'page' : 'false');
     if (settingsSectionAgents) {
       settingsSectionAgents.hidden = !isAgents;
-    }
-    if (settingsSectionApiProviders) {
-      settingsSectionApiProviders.hidden = !isApiProviders;
     }
     if (settingsSectionCommitMessage) {
       settingsSectionCommitMessage.hidden = !isCommitMessage;
@@ -1788,8 +1756,6 @@
     switch (section) {
       case 'agents':
         return homeAgentsSaveStatus;
-      case 'apiProviders':
-        return apiProviderSaveStatus;
       case 'commitMessage':
         return commitMessageSaveStatus;
       case 'mcp':
@@ -1860,10 +1826,10 @@
     }
 
     commitMessageProviderSelect.innerHTML = '';
-    appendApiProviderOption(commitMessageProviderSelect, 'default', i18n.t('commitSettings.providerDefault'));
-    appendApiProviderOption(commitMessageProviderSelect, 'ask', i18n.t('commitSettings.providerAsk'));
+    appendCliOption(commitMessageProviderSelect, 'default', i18n.t('commitSettings.providerDefault'));
+    appendCliOption(commitMessageProviderSelect, 'ask', i18n.t('commitSettings.providerAsk'));
     profiles.forEach((profile) => {
-      appendApiProviderOption(commitMessageProviderSelect, profile.id, profile.name);
+      appendCliOption(commitMessageProviderSelect, profile.id, profile.name);
     });
 
     const normalized = normalizeCommitMessageSettings(commitMessageSettings);
@@ -2225,474 +2191,6 @@
     vscode.postMessage({ command: 'toggleMcpServer', cliId: currentMcpCliId(), name, enabled });
   }
 
-  function normalizeApiProviderSettings(value) {
-    const record = value && typeof value === 'object' ? value : {};
-    const providers = Array.isArray(record.customProviders)
-      ? record.customProviders
-          .filter((provider) => provider && typeof provider === 'object')
-          .map((provider, index) => ({
-            id: sanitizeApiProviderId(provider.id || provider.name || `provider-${index + 1}`),
-            name: String(provider.name || `Custom Provider ${index + 1}`).trim(),
-            protocol: normalizeApiProviderProtocol(provider.protocol),
-            baseUrl: String(provider.baseUrl || '').trim(),
-            apiKey: String(provider.apiKey || ''),
-            apiKeyEnv: sanitizeEnvName(provider.apiKeyEnv || ''),
-            model: String(provider.model || '').trim(),
-            models: normalizeModelList(provider.models),
-            extraEnv: normalizeExtraEnv(provider.extraEnv),
-            enabled: provider.enabled !== false,
-          }))
-      : [];
-    const enabledIds = new Set(providers.filter((provider) => provider.enabled).map((provider) => provider.id));
-    const defaultProviderId = enabledIds.has(record.defaultProviderId) ? record.defaultProviderId : '';
-    const agentProviderByCliId = {};
-    const knownCliIds = profilesLoading
-      ? undefined
-      : new Set(configurableAgentProfiles().map((profile) => profile.id));
-    const bindings = record.agentProviderByCliId && typeof record.agentProviderByCliId === 'object'
-      ? record.agentProviderByCliId
-      : {};
-    Object.entries(bindings).forEach(([cliId, providerId]) => {
-      if (knownCliIds && !knownCliIds.has(cliId)) {
-        return;
-      }
-      if (providerId === 'inherit' || enabledIds.has(providerId)) {
-        agentProviderByCliId[cliId] = providerId;
-      }
-    });
-    return { customProviders: providers, defaultProviderId, agentProviderByCliId };
-  }
-
-  function normalizeExtraEnv(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return {};
-    }
-    return Object.entries(value).reduce((result, [key, rawValue]) => {
-      const envName = sanitizeEnvName(key);
-      if (envName && typeof rawValue === 'string') {
-        result[envName] = rawValue;
-      }
-      return result;
-    }, {});
-  }
-
-  function normalizeApiProviderProtocol(value) {
-    return value === 'anthropic' ? 'anthropic' : 'openai';
-  }
-
-  function normalizeModelList(value) {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    const seen = new Set();
-    const result = [];
-    value.forEach((item) => {
-      const model = String(item || '').trim();
-      if (!model || seen.has(model)) {
-        return;
-      }
-      seen.add(model);
-      result.push(model);
-    });
-    return result;
-  }
-
-  function sanitizeApiProviderId(value) {
-    const id = String(value || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    return id || `provider-${Date.now()}`;
-  }
-
-  function sanitizeEnvName(value) {
-    return String(value || '').replace(/[^A-Za-z0-9_]/g, '');
-  }
-
-  function openApiProviderSettings() {
-    openSettingsPage('agents');
-  }
-
-  function closeApiProviderSettings() {
-    if (apiSettingsPage) {
-      apiSettingsPage.hidden = true;
-    }
-    document.body.classList.remove('is-api-settings-open');
-    clearApiSettingsError();
-  }
-
-  function createApiProviderDraft(id) {
-    return {
-      id: id || `custom-${Date.now()}`,
-      name: '',
-      protocol: 'openai',
-      baseUrl: '',
-      apiKey: '',
-      apiKeyEnv: '',
-      model: '',
-      models: [],
-      extraEnv: {},
-      enabled: true,
-    };
-  }
-
-  function currentApiProvider() {
-    return apiProviderSettings.customProviders.find((provider) => provider.id === editingApiProviderId)
-      || apiProviderSettings.customProviders[0]
-      || undefined;
-  }
-
-  function renderApiProviderSettings() {
-    renderApiProviderList();
-    renderApiProviderForm();
-    renderApiProviderBindings();
-  }
-
-  function renderApiProviderList() {
-    if (!apiProviderList) {
-      return;
-    }
-    apiProviderList.innerHTML = '';
-    if (apiProviderSettings.customProviders.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'api-provider-status';
-      empty.textContent = i18n.t('apiSettings.noProviders');
-      apiProviderList.appendChild(empty);
-      return;
-    }
-
-    apiProviderSettings.customProviders.forEach((provider) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `api-provider-list-item${provider.id === editingApiProviderId ? ' is-active' : ''}${provider.enabled ? '' : ' is-disabled'}`;
-      button.dataset.providerId = provider.id;
-
-      const name = document.createElement('span');
-      name.textContent = provider.name || provider.id;
-      button.appendChild(name);
-
-      const status = document.createElement('span');
-      status.className = 'api-provider-status';
-      status.textContent = provider.enabled ? '' : i18n.t('apiSettings.disabled');
-      const envStatus = apiProviderEnvStatusById[provider.id];
-      if (provider.enabled && envStatus?.apiKeyEnv && envStatus.apiKeyEnvAvailable === false) {
-        status.textContent = i18n.t('apiSettings.missingKeyEnv', { envName: envStatus.apiKeyEnv });
-      }
-      button.appendChild(status);
-
-      apiProviderList.appendChild(button);
-    });
-  }
-
-  function renderApiProviderForm() {
-    const provider = currentApiProvider();
-    const disabled = !provider;
-    [apiProviderName, apiProviderProtocol, apiProviderBaseUrl, apiProviderApiKey, apiProviderApiKeyEnv, apiProviderModel].forEach((field) => {
-      if (field) {
-        field.disabled = disabled;
-      }
-    });
-    if (apiProviderFetchModels) {
-      apiProviderFetchModels.disabled = disabled;
-    }
-    if (apiProviderEnabled) {
-      apiProviderEnabled.disabled = disabled;
-    }
-    if (apiProviderDelete) {
-      apiProviderDelete.disabled = disabled;
-    }
-
-    if (!provider) {
-      if (apiProviderName) apiProviderName.value = '';
-      if (apiProviderProtocol) apiProviderProtocol.value = 'openai';
-      if (apiProviderBaseUrl) apiProviderBaseUrl.value = '';
-      if (apiProviderApiKey) apiProviderApiKey.value = '';
-      if (apiProviderApiKeyEnv) apiProviderApiKeyEnv.value = '';
-      if (apiProviderModel) apiProviderModel.value = '';
-      if (apiProviderEnabled) apiProviderEnabled.checked = true;
-      renderApiProviderModelOptions([]);
-      setApiProviderModelStatus('');
-      renderExtraEnvRows({});
-      return;
-    }
-
-    editingApiProviderId = provider.id;
-    if (apiProviderName) apiProviderName.value = provider.name;
-    if (apiProviderProtocol) apiProviderProtocol.value = normalizeApiProviderProtocol(provider.protocol);
-    if (apiProviderBaseUrl) apiProviderBaseUrl.value = provider.baseUrl;
-    if (apiProviderApiKey) apiProviderApiKey.value = provider.apiKey;
-    if (apiProviderApiKeyEnv) apiProviderApiKeyEnv.value = provider.apiKeyEnv;
-    if (apiProviderModel) apiProviderModel.value = provider.model;
-    if (apiProviderEnabled) apiProviderEnabled.checked = provider.enabled;
-    renderApiProviderModelOptions(provider.models);
-    setApiProviderModelStatus('');
-    renderExtraEnvRows(provider.extraEnv);
-  }
-
-  function renderApiProviderModelOptions(models) {
-    if (!apiProviderModelOptions) {
-      return;
-    }
-    apiProviderModelOptions.innerHTML = '';
-    normalizeModelList(models).forEach((model) => {
-      const option = document.createElement('option');
-      option.value = model;
-      apiProviderModelOptions.appendChild(option);
-    });
-  }
-
-  function setApiProviderModelStatus(text, state = '') {
-    if (!apiProviderModelStatus) {
-      return;
-    }
-    apiProviderModelStatus.textContent = text;
-    apiProviderModelStatus.dataset.state = state;
-  }
-
-  function renderExtraEnvRows(extraEnv) {
-    if (!apiProviderExtraEnv) {
-      return;
-    }
-    apiProviderExtraEnv.innerHTML = '';
-    const entries = Object.entries(extraEnv);
-    if (entries.length === 0) {
-      entries.push(['', '']);
-    }
-    entries.forEach(([key, value]) => {
-      apiProviderExtraEnv.appendChild(createExtraEnvRow(key, value));
-    });
-  }
-
-  function createExtraEnvRow(key, value) {
-    const row = document.createElement('div');
-    row.className = 'api-extra-env-row';
-
-    const keyInput = document.createElement('input');
-    keyInput.dataset.envKey = 'true';
-    keyInput.placeholder = 'ENV_NAME';
-    keyInput.value = key;
-    row.appendChild(keyInput);
-
-    const valueInput = document.createElement('input');
-    valueInput.dataset.envValue = 'true';
-    valueInput.placeholder = 'value';
-    valueInput.value = value;
-    row.appendChild(valueInput);
-
-    const remove = document.createElement('button');
-    remove.className = 'api-env-remove';
-    remove.type = 'button';
-    remove.dataset.removeEnv = 'true';
-    remove.textContent = '×';
-    row.appendChild(remove);
-    return row;
-  }
-
-  function renderApiProviderBindings() {
-    renderApiProviderDefaultSelect();
-    if (!apiProviderAgentBindings) {
-      return;
-    }
-    apiProviderAgentBindings.innerHTML = '';
-    const availableProfiles = configurableAgentProfiles();
-    if (availableProfiles.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'api-provider-status';
-      empty.textContent = i18n.t('provider.noInstalled');
-      apiProviderAgentBindings.appendChild(empty);
-      return;
-    }
-    availableProfiles.forEach((profile) => {
-      const row = document.createElement('label');
-      row.className = 'api-agent-binding';
-
-      const label = document.createElement('span');
-      label.className = 'api-agent-binding-label';
-      label.textContent = profile.name;
-      row.appendChild(label);
-
-      const select = document.createElement('select');
-      select.dataset.cliId = profile.id;
-      appendApiProviderOption(select, 'inherit', i18n.t('apiSettings.inherit'));
-      enabledApiProviders().forEach((provider) => {
-        appendApiProviderOption(select, provider.id, provider.name);
-      });
-      select.value = apiProviderSettings.agentProviderByCliId[profile.id] || 'inherit';
-      row.appendChild(select);
-
-      apiProviderAgentBindings.appendChild(row);
-    });
-  }
-
-  function renderApiProviderDefaultSelect() {
-    if (!apiProviderDefaultSelect) {
-      return;
-    }
-    apiProviderDefaultSelect.innerHTML = '';
-    appendApiProviderOption(apiProviderDefaultSelect, '', i18n.t('apiSettings.none'));
-    enabledApiProviders().forEach((provider) => {
-      appendApiProviderOption(apiProviderDefaultSelect, provider.id, provider.name);
-    });
-    apiProviderDefaultSelect.value = apiProviderSettings.defaultProviderId || '';
-  }
-
-  function appendApiProviderOption(select, value, label) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    select.appendChild(option);
-  }
-
-  function enabledApiProviders() {
-    return apiProviderSettings.customProviders.filter((provider) => provider.enabled);
-  }
-
-  function collectApiProviderForm() {
-    const provider = currentApiProvider() || createApiProviderDraft(editingApiProviderId);
-    const protocol = normalizeApiProviderProtocol(apiProviderProtocol?.value);
-    const baseUrl = apiProviderBaseUrl?.value.trim() || '';
-    const name = apiProviderName?.value.trim() || inferApiProviderName(protocol, baseUrl);
-    if (!name) {
-      showApiSettingsError(i18n.t('apiSettings.nameRequired'));
-      return undefined;
-    }
-
-    const nextProvider = {
-      ...provider,
-      name,
-      protocol,
-      baseUrl,
-      apiKey: apiProviderApiKey?.value.trim() || '',
-      apiKeyEnv: sanitizeEnvName(apiProviderApiKeyEnv?.value || provider.apiKeyEnv || ''),
-      model: apiProviderModel?.value.trim() || '',
-      models: normalizeModelList(provider.models),
-      enabled: true,
-      extraEnv: { ...provider.extraEnv },
-    };
-    const providers = apiProviderSettings.customProviders.some((item) => item.id === nextProvider.id)
-      ? apiProviderSettings.customProviders.map((item) => item.id === nextProvider.id ? nextProvider : item)
-      : [...apiProviderSettings.customProviders, nextProvider];
-    const enabledIds = new Set(providers.filter((item) => item.enabled).map((item) => item.id));
-    const defaultProviderId = enabledIds.has(apiProviderSettings.defaultProviderId)
-      ? apiProviderSettings.defaultProviderId
-      : (nextProvider.enabled ? nextProvider.id : '');
-    const agentProviderByCliId = Object.fromEntries(
-      Object.entries(apiProviderSettings.agentProviderByCliId || {}).filter(([, providerId]) => (
-        providerId === 'inherit' || enabledIds.has(providerId)
-      ))
-    );
-
-    return normalizeApiProviderSettings({
-      customProviders: providers,
-      defaultProviderId,
-      agentProviderByCliId,
-    });
-  }
-
-  function inferApiProviderName(protocol, baseUrl) {
-    try {
-      const hostname = new URL(baseUrl).hostname.replace(/^www\./, '');
-      if (hostname) {
-        return hostname;
-      }
-    } catch {
-      // Use the protocol label below when the URL is empty or incomplete.
-    }
-    return protocol === 'anthropic' ? 'Anthropic compatible' : 'OpenAI compatible';
-  }
-
-  function collectExtraEnvRows() {
-    const result = {};
-    apiProviderExtraEnv?.querySelectorAll('.api-extra-env-row').forEach((row) => {
-      const key = sanitizeEnvName(row.querySelector('[data-env-key]')?.value || '');
-      const value = row.querySelector('[data-env-value]')?.value || '';
-      if (key) {
-        result[key] = value;
-      }
-    });
-    return result;
-  }
-
-  function showApiSettingsError(text) {
-    if (!apiProviderSettingsError) {
-      return;
-    }
-    apiProviderSettingsError.textContent = text;
-    apiProviderSettingsError.hidden = false;
-  }
-
-  function clearApiSettingsError() {
-    if (!apiProviderSettingsError) {
-      return;
-    }
-    apiProviderSettingsError.textContent = '';
-    apiProviderSettingsError.hidden = true;
-  }
-
-  function saveApiProviderSettings() {
-    const next = collectApiProviderForm();
-    if (!next) {
-      return;
-    }
-    apiProviderSettings = next;
-    clearApiSettingsError();
-    setSettingsSaveStatus('apiProviders', 'saving');
-    vscode.postMessage({ command: 'saveApiProviderSettings', settings: apiProviderSettings });
-    renderApiProviderSettings();
-  }
-
-  function requestApiProviderModels() {
-    const provider = currentApiProvider();
-    if (!provider) {
-      return;
-    }
-    const requestId = ++apiProviderModelFetchRequestId;
-    setApiProviderModelStatus(i18n.t('apiSettings.fetchingModels'), 'loading');
-    if (apiProviderFetchModels) {
-      apiProviderFetchModels.disabled = true;
-    }
-    vscode.postMessage({
-      command: 'fetchApiProviderModels',
-      requestId,
-      provider: {
-        protocol: normalizeApiProviderProtocol(apiProviderProtocol?.value),
-        baseUrl: apiProviderBaseUrl?.value.trim() || '',
-        apiKey: apiProviderApiKey?.value.trim() || '',
-        apiKeyEnv: sanitizeEnvName(apiProviderApiKeyEnv?.value || provider.apiKeyEnv || ''),
-      },
-    });
-  }
-
-  function handleApiProviderModelsResult(message) {
-    if (message.requestId !== apiProviderModelFetchRequestId) {
-      return;
-    }
-    if (apiProviderFetchModels) {
-      apiProviderFetchModels.disabled = !currentApiProvider();
-    }
-    if (!message.ok) {
-      const detail = typeof message.message === 'string' ? message.message : '';
-      setApiProviderModelStatus(i18n.t('apiSettings.fetchModelsFailed', { message: detail || 'unknown error' }), 'error');
-      return;
-    }
-    const models = normalizeModelList(message.models);
-    const provider = currentApiProvider();
-    if (provider) {
-      provider.models = models;
-      if (!apiProviderModel?.value && models[0]) {
-        provider.model = models[0];
-        apiProviderModel.value = models[0];
-      }
-    }
-    renderApiProviderModelOptions(models);
-    setApiProviderModelStatus(
-      models.length
-        ? i18n.t('apiSettings.fetchModelsSuccess', { count: String(models.length) })
-        : i18n.t('apiSettings.fetchModelsEmpty'),
-      models.length ? 'success' : 'info'
-    );
-  }
 
   function providerStateLabel(profile) {
     if (!profile?.installed) {
@@ -3691,7 +3189,7 @@
         return;
       case 'connect':
         closeComposerMenus();
-        openSettingsPage('apiProviders');
+        openSettingsPage('agents');
         return;
       case 'org':
         closeComposerMenus();
@@ -3832,7 +3330,7 @@
         return;
       case 'settings':
         hideSlashPalette();
-        vscode.postMessage({ command: 'openSettings', section: 'apiProviders' });
+        vscode.postMessage({ command: 'openSettings', section: 'agents' });
         return;
       default:
         return;
@@ -5145,7 +4643,7 @@
     connect.textContent = 'Connect provider';
     connect.addEventListener('click', () => {
       closeOpenCodeStatusDialog({ focusPrompt: false });
-      openSettingsPage('apiProviders');
+      openSettingsPage('agents');
     });
     actions.appendChild(connect);
 
@@ -9760,15 +9258,14 @@
     vscode.postMessage({ command: 'openSettings' });
   });
 
-  apiSettingsBack?.addEventListener('click', closeApiProviderSettings);
-  apiProviderCancel?.addEventListener('click', closeApiProviderSettings);
+  apiSettingsBack?.addEventListener('click', closeSettingsPage);
 
   settingsNav?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-settings-section]');
     if (!button) {
       return;
     }
-    activeSettingsSection = ['agents', 'apiProviders', 'commitMessage'].includes(button.dataset.settingsSection)
+    activeSettingsSection = ['agents', 'commitMessage', 'mcp'].includes(button.dataset.settingsSection)
       ? button.dataset.settingsSection
       : 'agents';
     renderSettingsPage();
@@ -9802,71 +9299,6 @@
   commitMessageSave?.addEventListener('click', saveCommitMessageSettings);
   commitMessageReset?.addEventListener('click', resetCommitMessageSettings);
 
-  apiProviderAdd?.addEventListener('click', () => {
-    const provider = createApiProviderDraft();
-    apiProviderSettings = {
-      ...apiProviderSettings,
-      customProviders: [...apiProviderSettings.customProviders, provider],
-    };
-    editingApiProviderId = provider.id;
-    clearApiSettingsError();
-    renderApiProviderSettings();
-    apiProviderName?.focus();
-  });
-
-  apiProviderList?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-provider-id]');
-    if (!button) {
-      return;
-    }
-    editingApiProviderId = button.dataset.providerId;
-    clearApiSettingsError();
-    renderApiProviderSettings();
-  });
-
-  apiProviderAddEnv?.addEventListener('click', () => {
-    apiProviderExtraEnv?.appendChild(createExtraEnvRow('', ''));
-  });
-
-  apiProviderExtraEnv?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-remove-env]');
-    if (!button) {
-      return;
-    }
-    const row = button.closest('.api-extra-env-row');
-    row?.remove();
-    if (!apiProviderExtraEnv.children.length) {
-      apiProviderExtraEnv.appendChild(createExtraEnvRow('', ''));
-    }
-  });
-
-  apiProviderFetchModels?.addEventListener('click', requestApiProviderModels);
-
-  apiProviderDelete?.addEventListener('click', () => {
-    const provider = currentApiProvider();
-    if (!provider) {
-      return;
-    }
-    const customProviders = apiProviderSettings.customProviders.filter((item) => item.id !== provider.id);
-    const agentProviderByCliId = Object.fromEntries(
-      Object.entries(apiProviderSettings.agentProviderByCliId).filter(([, providerId]) => providerId !== provider.id)
-    );
-    apiProviderSettings = normalizeApiProviderSettings({
-      customProviders,
-      defaultProviderId: apiProviderSettings.defaultProviderId === provider.id ? '' : apiProviderSettings.defaultProviderId,
-      agentProviderByCliId,
-    });
-    editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
-    clearApiSettingsError();
-    setSettingsSaveStatus('apiProviders', 'saving');
-    vscode.postMessage({ command: 'saveApiProviderSettings', settings: apiProviderSettings });
-    renderApiProviderSettings();
-  });
-
-  apiProviderForm?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    saveApiProviderSettings();
-  });
 
   settingsNavMcp?.addEventListener('click', () => {
     openSettingsPage('mcp');
@@ -10253,7 +9685,7 @@
     if (action === 'openSettings') {
       event.preventDefault();
       event.stopPropagation();
-      vscode.postMessage({ command: 'openSettings', section: button.dataset.settingsSection || 'apiProviders' });
+      vscode.postMessage({ command: 'openSettings', section: button.dataset.settingsSection || 'agents' });
       return;
     }
 
@@ -10326,7 +9758,7 @@
         return;
       }
       if (apiSettingsPage && !apiSettingsPage.hidden) {
-        closeApiProviderSettings();
+        closeSettingsPage();
         return;
       }
       if (slashPaletteVisible()) {
@@ -10358,7 +9790,6 @@
         profilesLoading = false;
         profiles = message.profiles || [];
         setupProfiles = normalizeSetupProfiles(message.setupProfiles);
-        apiProviderSettings = normalizeApiProviderSettings(apiProviderSettings);
         {
           const availableProfiles = visibleInstalledProfiles();
           const storedAgentModes = persistableAgentModeMap(message.activeAgentModeByProvider);
@@ -10447,17 +9878,7 @@
         renderOpenCodeSidebar();
         renderOpenCodeStatusDialog();
         break;
-      case 'apiProviderSettings':
-        apiProviderSettings = normalizeApiProviderSettings(message.settings);
-        apiProviderEnvStatusById = message.envStatusByProviderId || {};
-        if (!editingApiProviderId || !apiProviderSettings.customProviders.some((provider) => provider.id === editingApiProviderId)) {
-          editingApiProviderId = apiProviderSettings.customProviders[0]?.id || '';
-        }
-        renderSettingsPage();
-        break;
-      case 'apiProviderModelsResult':
-        handleApiProviderModelsResult(message);
-        break;
+
       case 'settingsSaveResult': {
         if (message.ok) {
           setSettingsSaveStatus(message.section, 'success');
@@ -10585,9 +10006,6 @@
               index: assistant.index,
               buffer: '',
             };
-            if (message.apiProviderWarning) {
-              addMessage(message.cliId, 'system', normalizeMessageText(message.apiProviderWarning), undefined, false, threadId);
-            }
           }
         }
         persist();
@@ -10670,7 +10088,6 @@
   });
 
   vscode.postMessage({ command: 'checkProfiles' });
-  vscode.postMessage({ command: 'refreshApiProviderSettings' });
   applySessionHistoryWidth(sessionHistoryWidth);
   initSessionHistoryResizer();
   mountCodexRenderer();

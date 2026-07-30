@@ -1,9 +1,4 @@
 import * as vscode from 'vscode';
-import {
-  sanitizeApiProviderSettings,
-  type ApiProviderSettings,
-  type CustomApiProviderConfig,
-} from './apiProviders';
 import type { AssistantContextOptions } from './assistantTypes';
 import { CLI_PROFILES, getCliProfile, type CliProfile } from './cliProfiles';
 import {
@@ -74,34 +69,6 @@ function normalizeContextOptions(value: unknown): Partial<AssistantContextOption
 
 export class SettingsManager {
   constructor(private readonly state?: vscode.Memento) {}
-
-  getApiProviderSettings(profilesById: Map<string, CliProfile>): ApiProviderSettings {
-    const config = vscode.workspace.getConfiguration('agents-gui.apiProviders');
-    return this.filterApiProviderSettingsForInstalledAgents(
-      sanitizeApiProviderSettings({
-        customProviders: config.get<CustomApiProviderConfig[]>('customProviders', []),
-        defaultProviderId: config.get<string>('defaultProviderId', ''),
-        agentProviderByCliId: config.get<Record<string, string>>('agentProviderByCliId', {}),
-      }),
-      profilesById
-    );
-  }
-
-  private filterApiProviderSettingsForInstalledAgents(
-    settings: ApiProviderSettings,
-    profilesById: Map<string, CliProfile>
-  ): ApiProviderSettings {
-    if (profilesById.size === 0) {
-      return settings;
-    }
-
-    return {
-      ...settings,
-      agentProviderByCliId: Object.fromEntries(
-        Object.entries(settings.agentProviderByCliId).filter(([cliId]) => profilesById.has(cliId))
-      ),
-    };
-  }
 
   getHomeAgentSettings(): HomeAgentSettings {
     const config = vscode.workspace.getConfiguration('agents-gui.home');

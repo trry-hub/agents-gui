@@ -52,7 +52,7 @@
     <section class="api-settings-page" id="apiProviderSettingsPage" aria-labelledby="settingsTitle" hidden>
       <div class="api-settings-panel">
         <header class="api-settings-header">
-          <button class="api-settings-back tool-button" id="apiProviderSettingsClose" type="button" data-i18n-title="apiSettings.back" data-i18n-aria="apiSettings.back" aria-label="Back">
+          <button class="api-settings-back tool-button" id="apiProviderSettingsClose" type="button" data-i18n-title="action.dismiss" data-i18n-aria="action.dismiss" aria-label="Back">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4"/></svg>
           </button>
           <div class="brand-mark settings-brand-mark" aria-label="Agents GUI" title="Agents GUI">
@@ -73,12 +73,6 @@
                 <svg viewBox="0 0 16 16"><path d="M8 2.7 3.5 5.2v5.5L8 13.3l4.5-2.6V5.2L8 2.7z"/><path d="M5.7 6.3h4.6M5.7 8h4.6M5.7 9.7h2.7"/></svg>
               </span>
               <span class="settings-nav-label" data-i18n="settings.agents"></span>
-            </button>
-            <button class="settings-nav-item" id="settingsNavApiProviders" type="button" data-settings-section="apiProviders" data-i18n-aria="settings.apiProviders" aria-label="API Providers">
-              <span class="settings-nav-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16"><path d="M3.2 5.2c0-1 2.1-1.9 4.8-1.9s4.8.9 4.8 1.9-2.1 1.9-4.8 1.9-4.8-.9-4.8-1.9z"/><path d="M3.2 5.2v3.1c0 1 2.1 1.9 4.8 1.9s4.8-.9 4.8-1.9V5.2"/><path d="M3.2 8.3v2.5c0 1 2.1 1.9 4.8 1.9s4.8-.9 4.8-1.9V8.3"/></svg>
-              </span>
-              <span class="settings-nav-label" data-i18n="settings.apiProviders"></span>
             </button>
             <button class="settings-nav-item" id="settingsNavCommitMessage" type="button" data-settings-section="commitMessage" data-i18n-aria="settings.commitMessage" aria-label="Commit Message">
               <span class="settings-nav-icon" aria-hidden="true">
@@ -104,84 +98,8 @@
               <footer class="settings-section-actions">
                 <span id="homeAgentsSaveStatus" class="settings-save-status" aria-live="polite"></span>
                 <button class="api-secondary-button" id="homeAgentsReset" type="button" data-i18n="homeAgents.showAll"></button>
-                <button class="api-primary-button" id="homeAgentsSave" type="button" data-i18n="apiSettings.save"></button>
+                <button class="api-primary-button" id="homeAgentsSave" type="button" data-i18n="settings.save"></button>
               </footer>
-            </section>
-
-            <section class="settings-section-panel api-provider-settings-section" id="settingsSectionApiProviders" data-settings-panel="apiProviders" hidden>
-              <div class="api-settings-body">
-                <aside class="api-provider-list-pane">
-                  <div class="api-settings-section-title" data-i18n="apiSettings.providers"></div>
-                  <div class="api-provider-list" id="apiProviderList" role="list"></div>
-                  <button class="api-provider-add" id="apiProviderAdd" type="button" data-i18n="apiSettings.addProvider"></button>
-                </aside>
-
-                <form class="api-provider-form" id="apiProviderForm">
-                  <div class="api-provider-grid">
-                    <label class="api-field">
-                      <span data-i18n="apiSettings.name"></span>
-                      <input id="apiProviderName" autocomplete="off">
-                    </label>
-                    <label class="api-field">
-                      <span data-i18n="apiSettings.protocol"></span>
-                      <select id="apiProviderProtocol">
-                        <option value="openai" data-i18n="apiSettings.protocolOpenAI"></option>
-                        <option value="anthropic" data-i18n="apiSettings.protocolAnthropic"></option>
-                      </select>
-                    </label>
-                    <label class="api-field">
-                      <span data-i18n="apiSettings.baseUrl"></span>
-                      <input id="apiProviderBaseUrl" autocomplete="off" spellcheck="false">
-                    </label>
-                    <label class="api-field">
-                      <span data-i18n="apiSettings.apiKey"></span>
-                      <input id="apiProviderApiKey" type="password" autocomplete="off" spellcheck="false">
-                    </label>
-                    <label class="api-field api-field-wide">
-                      <span data-i18n="apiSettings.model"></span>
-                      <div class="api-model-row">
-                        <input id="apiProviderModel" list="apiProviderModelOptions" autocomplete="off" spellcheck="false" data-i18n-placeholder="apiSettings.modelPlaceholder">
-                        <datalist id="apiProviderModelOptions"></datalist>
-                        <button class="api-secondary-button" id="apiProviderFetchModels" type="button" data-i18n="apiSettings.fetchModels"></button>
-                      </div>
-                      <span class="api-model-status" id="apiProviderModelStatus" aria-live="polite"></span>
-                    </label>
-                  </div>
-
-                  <label class="api-provider-enabled" hidden>
-                    <input id="apiProviderEnabled" type="checkbox">
-                    <span data-i18n="apiSettings.enabled"></span>
-                  </label>
-
-                  <input id="apiProviderApiKeyEnv" type="hidden">
-
-                  <div class="api-settings-section api-advanced-settings" hidden>
-                    <div class="api-settings-row-title">
-                      <span data-i18n="apiSettings.extraEnv"></span>
-                      <button class="api-link-button" id="apiProviderAddEnv" type="button" data-i18n="apiSettings.addEnv"></button>
-                    </div>
-                    <div class="api-extra-env-list" id="apiProviderExtraEnv"></div>
-                  </div>
-
-                  <div class="api-settings-section api-advanced-settings" hidden>
-                    <div class="api-settings-section-title" data-i18n="apiSettings.binding"></div>
-                    <label class="api-field">
-                      <span data-i18n="apiSettings.globalDefault"></span>
-                      <select id="apiProviderDefaultSelect"></select>
-                    </label>
-                    <div class="api-agent-bindings" id="apiProviderAgentBindings"></div>
-                  </div>
-
-                  <div class="api-settings-error" id="apiProviderSettingsError" role="alert" hidden></div>
-
-                  <footer class="api-settings-footer">
-                    <button class="api-danger-button" id="apiProviderDelete" type="button" data-i18n="apiSettings.deleteProvider"></button>
-                    <span id="apiProviderSaveStatus" class="settings-save-status" aria-live="polite"></span>
-                    <button class="api-secondary-button" id="apiProviderCancel" type="button" data-i18n="action.dismiss"></button>
-                    <button class="api-primary-button" type="submit" data-i18n="apiSettings.save"></button>
-                  </footer>
-                </form>
-              </div>
             </section>
 
             <section class="settings-section-panel" id="settingsSectionCommitMessage" data-settings-panel="commitMessage" hidden>
@@ -212,7 +130,7 @@
               <footer class="settings-section-actions">
                 <span id="commitMessageSaveStatus" class="settings-save-status" aria-live="polite"></span>
                 <button class="api-secondary-button" id="commitMessageReset" type="button" data-i18n="commitSettings.reset"></button>
-                <button class="api-primary-button" id="commitMessageSave" type="button" data-i18n="apiSettings.save"></button>
+                <button class="api-primary-button" id="commitMessageSave" type="button" data-i18n="settings.save"></button>
               </footer>
             </section>
 
@@ -294,7 +212,7 @@
                     <button class="api-danger-button" id="mcpServerDelete" type="button" data-i18n="mcpSettings.delete"></button>
                     <span id="mcpServerSaveStatus" class="settings-save-status" aria-live="polite"></span>
                     <button class="api-secondary-button" id="mcpServerCancel" type="button" data-i18n="action.dismiss"></button>
-                    <button class="api-primary-button" type="submit" data-i18n="apiSettings.save"></button>
+                    <button class="api-primary-button" type="submit" data-i18n="settings.save"></button>
                   </footer>
                 </form>
               </div>

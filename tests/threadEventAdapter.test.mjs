@@ -139,15 +139,14 @@ test('provider activities become stable typed thread items', () => {
   assert.equal(secondEvent.activity.detail, 'passed');
 });
 
-test('request warnings and bound session feedback become typed system items', () => {
+test('bound session feedback becomes typed system items', () => {
   const adapter = new ThreadEventAdapter({ now: () => 42, streamId: 'host-a' });
-  const started = adapter.accept({
+  adapter.accept({
     command: 'requestStarted',
     cliId: 'codex',
     threadId: 'thread-1',
     sessionId: 'runtime-1',
     text: 'inspect',
-    apiProviderWarning: 'Missing optional API key',
   });
   const notice = adapter.accept({
     command: 'sessionNotice',
@@ -163,12 +162,15 @@ test('request warnings and bound session feedback become typed system items', ()
     text: 'Cannot send input',
   });
 
-  assert.equal(
-    eventsOfType(started, 'item/started').at(-1).event.item.type,
-    'system-message'
-  );
   assert.equal(notice[0].event.item.type, 'system-message');
   assert.equal(inputFailure[0].event.item.type, 'system-error');
+});
+
+test('thread event adapter has no API provider warning contract', () => {
+  assert.doesNotMatch(
+    readFileSync(new URL('../src/threadEventAdapter.ts', import.meta.url), 'utf8'),
+    /apiProviderWarning/
+  );
 });
 
 test('sequences increase per thread and completion clears the runtime binding', () => {
