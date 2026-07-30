@@ -912,10 +912,6 @@
     return ensureActiveThread(cliId)?.id || '';
   }
 
-  function activeOpenCodeSessionId() {
-    return ensureActiveThread('opencode')?.openCodeSessionId || '';
-  }
-
   function noteOpenCodeSessionId(cliId, threadId, openCodeSessionId) {
     if (cliId !== 'opencode' || !openCodeSessionId || !String(openCodeSessionId).startsWith('ses')) {
       return;
@@ -2521,10 +2517,6 @@
     return slashCommands.profileSlashCommands(profile);
   }
 
-  function nativeApiCommandNames(profile) {
-    return slashCommands.nativeApiCommandNames(profile);
-  }
-
   function commandsForActiveProvider() {
     return slashCommands.commandsForProvider(SLASH_COMMANDS, activeProfile());
   }
@@ -2900,92 +2892,6 @@
     }
   }
 
-  function executeOpenCodeNativeSlashCommand(command) {
-    if (!nativeApiCommandNames(activeProfile()).has(command.name)) {
-      appendShellFeedback(
-        activeId,
-        'system',
-        i18n.t('slash.unsupported', {
-          command: `/${command.name}`,
-          provider: activeProfile()?.name || activeId,
-        }),
-        activeThreadId(activeId)
-      );
-      return;
-    }
-
-    const openCodeSessionId = activeOpenCodeSessionId();
-    if (!openCodeSessionId) {
-      appendShellFeedback(
-        activeId,
-        'error',
-        i18n.t('slash.opencode.noSession'),
-        activeThreadId(activeId)
-      );
-      return;
-    }
-
-    vscode.postMessage({
-      command: 'openCodeNativeCommand',
-      nativeCommand: command.name,
-      openCodeSessionId: activeOpenCodeSessionId(),
-    });
-  }
-
-  function openCodeNativeCommandResultText(message) {
-    const command = `/${message.nativeCommand || message.command || 'opencode'}`;
-    if (message.ok) {
-      if (message.newOpenCodeSessionId && message.nativeCommand === 'fork') {
-        return i18n.t('slash.opencode.forked');
-      }
-      if (message.url) {
-        return i18n.t('slash.opencode.shared', { url: message.url });
-      }
-      return i18n.t('slash.opencode.done', { command });
-    }
-
-    return i18n.t('slash.opencode.failed', {
-      command,
-      message: message.message || i18n.t('message.unknownError'),
-    });
-  }
-
-  function cloneMessagesForOpenCodeFork(messages) {
-    return (messages || []).map((message) => {
-      if (!message || typeof message !== 'object') {
-        return message;
-      }
-
-      const cloned = { ...message, running: false };
-      delete cloned.startedAt;
-      delete cloned.runningNotice;
-      return cloned;
-    });
-  }
-
-  function handleOpenCodeForkResult(message) {
-    if (!message?.newOpenCodeSessionId) {
-      return false;
-    }
-
-    const currentThread = ensureActiveThread('opencode');
-    const forkedThread = createThread(
-      'opencode',
-      cloneMessagesForOpenCodeFork(currentThread?.messages || [])
-    );
-    forkedThread.openCodeSessionId = message.newOpenCodeSessionId;
-    if (message.title) {
-      forkedThread.title = message.title;
-    }
-
-    setActiveThread('opencode', forkedThread);
-    activeId = 'opencode';
-    addMessage('opencode', 'system', i18n.t('slash.opencode.forked'), undefined, false, forkedThread.id);
-    persist();
-    renderAll();
-    return true;
-  }
-
   function executeSlashCommand(command) {
     if (!command) {
       addMessage(activeId, 'system', i18n.t('slash.empty'));
@@ -3007,18 +2913,7 @@
     }
 
     if (command.kind === 'native') {
-      if (activeProfile()?.id === 'opencode') {
-        executeOpenCodeNativeSlashCommand(command);
-      } else {
-        addMessage(
-          activeId,
-          'system',
-          i18n.t('slash.unsupported', {
-            command: `/${command.name}`,
-            provider: activeProfile()?.name || activeId,
-          })
-        );
-      }
+      send('freeform', `/${command.name}${args ? ` ${args}` : ''}`);
       renderComposer();
       return;
     }
@@ -3543,7 +3438,7 @@
 
     return [
       { text: versionLabel ? `OpenCode ${versionLabel}` : 'OpenCode' },
-      { text: `Session ${activeOpenCodeSessionId() || activeThreadId('opencode') || 'local'}` },
+      { text: `Thread ${activeThreadId('opencode') || 'local'}` },
       { text: `Agent ${mode?.label || 'Default'}` },
       { text: `MCP ${connectedMcpCount}/${mcpServers.length}` },
       ...openCodeContextMetrics(profile),
@@ -5837,11 +5732,6 @@
     return parts.length ? `${i18n.t('context.prefix')}: ${parts.join(', ')}` : undefined;
   }
 
-  function summarizeRuntimeSelection(message) {
-    const model = normalizeMessageText(message?.modelLabel || message?.modelId);
-    return model ? i18n.t('message.modelMeta', { model }) : undefined;
-  }
-
   function mergeMessageMeta(...values) {
     return values
       .map((value) => normalizeMessageText(value))
@@ -6169,7 +6059,8 @@
     }
 
     if (runningByProvider[activeId] || pendingByProvider[activeId]) {
-      vscode.postMessage({ command: 'sendSessionInput', cliId: activeId, text });
+      addMessage(activeId, 'system', i18n.t('claude.approval.unavailable'));
+      renderAll();
       refreshAfterClaudeApproval(key);
     } else {
       send('freeform', text);
@@ -8266,7 +8157,7 @@
       event.preventDefault();
       event.stopPropagation();
       if (fileCardAction.dataset.fileCardAction === 'undo') {
-        executeOpenCodeNativeSlashCommand({ name: 'undo' });
+        send('freeform', '/undo');
       } else if (fileCardAction.dataset.fileCardAction === 'review') {
         send('freeform', fileCardReviewPrompt());
       }
@@ -8607,10 +8498,7 @@
               message.cliId,
               'assistant',
               '',
-              mergeMessageMeta(
-                summarizeRuntimeSelection(message),
-                summarizeRequestContext(message.contextSummary)
-              ),
+              summarizeRequestContext(message.contextSummary),
               true,
               threadId
             );
@@ -8630,34 +8518,9 @@
           updateStream(message);
         }
         break;
-      case 'openCodeNativeCommandResult':
-        if (message.ok && message.nativeCommand === 'fork' && handleOpenCodeForkResult(message)) {
-          break;
-        }
-        appendShellFeedback(
-          'opencode',
-          message.ok ? 'system' : 'error',
-          openCodeNativeCommandResultText(message),
-          activeThreadId('opencode')
-        );
-        renderAll();
-        break;
       case 'sessionNotice':
         if (!codexRendererEnabled) {
           updateSessionNotice(message);
-        }
-        break;
-      case 'sessionInputResult':
-        if (!message.ok && !codexRendererEnabled) {
-          addMessage(
-            message.cliId || activeId,
-            'system',
-            i18n.t('claude.approval.unavailable'),
-            undefined,
-            false,
-            activeThreadId(message.cliId || activeId)
-          );
-          renderAll();
         }
         break;
       case 'sessionEnd':

@@ -13,7 +13,7 @@ const {
   normalizeCommandVersionOutput,
 } = require('../.test-dist/cliDiscovery.js');
 const { CliProcessRunner } = require('../.test-dist/cliProcessRunner.js');
-const { getCliProfile } = require('../.test-dist/cliProfiles.js');
+const { getCliProfile, resolveContextWindowTokens } = require('../.test-dist/cliProfiles.js');
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -242,7 +242,7 @@ test('CliDiscovery exposes the configured OpenCode model as observation without 
     completedProbeRunner({
       '--version': { stdout: 'OpenCode 1.2.3\n' },
       'debug config': {
-        stdout: JSON.stringify({ default_model: 'acme/fast', default_agent: 'build', agent: {} }),
+        stdout: JSON.stringify({ model: 'acme/fast', default_agent: 'build', agent: {} }, null, 2),
       },
       models: { stdout: 'acme/fast\nacme/accurate\n' },
     })
@@ -256,6 +256,27 @@ test('CliDiscovery exposes the configured OpenCode model as observation without 
   assert.deepEqual(profile.configuredModel, { id: 'acme/fast', label: 'acme/fast' });
   assert.deepEqual(profile.promptArgs, ['run', '--format', 'json']);
   assert.equal(profile.env, undefined);
+});
+
+test('CliDiscovery does not infer a configured model from the first available model', async () => {
+  const discovery = createDiscovery(
+    completedProbeRunner({
+      '--version': { stdout: 'OpenCode 1.2.3\n' },
+      'debug config': { stdout: JSON.stringify({ default_agent: 'build', agent: {} }, null, 2) },
+      models: { stdout: 'acme/fast\nacme/accurate\n' },
+    })
+  );
+  discovery.resolveCommandPath = async () => '/bin/opencode';
+
+  const [profile] = await discovery.getProfilesWithStatus([getCliProfile('opencode')], {
+    force: true,
+  });
+
+  assert.equal(profile.configuredModel, undefined);
+  assert.equal(
+    resolveContextWindowTokens(profile, profile.configuredModel?.id),
+    profile.contextWindowTokens
+  );
 });
 
 test('version normalization accepts a bounded ANSI dotted version and rejects malformed tokens', () => {

@@ -37,10 +37,6 @@ const {
   parseOpenCodeDebugConfigOutput,
   parseOpenCodeConfigAgents,
   parseOpenCodeModelsOutput,
-  parseOpenCodeModelState,
-  parseOpenCodeModelId,
-  parseOpenCodeProviderModels,
-  parseOpenCodeModelMetadata,
 } = require('../.test-dist/opencodeAgents.js');
 const { normalizeMessageText, stripInlineMarkdown } = require('../media/messageText.js');
 const inlineMarkdown = require('../media/inlineMarkdown.js');
@@ -493,129 +489,6 @@ test('opencode models output is parsed into observational configured models', ()
   );
 });
 
-test('opencode model state exposes current model and variant', () => {
-  const state = parseOpenCodeModelState({
-    recent: [
-      { providerID: 'openai', modelID: 'gpt-5.5' },
-      { providerID: 'opencode', modelID: 'deepseek-v4-flash-free' },
-    ],
-    variant: {
-      'openai/gpt-5.5': 'xhigh',
-      'opencode/deepseek-v4-flash-free': 'max',
-    },
-  });
-
-  assert.equal(state.currentModelId, 'openai/gpt-5.5');
-  assert.equal(state.currentVariant, 'xhigh');
-  assert.deepEqual(state.recentModelIds, ['openai/gpt-5.5', 'opencode/deepseek-v4-flash-free']);
-  assert.deepEqual(state.variants, {
-    'openai/gpt-5.5': 'xhigh',
-    'opencode/deepseek-v4-flash-free': 'max',
-  });
-});
-
-test('opencode model ids split into provider and model for server prompts', () => {
-  assert.deepEqual(parseOpenCodeModelId('opencode/big-pickle'), {
-    providerID: 'opencode',
-    modelID: 'big-pickle',
-  });
-  assert.deepEqual(parseOpenCodeModelId('mimo/mimo-v2.5-pro'), {
-    providerID: 'mimo',
-    modelID: 'mimo-v2.5-pro',
-  });
-  assert.equal(parseOpenCodeModelId('default'), undefined);
-  assert.equal(parseOpenCodeModelId('custom'), undefined);
-});
-
-test('opencode provider payload is parsed into observational configured models', () => {
-  const options = parseOpenCodeProviderModels({
-    default: {
-      opencode: 'big-pickle',
-      mimo: 'mimo-v2.5-pro',
-    },
-    providers: [
-      {
-        id: 'opencode',
-        name: 'OpenCode Zen',
-        models: {
-          'big-pickle': { id: 'big-pickle', name: 'Big Pickle' },
-          'qwen3.6-plus-free': {
-            id: 'qwen3.6-plus-free',
-            name: 'Qwen3.6 Plus Free',
-            reasoning: true,
-            reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'high', 'xhigh'] }],
-          },
-        },
-      },
-      {
-        id: 'mimo',
-        name: 'Xiaomi MiMo',
-        models: {
-          'mimo-v2.5-pro': { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
-        },
-      },
-    ],
-  });
-
-  assert.deepEqual(
-    options.map((option) => [option.id, option.label]),
-    [
-      ['opencode/big-pickle', 'Big Pickle'],
-      ['opencode/qwen3.6-plus-free', 'Qwen3.6 Plus Free'],
-      ['mimo/mimo-v2.5-pro', 'MiMo V2.5 Pro'],
-    ]
-  );
-  assert.equal(
-    options.some((option) => Object.hasOwn(option, 'args')),
-    false
-  );
-});
-
-test('opencode model metadata exposes per-model reasoning depth options', () => {
-  const metadata = parseOpenCodeModelMetadata({
-    openai: {
-      id: 'openai',
-      models: {
-        'gpt-5.5': {
-          id: 'gpt-5.5',
-          reasoning: true,
-          reasoning_options: [
-            { type: 'effort', values: ['none', 'low', 'medium', 'high', 'xhigh'] },
-          ],
-        },
-        'gpt-5.4-mini': {
-          id: 'gpt-5.4-mini',
-          reasoning: false,
-          reasoning_options: [{ type: 'effort', values: ['low'] }],
-        },
-      },
-    },
-    deepseek: {
-      id: 'deepseek',
-      models: {
-        'deepseek-v4-flash': {
-          id: 'deepseek-v4-flash',
-          reasoning: true,
-          reasoning_options: [
-            { type: 'toggle' },
-            { type: 'effort', values: ['high', 'max', 'max'] },
-          ],
-        },
-      },
-    },
-  });
-
-  assert.deepEqual(metadata['openai/gpt-5.5']?.variantOptions, [
-    'none',
-    'low',
-    'medium',
-    'high',
-    'xhigh',
-  ]);
-  assert.equal(metadata['openai/gpt-5.4-mini'], undefined);
-  assert.deepEqual(metadata['deepseek/deepseek-v4-flash']?.variantOptions, ['high', 'max']);
-});
-
 test('opencode config agents remain observational and do not synthesize argv', () => {
   const discovery = parseOpenCodeConfigAgents({
     model: 'opencode/big-pickle',
@@ -640,9 +513,11 @@ test('opencode config agents remain observational and do not synthesize argv', (
   assert.equal(discovery.defaultModelId, 'opencode/big-pickle');
   assert.deepEqual(
     discovery.modes.map((mode) => [mode.id, mode.label, mode.disabled]),
-    [['\u200bSisyphus - Ultraworker', 'Sisyphus - Ultraworker', undefined]]
+    [
+      ['nvidia-chat', 'nvidia-chat', undefined],
+      ['\u200bSisyphus - Ultraworker', 'Sisyphus - Ultraworker', undefined],
+    ]
   );
-  assert.deepEqual(discovery.modelBoundAgentIds, ['nvidia-chat']);
 });
 
 test('opencode plugin agents remain observational and do not synthesize argv', () => {
@@ -671,7 +546,6 @@ test('opencode plugin agents remain observational and do not synthesize argv', (
       ['plan', 'plan'],
     ]
   );
-  assert.deepEqual(discovery.modelBoundAgentIds, []);
 });
 
 test('opencode debug config text exposes default agent without parsing full prompts', () => {
@@ -679,6 +553,7 @@ test('opencode debug config text exposes default agent without parsing full prom
     [
       '{',
       '  "default_agent": "\\u200bSisyphus - Ultraworker",',
+      '  "model": "mimo/mimo-v2.5-pro",',
       '  "agent": {',
       '    "build": {',
       '      "description": "Implementation helper",',
@@ -700,9 +575,8 @@ test('opencode debug config text exposes default agent without parsing full prom
   assert.equal(discovery.defaultModelId, 'mimo/mimo-v2.5-pro');
   assert.deepEqual(
     discovery.modes.map((mode) => [mode.id, mode.disabled, mode.args]),
-    []
+    [['\u200bSisyphus - Ultraworker', undefined, undefined]]
   );
-  assert.deepEqual(discovery.modelBoundAgentIds, ['\u200bSisyphus - Ultraworker']);
 });
 
 
@@ -2791,7 +2665,7 @@ test('webview renders edited files as an OpenCode-style change card', () => {
   assert.match(script, /showMore\.dataset\.fileCardShowMore = 'true';/);
   assert.match(script, /fileResults\.slice\(0, FILE_CARD_COLLAPSE_LIMIT\)/);
   assert.match(script, /messages\.addEventListener\('click'[\s\S]*data-file-card-action/s);
-  assert.match(script, /executeOpenCodeNativeSlashCommand\(\{ name: 'undo' \}\);/);
+  assert.match(script, /send\('freeform', '\/undo'\);/);
   assert.match(script, /send\('freeform', fileCardReviewPrompt\(\)\);/);
   assert.match(script, /function fileCardReviewPrompt\(\)/);
   assert.match(
@@ -2971,7 +2845,7 @@ test('webview keeps running status singular and supports quick choices', () => {
   assert.match(script, /className = 'claude-approval-panel'/);
   assert.match(script, /dataset\.claudeApprovalPrompt = choice\.prompt/);
   assert.match(script, /event\.target\.closest\('\[data-claude-approval-prompt\]'\)/);
-  assert.match(script, /command:\s*'sendSessionInput'/);
+  assert.doesNotMatch(script, /command:\s*'sendSessionInput'/);
   assert.match(css, /\.message-choice-actions\s*\{/);
   assert.match(css, /\.message-choice-button\s*\{/);
   assert.match(css, /\.message\.assistant:has\(\.claude-approval-panel\)\s*\{/);
@@ -3271,22 +3145,20 @@ test('slash command helper parses, filters, dedupes, and composes commands', () 
   const provider = {
     id: 'opencode',
     slashCommands: [
-      { name: 'models', aliases: ['model'], kind: 'local', local: 'models' },
-      { name: 'new', kind: 'native', nativeApi: true },
-      { name: 'fork', kind: 'native', nativeApi: true },
+      { name: 'fork', kind: 'native' },
       { name: 'bad' },
       null,
     ],
   };
 
-  assert.deepEqual(slashCommands.parseSlashInput('/models big-pickle'), {
-    query: 'models',
-    args: 'big-pickle',
+  assert.deepEqual(slashCommands.parseSlashInput('/fork branch-name'), {
+    query: 'fork',
+    args: 'branch-name',
   });
   assert.equal(slashCommands.parseSlashInput('/mo/dels'), null);
   assert.equal(slashCommands.slashInputLooksLikeCommand('mo/dels'), false);
   assert.equal(
-    slashCommands.slashCommandMatchesQuery({ name: 'models', aliases: ['model'] }, 'mod'),
+    slashCommands.slashCommandMatchesQuery({ name: 'fork' }, 'for'),
     true
   );
   assert.equal(
@@ -3299,9 +3171,8 @@ test('slash command helper parses, filters, dedupes, and composes commands', () 
 
   const commands = slashCommands.commandsForProvider(baseCommands, provider);
   assert.equal(commands.filter((command) => command.name === 'new').length, 1);
-  assert.ok(commands.some((command) => command.name === 'models'));
   assert.ok(commands.some((command) => command.name === 'fork'));
-  assert.equal(slashCommands.nativeApiCommandNames(provider).has('fork'), true);
+  assert.equal(typeof slashCommands.nativeApiCommandNames, 'undefined');
   assert.equal(
     slashCommands.buildSlashCommandPrompt({ prompt: 'review this' }, 'extra'),
     'review this\n\nextra'
@@ -4471,7 +4342,40 @@ test('agent mode persistence and send readiness are independent of execution ove
   assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
   assert.doesNotMatch(sidebarSource, /RUNTIME_STATE_KEY|PERMISSION_STATE_KEY/);
   assert.match(composerSource, /const hasPrompt = String\(options\.promptText \|\| ''\)\.trim\(\)\.length > 0;/);
-  assert.match(composerSource, /sendDisabled: !canSend \|\| busy \|\| !canRunAction \|\| missingSelection \|\| missingCustomModel,/);
+  assert.match(composerSource, /sendDisabled: !canSend \|\| busy \|\| !canRunAction \|\| missingSelection,/);
+  assert.doesNotMatch(composerSource, /missingCustomModel/);
+});
+
+test('native OpenCode slash commands use the ordinary fresh-request send path', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const protocol = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+
+  assert.match(
+    script,
+    /if \(command\.kind === 'native'\) \{[\s\S]*send\('freeform', `\/\$\{command\.name\}\$\{args \? ` \$\{args\}` : ''\}`\);/
+  );
+  assert.doesNotMatch(script, /openCodeNativeCommand|activeOpenCodeSessionId|nativeApiCommandNames/);
+  assert.doesNotMatch(protocol, /openCodeNativeCommand|openCodeNativeCommandResult/);
+});
+
+test('request-start metadata contains context but no execution model selection', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(script, /summarizeRuntimeSelection|modelLabel \|\| message\?\.modelId/);
+  assert.doesNotMatch(i18nScript, /message\.modelMeta/);
+  assert.doesNotMatch(sidebarSource, /modelId:|modelLabel:/);
+});
+
+test('retired OpenCode model-state infrastructure is absent from runtime code', () => {
+  const agentsSource = readFileSync(new URL('../src/opencodeAgents.ts', import.meta.url), 'utf8');
+  const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
+  const localStatePath = new URL('../src/openCodeLocalState.ts', import.meta.url);
+
+  assert.doesNotMatch(agentsSource, /OpenCodeModelState|recentModelIds|currentVariant|variantOptions|parseOpenCodeModelId/);
+  assert.doesNotMatch(profilesSource, /variant\?: string/);
+  assert.equal(require('node:fs').existsSync(localStatePath), false);
 });
 
 test('filterPromptEchoChunk buffer accommodates prompts larger than 16K', () => {

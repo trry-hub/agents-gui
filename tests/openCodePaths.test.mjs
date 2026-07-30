@@ -5,7 +5,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { resolveOpenCodePaths } = require('../.test-dist/openCodePaths.js');
 
-test('Windows OpenCode paths prefer existing APPDATA config and LOCALAPPDATA state', () => {
+test('Windows OpenCode paths prefer existing APPDATA config', () => {
   const existing = new Set(['C:\\Users\\Agent\\AppData\\Roaming\\opencode\\opencode.json']);
   const paths = resolveOpenCodePaths({
     platform: 'win32',
@@ -21,14 +21,8 @@ test('Windows OpenCode paths prefer existing APPDATA config and LOCALAPPDATA sta
     paths.configPath,
     'C:\\Users\\Agent\\AppData\\Roaming\\opencode\\opencode.json'
   );
-  assert.equal(
-    paths.modelStatePath,
-    'C:\\Users\\Agent\\AppData\\Local\\opencode\\model.json'
-  );
-  assert.equal(
-    paths.modelMetadataPath,
-    'C:\\Users\\Agent\\AppData\\Local\\opencode\\models.json'
-  );
+  assert.equal('modelStatePath' in paths, false);
+  assert.equal('modelMetadataPath' in paths, false);
 });
 
 test('Windows OpenCode paths read an existing legacy config before creating APPDATA config', () => {
@@ -61,18 +55,16 @@ test('Windows OpenCode paths create new config under APPDATA when neither file e
   );
 });
 
-test('Linux OpenCode paths preserve XDG config, state, and cache', () => {
+test('Linux OpenCode paths preserve XDG config', () => {
   const paths = resolveOpenCodePaths({
     platform: 'linux',
     homeDir: '/home/agent',
     env: {
       XDG_CONFIG_HOME: '/xdg/config',
-      XDG_STATE_HOME: '/xdg/state',
-      XDG_CACHE_HOME: '/xdg/cache',
     },
     exists: () => false,
   });
   assert.equal(paths.configPath, '/xdg/config/opencode/opencode.json');
-  assert.equal(paths.modelStatePath, '/xdg/state/opencode/model.json');
-  assert.equal(paths.modelMetadataPath, '/xdg/cache/opencode/models.json');
+  assert.equal('stateHome' in paths, false);
+  assert.equal('cacheHome' in paths, false);
 });

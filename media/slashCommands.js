@@ -107,14 +107,6 @@
       }));
   }
 
-  function nativeApiCommandNames(profile) {
-    return new Set(
-      profileSlashCommands(profile)
-        .filter((command) => command.kind === 'native' && command.nativeApi)
-        .map((command) => command.name)
-    );
-  }
-
   function commandsForProvider(baseCommands, profile) {
     const seen = new Set();
     const commands = [];
@@ -147,7 +139,6 @@
     buildSlashCommandPrompt,
     commandsForProvider,
     createBaseSlashCommands,
-    nativeApiCommandNames,
     parseSlashInput,
     profileSlashCommands,
     slashCommandMatchesProvider,

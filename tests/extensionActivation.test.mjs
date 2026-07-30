@@ -20,10 +20,6 @@ const attachmentStoreSource = readFileSync(
   new URL('../src/attachmentStore.ts', import.meta.url),
   'utf8'
 );
-const openCodeLocalStateSource = readFileSync(
-  new URL('../src/openCodeLocalState.ts', import.meta.url),
-  'utf8'
-);
 const openCodePathsSource = readFileSync(
   new URL('../src/openCodePaths.ts', import.meta.url),
   'utf8'
@@ -231,7 +227,7 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.doesNotMatch(agentRuntimeSource, /OpenCodeAgentCapability/);
   assert.match(agentSessionControllerSource, /export class AgentSessionController/);
   assert.match(attachmentStoreSource, /export class ImageAttachmentStore/);
-  assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
+  assert.equal(existsSync(new URL('../src/openCodeLocalState.ts', import.meta.url)), false);
   assert.equal(existsSync(new URL('../src/openCodeAgentCapability.ts', import.meta.url)), false);
   assert.equal(existsSync(new URL('../src/openCodeServerClient.ts', import.meta.url)), false);
   const runtimeInterface =
@@ -245,7 +241,6 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(architectureDoc, /AgentRuntime port/);
   assert.match(architectureDoc, /src\/agentSessionController\.ts/);
   assert.match(architectureDoc, /src\/attachmentStore\.ts/);
-  assert.match(architectureDoc, /src\/openCodeLocalState\.ts/);
   assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
 });
 

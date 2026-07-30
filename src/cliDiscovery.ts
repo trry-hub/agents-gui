@@ -312,7 +312,7 @@ function selectConfiguredModel(
 ): CliConfiguredModel | undefined {
   return (
     models.find((model) => model.id === configuredId) ??
-    (configuredId ? { id: configuredId, label: configuredId } : models[0])
+    (configuredId ? { id: configuredId, label: configuredId } : undefined)
   );
 }
 

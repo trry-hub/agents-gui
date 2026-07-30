@@ -11,10 +11,6 @@ export interface OpenCodePathOptions {
 
 export interface OpenCodePaths {
   configPath: string;
-  stateHome: string;
-  cacheHome: string;
-  modelStatePath: string;
-  modelMetadataPath: string;
 }
 
 export function resolveOpenCodePaths(options: OpenCodePathOptions = {}): OpenCodePaths {
@@ -43,24 +39,8 @@ export function resolveOpenCodePaths(options: OpenCodePathOptions = {}): OpenCod
     validConfigCandidates[0] ??
     legacyConfigPath;
 
-  const localAppData =
-    platform === 'win32' ? usableAbsolutePath(env.LOCALAPPDATA, pathApi) : undefined;
-  const stateHome =
-    platform === 'win32'
-      ? (localAppData ?? pathApi.join(homeDir, '.local', 'state'))
-      : (usableAbsolutePath(env.XDG_STATE_HOME, pathApi) ??
-        pathApi.join(homeDir, '.local', 'state'));
-  const cacheHome =
-    platform === 'win32'
-      ? (localAppData ?? pathApi.join(homeDir, '.cache'))
-      : (usableAbsolutePath(env.XDG_CACHE_HOME, pathApi) ?? pathApi.join(homeDir, '.cache'));
-
   return {
     configPath,
-    stateHome,
-    cacheHome,
-    modelStatePath: pathApi.join(stateHome, 'opencode', 'model.json'),
-    modelMetadataPath: pathApi.join(cacheHome, 'opencode', 'models.json'),
   };
 }
 

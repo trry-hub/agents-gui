@@ -14,7 +14,6 @@
     const hasPrompt = String(options.promptText || '').trim().length > 0;
     const hasAttachments = Number(options.attachmentCount || 0) > 0;
     const missingSelection = Boolean(options.requiresSelection && !options.hasSelection);
-    const missingCustomModel = Boolean(options.missingCustomModel);
     const canRunAction = hasPrompt || hasAttachments || selectedAction !== 'freeform';
     const running = Boolean(options.running);
     const translate = typeof options.translate === 'function' ? options.translate : defaultTranslate;
@@ -27,10 +26,9 @@
       busy,
       canRunAction,
       missingSelection,
-      missingCustomModel,
       running,
       inputDisabled: !canSend,
-      sendDisabled: !canSend || busy || !canRunAction || missingSelection || missingCustomModel,
+      sendDisabled: !canSend || busy || !canRunAction || missingSelection,
       actionSelectDisabled: !canSend || busy,
       providerSelectDisabled: Number(options.installedProviderCount || 0) === 0 || busy,
       threadSelectDisabled: !activeId || busy,

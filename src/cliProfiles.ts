@@ -11,7 +11,6 @@ export interface CliAgentMode {
 export interface CliConfiguredModel {
   id: string;
   label: string;
-  variant?: string;
   contextWindowTokens?: number;
 }
 
@@ -25,7 +24,6 @@ export interface CliSlashCommand {
   kind: CliSlashCommandKind;
   local?: string;
   descriptionKey: string;
-  nativeApi?: boolean;
 }
 
 export type CliInstallPlatform = NodeJS.Platform | 'default';
@@ -120,7 +118,6 @@ const OPENCODE_SLASH_COMMANDS: CliSlashCommand[] = [
     name,
     kind: 'native' as const,
     descriptionKey: 'slash.native.desc',
-    nativeApi: true,
   })),
 ];
 
