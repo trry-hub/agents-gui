@@ -636,7 +636,6 @@
           title: thread.title || deriveThreadTitle(thread.messages) || i18n.t('history.untitled'),
           createdAt: Number(thread.createdAt) || Date.now(),
           updatedAt: Number(thread.updatedAt) || Date.now(),
-          openCodeSessionId: typeof thread.openCodeSessionId === 'string' ? thread.openCodeSessionId : undefined,
           messages: normalizeThreadMessages(thread.messages),
         }));
     });
@@ -777,19 +776,7 @@
       ? codexThreadSummaries(cliId).length
       : ensureThreadList(cliId).length) > 1 ||
       thread.messages.length > 0 ||
-      Boolean(codexThreadSummary(cliId, thread.id)?.turnCount) ||
-      Boolean(thread.openCodeSessionId);
-  }
-
-  function requestOpenCodeSessionDelete(openCodeSessionId) {
-    if (!openCodeSessionId || !String(openCodeSessionId).startsWith('ses')) {
-      return;
-    }
-
-    vscode.postMessage({
-      command: 'deleteOpenCodeSession',
-      openCodeSessionId,
-    });
+      Boolean(codexThreadSummary(cliId, thread.id)?.turnCount);
   }
 
   function deleteActiveThread(cliId = activeId) {
@@ -802,15 +789,11 @@
       return null;
     }
 
-    const deletedOpenCodeSessionId = cliId === 'opencode' ? thread.openCodeSessionId : '';
     if (codexRendererEnabled) {
       codexRenderer.deleteThread(cliId, thread.id);
     }
     const threads = ensureThreadList(cliId);
     const remainingThreads = threads.filter((item) => item.id !== thread.id);
-    const shouldDeleteRemoteOpenCodeSession =
-      Boolean(deletedOpenCodeSessionId) &&
-      !remainingThreads.some((item) => item.openCodeSessionId === deletedOpenCodeSessionId);
     threads.splice(0, threads.length, ...remainingThreads);
     delete activeThreadByProvider[cliId];
 
@@ -819,9 +802,6 @@
       threads.unshift(next);
     }
     setActiveThread(cliId, next);
-    if (shouldDeleteRemoteOpenCodeSession) {
-      requestOpenCodeSessionDelete(deletedOpenCodeSessionId);
-    }
     persist();
     renderAll();
     return next;
@@ -910,21 +890,6 @@
 
   function activeThreadId(cliId = activeId) {
     return ensureActiveThread(cliId)?.id || '';
-  }
-
-  function noteOpenCodeSessionId(cliId, threadId, openCodeSessionId) {
-    if (cliId !== 'opencode' || !openCodeSessionId || !String(openCodeSessionId).startsWith('ses')) {
-      return;
-    }
-
-    const thread = ensureThread(cliId, threadId);
-    if (!thread || thread.openCodeSessionId === openCodeSessionId) {
-      return;
-    }
-
-    thread.openCodeSessionId = openCodeSessionId;
-    persist();
-    renderOpenCodeSidebar();
   }
 
   function ensureConversation(cliId, threadId) {
@@ -5390,8 +5355,6 @@
     if (!item) {
       return;
     }
-    noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
-
     const buffered = mergeStreamText(target.buffer || item.text || '', message.text);
     const filtered = filterInternalPromptEcho(buffered);
     target.buffer = filtered.pending ? buffered : filtered.text;
@@ -5458,7 +5421,6 @@
       return;
     }
 
-    noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
     const existingThinking = target.thinkingBuffer ?? item.thinking ?? '';
     target.thinkingBuffer = mergeStreamText(existingThinking, message.thinking);
     const filtered = filterInternalPromptEcho(target.thinkingBuffer);
@@ -5498,7 +5460,6 @@
       return;
     }
 
-    noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
     item.activity = mergeOpenCodeActivity(item.activity, message.activities);
     item.activityTimeline = mergeOpenCodeActivityTimeline(
       item.activityTimeline,
@@ -5534,7 +5495,6 @@
   function finishStreamTarget(message, { removeEmpty = true } = {}) {
     const target = streamTargets[message.sessionId];
     if (target) {
-      noteOpenCodeSessionId(message.cliId, target.threadId, message.openCodeSessionId);
       const conversation = ensureConversation(target.cliId, target.threadId);
       const item = conversation[target.index];
       if (item) {
@@ -5730,13 +5690,6 @@
     }
 
     return parts.length ? `${i18n.t('context.prefix')}: ${parts.join(', ')}` : undefined;
-  }
-
-  function mergeMessageMeta(...values) {
-    return values
-      .map((value) => normalizeMessageText(value))
-      .filter(Boolean)
-      .join(i18n.t('message.metaSeparator')) || undefined;
   }
 
   function messageDetailKey(cliId, threadId, index, kind, localKey = '') {

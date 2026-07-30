@@ -17,6 +17,9 @@ export function parseOpenCodeConfigAgents(config: unknown): OpenCodeAgentDiscove
 
   const record = config as Record<string, unknown>;
   const defaultAgentId = pickString(record.default_agent);
+  const defaultAgent = defaultAgentId
+    ? objectRecord(objectRecord(record.agent)[defaultAgentId])
+    : {};
   const modes = Object.entries(objectRecord(record.agent))
     .filter(([id, value]) => {
       const mode = pickString(objectRecord(value).mode) ?? 'primary';
@@ -27,7 +30,7 @@ export function parseOpenCodeConfigAgents(config: unknown): OpenCodeAgentDiscove
   return {
     modes,
     defaultAgentId,
-    defaultModelId: pickString(record.model),
+    defaultModelId: pickString(record.model, defaultAgent.model),
   };
 }
 
@@ -35,11 +38,12 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
   const defaultAgentId = parseJsonStringCapture(
     /^\s*"default_agent"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
   );
-  const defaultModelId = parseJsonStringCapture(
-    /^\s*"model"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
+  const topLevelModelId = parseJsonStringCapture(
+    /^ {2}"model"\s*:\s*"((?:\\.|[^"\\])*)"/m.exec(output)?.[1]
   );
   const modes: CliAgentMode[] = [];
   let inAgentBlock = false;
+  let defaultAgentModelId: string | undefined;
   let current: { id: string; role: string; description?: string } | undefined;
 
   const pushCurrent = () => {
@@ -74,9 +78,17 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
     }
     const descriptionMatch = /^\s+"description"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(line);
     if (descriptionMatch) current.description = parseJsonStringCapture(descriptionMatch[1]);
+    const modelMatch = /^ {6}"model"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(line);
+    if (current.id === defaultAgentId && modelMatch) {
+      defaultAgentModelId = parseJsonStringCapture(modelMatch[1]);
+    }
   }
 
-  return { modes, defaultAgentId, defaultModelId };
+  return {
+    modes,
+    defaultAgentId,
+    defaultModelId: topLevelModelId ?? defaultAgentModelId,
+  };
 }
 
 export function parseOpenCodeModelsOutput(output: string): CliConfiguredModel[] {

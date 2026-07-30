@@ -102,7 +102,6 @@
       title: deriveThreadTitle(initialMessages) || newThreadTitle,
       createdAt: now,
       updatedAt: now,
-      openCodeSessionId: undefined,
       messages: initialMessages,
     };
   }

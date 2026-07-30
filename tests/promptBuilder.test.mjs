@@ -520,6 +520,51 @@ test('opencode config agents remain observational and do not synthesize argv', (
   );
 });
 
+test('opencode object config uses the top-level model over its default-agent model', () => {
+  const discovery = parseOpenCodeConfigAgents({
+    model: 'top-level/model',
+    default_agent: 'build',
+    agent: {
+      build: { model: 'default-agent/model' },
+    },
+  });
+
+  assert.equal(discovery.defaultModelId, 'top-level/model');
+});
+
+test('opencode object config falls back to the selected default-agent model only', () => {
+  const discovery = parseOpenCodeConfigAgents({
+    default_agent: 'build',
+    agent: {
+      build: { model: 'default-agent/model' },
+      unrelated: { model: 'unrelated/model' },
+    },
+  });
+
+  assert.equal(discovery.defaultModelId, 'default-agent/model');
+});
+
+test('opencode object config ignores non-default agent models', () => {
+  const discovery = parseOpenCodeConfigAgents({
+    default_agent: 'build',
+    agent: {
+      build: {},
+      unrelated: { model: 'unrelated/model' },
+    },
+  });
+
+  assert.equal(discovery.defaultModelId, undefined);
+});
+
+test('opencode object config has no effective model when neither source supplies one', () => {
+  const discovery = parseOpenCodeConfigAgents({
+    default_agent: 'build',
+    agent: { build: {} },
+  });
+
+  assert.equal(discovery.defaultModelId, undefined);
+});
+
 test('opencode plugin agents remain observational and do not synthesize argv', () => {
   const discovery = parseOpenCodeConfigAgents({
     default_agent: 'build',
@@ -577,6 +622,77 @@ test('opencode debug config text exposes default agent without parsing full prom
     discovery.modes.map((mode) => [mode.id, mode.disabled, mode.args]),
     [['\u200bSisyphus - Ultraworker', undefined, undefined]]
   );
+});
+
+test('opencode debug config uses a top-level model over its default-agent model', () => {
+  const discovery = parseOpenCodeDebugConfigOutput(
+    [
+      '{',
+      '  "default_agent": "build",',
+      '  "model": "top-level/model",',
+      '  "agent": {',
+      '    "build": {',
+      '      "model": "default-agent/model"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n')
+  );
+
+  assert.equal(discovery.defaultModelId, 'top-level/model');
+});
+
+test('opencode debug config falls back to the selected default-agent model only', () => {
+  const discovery = parseOpenCodeDebugConfigOutput(
+    [
+      '{',
+      '  "default_agent": "build",',
+      '  "agent": {',
+      '    "build": {',
+      '      "model": "default-agent/model"',
+      '    },',
+      '    "unrelated": {',
+      '      "model": "unrelated/model"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n')
+  );
+
+  assert.equal(discovery.defaultModelId, 'default-agent/model');
+});
+
+test('opencode debug config ignores non-default agent models', () => {
+  const discovery = parseOpenCodeDebugConfigOutput(
+    [
+      '{',
+      '  "default_agent": "build",',
+      '  "agent": {',
+      '    "build": {},',
+      '    "unrelated": {',
+      '      "model": "unrelated/model"',
+      '    }',
+      '  }',
+      '}',
+    ].join('\n')
+  );
+
+  assert.equal(discovery.defaultModelId, undefined);
+});
+
+test('opencode debug config has no effective model when neither source supplies one', () => {
+  const discovery = parseOpenCodeDebugConfigOutput(
+    [
+      '{',
+      '  "default_agent": "build",',
+      '  "agent": {',
+      '    "build": {}',
+      '  }',
+      '}',
+    ].join('\n')
+  );
+
+  assert.equal(discovery.defaultModelId, undefined);
 });
 
 
@@ -3007,7 +3123,6 @@ test('conversation store normalizes restored messages and serializes safe state'
     title: 'Derived title',
     createdAt: 123,
     updatedAt: 123,
-    openCodeSessionId: undefined,
     messages: [{ role: 'user', text: 'hello' }],
   });
 
@@ -3412,21 +3527,30 @@ test('webview confirms deleting conversation history inside the webview', () => 
   assert.match(i18nScript, /'history\.deleteConfirmTitle': '删除当前会话？'/);
 });
 
-test('webview deletes the active conversation through a single session cleanup path', () => {
+test('webview thread deletion remains local and has no managed OpenCode session protocol', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const conversationStoreSource = readFileSync(
+    new URL('../media/conversationStore.js', import.meta.url),
+    'utf8'
+  );
+  const protocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
 
   assert.match(script, /function deleteActiveThread\(cliId = activeId\)/);
-  assert.match(
-    script,
-    /const deletedOpenCodeSessionId = cliId === 'opencode' \? thread\.openCodeSessionId : '';/
-  );
-  assert.match(script, /command: 'deleteOpenCodeSession'/);
   assert.match(script, /delete activeThreadByProvider\[cliId\];/);
   assert.match(script, /deleteThreadBtn\.disabled = !canDeleteActiveThread\(activeId\);/);
+  assert.doesNotMatch(conversationStoreSource, /openCodeSessionId/);
+  assert.doesNotMatch(script, /openCodeSessionId|deleteOpenCodeSession|noteOpenCodeSessionId/);
+  assert.doesNotMatch(protocolSource, /openCodeSessionId|deleteOpenCodeSession/);
   assert.doesNotMatch(
     script,
     /const next = threads\.sort\(\(a, b\) => b\.updatedAt - a\.updatedAt\)\[0\] \|\| createThread\(activeId\);/
   );
+});
+
+test('webview has no orphaned message metadata merger', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(script, /function mergeMessageMeta\(/);
 });
 
 
