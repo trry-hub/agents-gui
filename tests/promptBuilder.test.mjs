@@ -2360,7 +2360,6 @@ test('manifest exposes title actions and general settings', () => {
   assert.match(css, /\.settings-nav-icon svg\s*\{\s*[^}]*width:\s*15px;/s);
   assert.match(css, /@container \(max-width:\s*700px\)\s*\{[\s\S]*?\.settings-layout\s*\{[\s\S]*?grid-template-columns:\s*44px minmax\(0,\s*1fr\);/s);
   assert.match(css, /@container \(max-width:\s*700px\)\s*\{[\s\S]*?\.settings-nav-label\s*\{[\s\S]*?display:\s*none;/s);
-  assert.match(css, /@container \(max-width:\s*700px\)\s*\{[\s\S]*?\.api-settings-body\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
   assert.match(css, /\.home-agent-sort\s*\{/);
   assert.match(script, /saveHomeAgentSettings/);
   assert.match(script, /saveCommitMessageSettings/);
@@ -2389,7 +2388,10 @@ test('native passthrough removes the custom API provider surface', () => {
   assert.doesNotMatch(sidebar, /ApiProvider|apiProvider|OpenCodeConfigSync|\.sync\(/);
   assert.doesNotMatch(protocol, /apiProvider|ApiProvider/);
   assert.doesNotMatch(settings, /apiProvider|ApiProvider/);
-  assert.doesNotMatch(css, /\.api-model-row|\.api-model-status|\.api-agent-binding/);
+  assert.doesNotMatch(
+    css,
+    /\.api-settings-body|\.api-model-row|\.api-model-status|\.api-agent-binding/
+  );
 });
 
 test('webview settings reset and reorder controls have durable local feedback', () => {

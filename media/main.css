@@ -1532,13 +1532,6 @@ body.is-api-settings-open .composer {
   max-width: 420px;
 }
 
-.api-settings-body {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  overflow: hidden;
-}
-
 .mcp-settings-body {
   min-height: 0;
   display: grid;
@@ -1811,11 +1804,6 @@ body.is-api-settings-open .composer {
 
   .settings-section-panel {
     padding: 12px;
-  }
-
-  .api-settings-body {
-    grid-template-columns: minmax(0, 1fr);
-    overflow: visible;
   }
 
   .api-settings-footer {
@@ -6510,11 +6498,6 @@ textarea:disabled {
 
   .settings-section-panel {
     padding: 12px;
-  }
-
-  .api-settings-body {
-    grid-template-columns: minmax(0, 1fr);
-    overflow: visible;
   }
 
   .api-extra-env-row {
