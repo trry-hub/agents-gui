@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   parseOpenCodeModelMetadata,
   parseOpenCodeModelState,
@@ -42,33 +41,6 @@ export class OpenCodeLocalState {
       return parseOpenCodeModelMetadata(
         JSON.parse(fs.readFileSync(this.paths().modelMetadataPath, 'utf8'))
       );
-    } catch {
-      return {};
-    }
-  }
-
-  async updateModelVariant(modelId: string, variant: string): Promise<void> {
-    const modelStatePath = this.paths().modelStatePath;
-    const state = await this.readModelStateRecord(modelStatePath);
-    const existingVariants =
-      state.variant && typeof state.variant === 'object' && !Array.isArray(state.variant)
-        ? (state.variant as Record<string, unknown>)
-        : {};
-    state.variant = {
-      ...existingVariants,
-      [modelId]: variant,
-    };
-
-    await fs.promises.mkdir(path.dirname(modelStatePath), { recursive: true });
-    await fs.promises.writeFile(modelStatePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  }
-
-  private async readModelStateRecord(modelStatePath: string): Promise<Record<string, unknown>> {
-    try {
-      const parsed = JSON.parse(await fs.promises.readFile(modelStatePath, 'utf8'));
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
     } catch {
       return {};
     }

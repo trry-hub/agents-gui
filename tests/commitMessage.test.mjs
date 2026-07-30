@@ -407,7 +407,7 @@ test('commit message command depends on the text-generation use case instead of 
 });
 
 
-test('sidebar does not persist active model selection as its own model config', () => {
+test('sidebar keeps execution overrides out of persisted composer state', () => {
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const mediaSource = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
   const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
@@ -422,17 +422,14 @@ test('sidebar does not persist active model selection as its own model config', 
   assert.doesNotMatch(sidebarSource, /this\.state\.update\(\s*MODEL_STATE_KEY,/s);
   assert.doesNotMatch(sidebarSource, /activeModelByProvider: this\.getStoredModelState\(\)/);
   assert.doesNotMatch(sidebarSource, /normalizeModelState\(payload\.activeModelByProvider\)/);
-  assert.match(mediaSource, /let activeModelByProvider = \{\};/);
-  assert.match(mediaSource, /activeModelByProvider = \{\};/);
-  assert.doesNotMatch(mediaSource, /activeModelByProvider,\s*recentModelByProvider,/);
+  assert.doesNotMatch(mediaSource, /activeModelByProvider|recentModelByProvider|favoriteModelByProvider/);
+  assert.doesNotMatch(mediaSource, /customModel|modelVariant|activeRuntime|activePermission/);
+  assert.match(mediaSource, /let activeAgentModeByProvider = persistableAgentModeMap\(saved\.activeAgentModeByProvider\);/);
   assert.match(
     mediaSource,
     /function persist\(\)[\s\S]*vscode\.setState[\s\S]*schedulePersistUserSelection\(\);/
   );
-  assert.match(
-    mediaSource,
-    /modelSelect\.addEventListener\('change'[\s\S]*persistUserSelection\(\);[\s\S]*renderAll\(\);/
-  );
+  assert.doesNotMatch(mediaSource, /modelSelect|runtimeSelect|permissionSelect/);
 });
 
 test('extension registers SCM title generation and cancel commands', () => {

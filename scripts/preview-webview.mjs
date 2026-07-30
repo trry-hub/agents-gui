@@ -34,36 +34,10 @@ const codexModes = [
   { id: 'plan', label: 'Plan', description: 'Codex planning workflow', instruction: 'Plan before editing.' },
   { id: 'review', label: 'Review', description: 'Codex review mode', instruction: 'Lead with findings.' },
 ];
-const codexModels = [
-  { id: 'gpt-5.5', label: 'GPT-5.5', description: 'Frontier model for complex work', args: ['--model', 'gpt-5.5'] },
-  { id: 'gpt-5.4', label: 'GPT-5.4', description: 'Strong model for everyday coding', args: ['--model', 'gpt-5.4'] },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', description: 'Fast model for lighter tasks', args: ['--model', 'gpt-5.4-mini'] },
-  { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', description: 'Coding-optimized model', args: ['--model', 'gpt-5.3-codex'] },
-  { id: 'gpt-5.3-codex-spark', label: 'Codex Spark', description: 'Ultra-fast coding model', args: ['--model', 'gpt-5.3-codex-spark'] },
-  { id: 'custom', label: 'Custom', description: 'Enter a custom model id', custom: true },
-];
-const codexRuntimes = [
-  { id: 'localProcessing', label: 'Process locally', summaryLabel: 'Local mode', description: 'Keep Codex work on this machine.' },
-  { id: 'codexWeb', label: 'Connect Codex web', description: 'Open Codex web connection settings.', actionOnly: true, external: true },
-  { id: 'sendCloud', label: 'Send to cloud', description: 'Cloud handoff is not available in this extension yet.', disabled: true },
-  { id: 'quota', label: 'Remaining quota', description: 'View remaining Codex web quota.', actionOnly: true, dividerBefore: true },
-];
-const codexPermissions = [
-  { id: 'readOnly', label: 'Read Only', description: 'Inspect without edits', args: ['--sandbox', 'read-only'] },
-  { id: 'workspaceWrite', label: 'Workspace', description: 'Edit workspace files', args: ['--sandbox', 'workspace-write'] },
-  { id: 'fullAuto', label: 'Full Auto', description: 'Low-friction sandboxed automation', args: ['--full-auto'] },
-  { id: 'danger', label: 'Danger', description: 'Bypass approvals and sandbox', args: ['--dangerously-bypass-approvals-and-sandbox'], dangerous: true },
-];
 const claudeModes = [
   { id: 'build', label: 'Build', description: 'Claude Code implementation workflow', instruction: 'Implement scoped changes.' },
   { id: 'plan', label: 'Plan', description: 'Claude Code planning workflow', instruction: 'Plan before editing.' },
   { id: 'review', label: 'Review', description: 'Claude Code review mode', instruction: 'Lead with findings.' },
-];
-const claudePermissions = [
-  { id: 'default', label: 'Ask before edits', description: 'Claude Code default permission mode.', args: ['--permission-mode', 'default'] },
-  { id: 'acceptEdits', label: 'Accept edits', description: 'Claude can edit without asking each time.', args: ['--permission-mode', 'acceptEdits'] },
-  { id: 'plan', label: 'Plan', description: 'Planning before changes.', args: ['--permission-mode', 'plan'] },
-  { id: 'bypassPermissions', label: 'Bypass', description: 'Bypass permissions in isolated environments only.', args: ['--permission-mode', 'bypassPermissions'], dangerous: true },
 ];
 const geminiModes = [
   { id: 'assist', label: 'Assist', description: 'General Gemini CLI coding assistant', instruction: 'Answer directly with project context.' },
@@ -76,11 +50,6 @@ const opencodeModes = [
   { id: 'Hephaestus - Deep Agent', label: 'Hephaestus - Deep Agent', description: 'OpenCode custom primary agent', instruction: 'Use the deep agent.' },
   { id: 'Prometheus - Plan Builder', label: 'Prometheus - Plan Builder', description: 'OpenCode custom primary agent', instruction: 'Use the plan builder agent.' },
 ];
-const opencodeModels = [
-  { id: 'mimo/mimo-v2.5-pro', label: 'mimo/mimo-v2.5-pro', summaryLabel: 'mimo-v2.5-pro', description: 'OpenCode model from configured providers.', args: ['--model', 'mimo/mimo-v2.5-pro'] },
-  { id: 'opencode/big-pickle', label: 'opencode/big-pickle', summaryLabel: 'big-pickle', description: 'OpenCode hosted model.', args: ['--model', 'opencode/big-pickle'] },
-  { id: 'custom', label: 'Custom', description: 'Enter a provider/model string accepted by OpenCode.', custom: true },
-];
 const providerIcons = Object.fromEntries(
   Object.entries(manifest.providerIcons).map(([providerId, icon]) => [
     providerId,
@@ -91,14 +60,9 @@ const providerIcons = Object.fromEntries(
 const vscodeStub = `
 <script>
 const codexModes = ${JSON.stringify(codexModes)};
-const codexModels = ${JSON.stringify(codexModels)};
-const codexRuntimes = ${JSON.stringify(codexRuntimes)};
-const codexPermissions = ${JSON.stringify(codexPermissions)};
 const claudeModes = ${JSON.stringify(claudeModes)};
-const claudePermissions = ${JSON.stringify(claudePermissions)};
 const geminiModes = ${JSON.stringify(geminiModes)};
 const opencodeModes = ${JSON.stringify(opencodeModes)};
-const opencodeModels = ${JSON.stringify(opencodeModels)};
 window.__messages = [];
 const previewStateKey = 'agents-gui-preview-state-v2';
 let previewThreadSequence = 0;
@@ -134,10 +98,10 @@ window.acquireVsCodeApi = () => ({
         command: 'profiles',
         defaultProviderId: 'opencode',
         profiles: [
-          { id: 'claude', name: 'Claude Code', accent: '#d97757', installed: true, version: '2.1.118', webviewIcon: ${JSON.stringify(providerIcons.claude)}, installHint: 'curl -fsSL https://claude.ai/install.sh | bash', defaultAgentMode: 'build', agentModes: claudeModes, defaultPermissionMode: 'default', permissionModes: claudePermissions },
+          { id: 'claude', name: 'Claude Code', accent: '#d97757', installed: true, version: '2.1.118', webviewIcon: ${JSON.stringify(providerIcons.claude)}, installHint: 'curl -fsSL https://claude.ai/install.sh | bash', defaultAgentMode: 'build', agentModes: claudeModes },
           { id: 'gemini', name: 'Gemini CLI', accent: '#4285f4', installed: true, version: '0.40.0', webviewIcon: ${JSON.stringify(providerIcons.gemini)}, installHint: 'npm install -g @google/gemini-cli', defaultAgentMode: 'assist', agentModes: geminiModes },
-          { id: 'codex', name: 'Codex CLI', accent: '#10a37f', installed: true, version: '0.128.0', webviewIcon: ${JSON.stringify(providerIcons.codex)}, installHint: 'npm install -g @openai/codex', defaultAgentMode: 'build', agentModes: codexModes, defaultModel: 'gpt-5.4', modelOptions: codexModels, defaultRuntime: 'localProcessing', runtimeModes: codexRuntimes, defaultPermissionMode: 'workspaceWrite', permissionModes: codexPermissions },
-          { id: 'opencode', name: 'OpenCode', accent: '#a855f7', installed: true, version: '1.14.49', webviewIcon: ${JSON.stringify(providerIcons.opencode)}, installHint: 'brew install opencode-ai/tap/opencode', defaultAgentMode: 'Sisyphus - Ultraworker', agentModes: opencodeModes, defaultModel: 'mimo/mimo-v2.5-pro', modelOptions: opencodeModels },
+          { id: 'codex', name: 'Codex CLI', accent: '#10a37f', installed: true, version: '0.128.0', webviewIcon: ${JSON.stringify(providerIcons.codex)}, installHint: 'npm install -g @openai/codex', defaultAgentMode: 'build', agentModes: codexModes },
+          { id: 'opencode', name: 'OpenCode', accent: '#a855f7', installed: true, version: '1.14.49', webviewIcon: ${JSON.stringify(providerIcons.opencode)}, installHint: 'brew install opencode-ai/tap/opencode', defaultAgentMode: 'Sisyphus - Ultraworker', agentModes: opencodeModes },
           { id: 'missing', name: 'Missing CLI', accent: '#d97757', installed: false, installHint: 'install missing-cli' }
         ],
       }})), 20);
@@ -150,7 +114,6 @@ window.acquireVsCodeApi = () => ({
         command: 'contextSummary',
         requestId: message.requestId,
         cliId: message.cliId,
-        modelId: message.modelId,
         summary: {
           workspace: 'agents-gui',
           workspacePath: '/Users/t/6bt/myproject/agents-gui',

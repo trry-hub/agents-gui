@@ -69,14 +69,6 @@ export interface CliProfile {
 }
 
 const CLAUDE_SLASH_COMMANDS: CliSlashCommand[] = [
-  { name: 'model', kind: 'local', local: 'model', descriptionKey: 'slash.model.desc' },
-  {
-    name: 'permissions',
-    aliases: ['permission'],
-    kind: 'local',
-    local: 'permissions',
-    descriptionKey: 'slash.permissions.desc',
-  },
   {
     name: 'terminal',
     aliases: ['terminal-setup'],
@@ -87,20 +79,6 @@ const CLAUDE_SLASH_COMMANDS: CliSlashCommand[] = [
 ];
 
 const OPENCODE_SLASH_COMMANDS: CliSlashCommand[] = [
-  {
-    name: 'sessions',
-    aliases: ['session', 'resume', 'continue'],
-    kind: 'local',
-    local: 'sessions',
-    descriptionKey: 'slash.sessions.desc',
-  },
-  {
-    name: 'models',
-    aliases: ['model'],
-    kind: 'local',
-    local: 'models',
-    descriptionKey: 'slash.models.desc',
-  },
   {
     name: 'agents',
     aliases: ['agent'],
@@ -115,7 +93,6 @@ const OPENCODE_SLASH_COMMANDS: CliSlashCommand[] = [
     local: 'mcp',
     descriptionKey: 'slash.mcps.desc',
   },
-  { name: 'variants', kind: 'local', local: 'variants', descriptionKey: 'slash.variants.desc' },
   { name: 'connect', kind: 'local', local: 'connect', descriptionKey: 'slash.connect.desc' },
   {
     name: 'org',

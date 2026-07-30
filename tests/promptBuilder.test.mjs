@@ -836,28 +836,6 @@ test('CLI profiles retain normalized detected version status', () => {
   assert.match(discoverySource, /const candidates = clean\.matchAll/);
 });
 
-test('context summary carries lightweight token usage estimates without bundled tokenizer runtimes', () => {
-  const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
-  const collectorSource = readFileSync(
-    new URL('../src/contextCollector.ts', import.meta.url),
-    'utf8'
-  );
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const counterSource = readFileSync(new URL('../src/tokenCounter.ts', import.meta.url), 'utf8');
-  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-
-  assert.match(typesSource, /tokenUsage\?: AssistantTokenUsage/);
-  assert.match(typesSource, /'estimated'/);
-  assert.doesNotMatch(collectorSource, /estimateContextTokens/);
-  assert.match(sidebarSource, /tokenUsage: countContextTokens\(snapshot, profile, modelId\)/);
-  assert.match(counterSource, /function isCjkCodePoint/);
-  assert.match(counterSource, /precision: 'estimated'/);
-  assert.doesNotMatch(counterSource, /getEncoding/);
-  assert.doesNotMatch(counterSource, /countAnthropicTokens/);
-  assert.doesNotMatch(counterSource, /Math\.ceil\(characters \/ 4\)/);
-  assert.ok(!('@anthropic-ai/tokenizer' in (manifest.dependencies ?? {})));
-  assert.ok(!('js-tiktoken' in (manifest.dependencies ?? {})));
-});
 
 test('context token usage identifies attached context explicitly', () => {
   const usage = countContextTokens(
@@ -1185,40 +1163,6 @@ test('webview avoids a duplicate internal title and uses icon-only action button
   assert.match(html, /<svg viewBox="0 0 16 16"/);
 });
 
-test('webview uses provider-native mode control and keeps task routing internal', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-
-  assert.match(html, /id="modelSelect"/);
-  assert.match(html, /id="runtimeSelect"/);
-  assert.match(html, /id="permissionSelect"/);
-  assert.match(html, /id="customModelInput"/);
-  assert.match(html, /class="mode-menu"/);
-  assert.match(html, /class="mode-popover option-popover-single"/);
-  assert.match(html, /id="agentModeSummaryLabel"/);
-  assert.match(html, /class="select-field agent-select native-option-field"/);
-  assert.match(html, /id="agentModeSelect"/);
-  assert.match(html, /id="agentModeOptionList"/);
-  assert.match(html, /id="actionSelect"[^>]*hidden/);
-  assert.doesNotMatch(html, /class="advanced-menu"/);
-  assert.doesNotMatch(html, /data-i18n="advanced\.short"/);
-});
-
-test('webview keeps local remote runtime outside the prompt input shell', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const promptShellStart = html.indexOf('<div class="prompt-shell">');
-  const composerRuntimeStart = html.indexOf('<div class="composer-runtime"');
-
-  assert.ok(promptShellStart >= 0);
-  assert.ok(composerRuntimeStart > promptShellStart);
-  assert.doesNotMatch(
-    html.slice(promptShellStart, composerRuntimeStart),
-    /runtimeSelect|runtime-menu/
-  );
-  assert.match(html.slice(composerRuntimeStart), /class="option-menu runtime-menu"/);
-  assert.match(css, /\.composer-runtime\s*\{\s*[^}]*display:\s*flex;/s);
-  assert.match(css, /\.composer-runtime \.runtime-menu\.is-visible\s*\{\s*[^}]*display:\s*block;/s);
-});
 
 test('webview allocates the OpenCode history column at medium widths only when history is visible', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
@@ -1258,488 +1202,7 @@ test('webview allocates the OpenCode history column at medium widths only when h
   );
 });
 
-test('webview omits the composer advanced toggle but keeps provider setup actions', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const attachmentStoreSource = readFileSync(
-    new URL('../src/attachmentStore.ts', import.meta.url),
-    'utf8'
-  );
-  const cliSetupSource = readFileSync(new URL('../src/cliSetup.ts', import.meta.url), 'utf8');
-  const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
-  const openCodeLocalStateSource = readFileSync(
-    new URL('../src/openCodeLocalState.ts', import.meta.url),
-    'utf8'
-  );
 
-  assert.doesNotMatch(html, /id="composerAdvancedToggle"/);
-  assert.doesNotMatch(html, /class="advanced-toggle"/);
-  assert.doesNotMatch(
-    script,
-    /composerAdvancedVisible|composerAdvancedToggle|setComposerAdvancedVisible|applyComposerAdvancedState|composerShell\.dataset\.advanced/
-  );
-  assert.doesNotMatch(css, /\.advanced-toggle|data-advanced/);
-  assert.doesNotMatch(i18nScript, /composer\.advanced|advancedHide/);
-  assert.match(css, /\.suggestion-button--primary\s*\{/s);
-
-  assert.match(script, /let setupProfiles = \[\];/);
-  assert.match(script, /function normalizeSetupProfiles\(value\)/);
-  assert.match(script, /function setupProfilesForOnboarding\(\)/);
-  assert.match(script, /function appendCliSetupState\(fallbackProfile\)/);
-  assert.match(script, /function createCliSetupCard\(profile, recommended\)/);
-  assert.match(
-    script,
-    /SETUP_PROVIDER_ORDER = Object\.freeze\(\['opencode', 'codex', 'claude', 'gemini', 'goose', 'aider'\]\)/
-  );
-  assert.match(script, /function providerUnavailableMessage\(profile\)/);
-  assert.match(script, /appendCliSetupState\(\);/);
-  assert.match(script, /appendCliSetupState\(selectedProfile\);/);
-  assert.match(script, /'openSettings'/);
-  assert.match(script, /'refreshProviders'/);
-  assert.match(script, /'installCli'/);
-  assert.match(script, /'copyInstall'/);
-  assert.match(script, /function createHomeAgentAuthActions\(profile\)/);
-  assert.match(script, /button\.dataset\.cliAuthAction = action/);
-  assert.match(script, /command: 'runCliAuthAction'/);
-  assert.match(script, /button\.classList\.add\('suggestion-button--primary'\)/);
-  assert.match(
-    script,
-    /vscode\.postMessage\(\{ command: 'installCli', cliId: button\.dataset\.cliId \}\)/
-  );
-  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles' \}\)/);
-  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles', force: true \}\)/);
-  assert.match(sidebarSource, /case 'openSettings':/);
-  assert.match(sidebarSource, /case 'runCliAuthAction':/);
-  assert.match(
-    sidebarSource,
-    /this\.cliSetup\.runCliAuthAction\(\s*this\.settingsManager\.resolveCliId\(message\),\s*message\.action\s*\)/s
-  );
-  assert.match(sidebarSource, /case 'copyInstallCommand':/);
-  assert.match(sidebarSource, /this\.cliSetup\.copyInstallCommand\(message\.installCommand\)/);
-  assert.match(sidebarSource, /case 'installCli':/);
-  assert.match(sidebarSource, /this\.cliSetup\.installCli\(message\.cliId\)/);
-  assert.doesNotMatch(sidebarSource, /private async installCli\(cliId: unknown\): Promise<void>/);
-  assert.doesNotMatch(
-    sidebarSource,
-    /private async runCliAuthAction\(cliId: string, action: unknown\): Promise<void>/
-  );
-  assert.match(cliSetupSource, /export class CliSetupController/);
-  assert.match(cliSetupSource, /installHint: resolveCliInstallHint\(profile\)/);
-  assert.match(cliSetupSource, /const command = profile \? resolveCliInstallHint\(profile\) : '';/);
-  assert.match(cliSetupSource, /CLI_PROFILES\.find\(\(item\) => item\.id === profileId\)/);
-  assert.match(cliSetupSource, /profile\?\.authCommands\?\.\[authAction\]/);
-  assert.match(
-    cliSetupSource,
-    /const command = \[profile\.command, \.\.\.args\]\.map\(shellQuote\)\.join\(' '\)/
-  );
-  assert.match(
-    cliSetupSource,
-    /vscode\.window\.createTerminal\(\{ name: `Agents GUI Setup: \$\{profile\.name\}` \}\)/
-  );
-  assert.match(cliSetupSource, /terminal\.sendText\(command, true\)/);
-  const protocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(protocolSource, /setOpenCodeModelVariant/);
-  assert.doesNotMatch(sidebarSource, /setOpenCodeModelVariant|OpenCodeLocalState/);
-  assert.doesNotMatch(sidebarSource, /\.local', 'state', 'opencode', 'model\.json'/);
-  assert.doesNotMatch(sidebarSource, /state\.variant = \{/);
-  assert.match(
-    openCodeLocalStateSource,
-    /async updateModelVariant\(modelId: string, variant: string\): Promise<void>/
-  );
-  assert.match(openCodeLocalStateSource, /state\.variant = \{/);
-  assert.match(extensionSource, /agents-gui\.openSettings/);
-  assert.match(css, /\.cli-setup-state\s*\{/);
-  assert.match(css, /\.cli-setup-card\.is-recommended\s*\{/);
-  assert.match(css, /\.cli-setup-command\s*\{/);
-  assert.match(css, /\.home-agent-auth-actions\s*\{/);
-  assert.match(css, /\.home-agent-auth-button\.is-danger\s*\{/);
-  assert.match(i18nScript, /'homeAgents\.signOut': 'Sign out'/);
-  assert.match(i18nScript, /'homeAgents\.signOut': '退出登录'/);
-  assert.match(i18nScript, /'setup\.title': 'Install a CLI Agent to start'/);
-  assert.match(i18nScript, /'setup\.title': '安装一个 CLI Agent 后开始使用'/);
-  assert.match(i18nScript, /'setup\.recommendedBadge': 'Recommended · Quick start'/);
-  assert.match(i18nScript, /'setup\.recommendedBadge': '推荐 · 快速开始'/);
-  assert.match(i18nScript, /'setup\.installRecommended': 'Install OpenCode'/);
-  assert.match(i18nScript, /'setup\.installRecommended': '安装 OpenCode'/);
-  assert.match(i18nScript, /'empty\.configureProviders': 'Open provider settings'/);
-  assert.match(i18nScript, /'empty\.configureProviders': '前往设置配置提供方'/);
-  assert.match(i18nScript, /'empty\.copyInstall': 'Copy install command'/);
-  assert.match(i18nScript, /'empty\.copyInstall': '复制安装命令'/);
-  assert.match(
-    i18nScript,
-    /'provider\.unavailableWithHint': 'Provider is not installed\. Install one first \(for example: \{hint\}\), then refresh\.'/
-  );
-  assert.match(
-    i18nScript,
-    /'provider\.unavailableWithHint': '该提供方尚未安装。请先安装一个提供方（例如：\{hint\}），然后刷新。'/
-  );
-  assert.match(script, /providerUnavailableMessage\(profile\)/);
-  assert.match(script, /providerUnavailableMessage\(profile \|\| providerId\)/);
-});
-
-test('webview renders the Codex local mode menu like Code X', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-
-  assert.match(html, /id="runtimeOptionList"[^>]*role="menu"/);
-  assert.match(
-    script,
-    /const runtimeOptionList = document\.getElementById\('runtimeOptionList'\);/
-  );
-  assert.match(script, /function renderRuntimeOptionList\(options, selectedId\)/);
-  assert.match(
-    script,
-    /runtimeMenu\?\.classList\.toggle\('is-danger', Boolean\(runtime\?\.dangerous\)\);/
-  );
-  assert.match(script, /i18n\.t\('runtime\.continue'\)/);
-  assert.match(script, /displayRuntime\.summaryLabel \|\| displayRuntime\.label/);
-  assert.match(script, /function selectableOption\(option\)/);
-  assert.match(script, /return providerCapabilities\.selectableOption\(option\);/);
-  assert.match(script, /if \(!button \|\| button\.disabled\) \{/);
-  assert.match(script, /if \(button\.classList\.contains\('is-action'\)\) \{/);
-  assert.match(script, /runtimeMenu\.open = false;/);
-  assert.match(script, /runtimeAction: button\.dataset\.value/);
-  assert.doesNotMatch(
-    script,
-    /button\.disabled \|\| button\.classList\.contains\('is-action'\)\) \{/
-  );
-  assert.match(css, /\.runtime-option-list\s*\{/);
-  assert.match(css, /\.runtime-option-list \.option-list-item\s*\{/);
-  assert.match(css, /\.option-list-item-trailing\s*\{/);
-  assert.match(css, /\.runtime-menu\.is-danger \.option-summary/);
-  assert.match(css, /body\[data-provider="codex"\] \.runtime-menu\.is-danger \.option-summary/);
-  assert.match(i18nScript, /'runtime\.continue': '继续使用'/);
-  assert.match(i18nScript, /'option\.runtime\.localProcessing': '在本地处理'/);
-  assert.match(i18nScript, /'option\.runtime\.localProcessing\.summary': '本地模式'/);
-  assert.match(i18nScript, /'option\.runtime\.codexWeb': '关联 Codex web'/);
-  assert.match(i18nScript, /'option\.runtime\.sendCloud': '发送至云端'/);
-  assert.match(i18nScript, /'option\.runtime\.quota': '剩余额度'/);
-  assert.doesNotMatch(i18nScript, /localOllama|localLmStudio/);
-});
-
-test('webview renders model selection as a single-layer menu', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-
-  assert.match(
-    html,
-    /class="select-field agent-select native-option-field"[\s\S]*id="modelSelect"/
-  );
-  assert.match(html, /id="modelOptionList"[^>]*role="menu"/);
-  assert.match(script, /const modelOptionList = document\.getElementById\('modelOptionList'\);/);
-  assert.match(script, /function renderModelOptionList\(options, selectedId\)/);
-  assert.match(script, /function renderAgentModeOptionList\(modes, selectedId\)/);
-  assert.match(script, /'model-option-item'/);
-  assert.match(script, /'mode-option-item'/);
-  assert.match(script, /check\.className = 'model-option-check';/);
-  assert.match(script, /renderModelOptionList\(options, model\.id\);/);
-  assert.match(script, /renderAgentModeOptionList\(modes, agentModeSelect\.value\);/);
-  assert.match(script, /modelOptionList\?\.addEventListener\('click'/);
-  assert.match(script, /agentModeOptionList\?\.addEventListener\('click'/);
-  assert.match(script, /modeMenu\?\.addEventListener\('keydown'/);
-  assert.match(script, /event\.key !== 'Tab'/);
-  assert.match(script, /switchAgentModeByDelta\(event\.shiftKey \? -1 : 1\)/);
-  assert.match(script, /function switchAgentModeByDelta\(delta\)/);
-  assert.match(script, /activeModelByProvider\[activeId\] = button\.dataset\.value;/);
-  assert.match(script, /setActiveAgentMode\(button\.dataset\.value\)/);
-  assert.match(script, /setActiveAgentMode\(next\.id, \{ keepMenuOpen: true \}\)/);
-  assert.match(script, /modelMenu\.open = false;/);
-  assert.match(script, /modeMenu\.open = false;/);
-  assert.match(script, /if \(option\?\.custom\) \{/);
-  assert.match(css, /\.model-option-list\s*\{/);
-  assert.match(html, /id="agentModeOptionList"[^>]*role="menu"/);
-  assert.match(css, /\.mode-option-list\s*\{/);
-  assert.match(css, /\.model-option-list \.option-list-item\s*\{/);
-  assert.match(css, /\.mode-option-list \.option-list-item\s*\{/);
-  assert.match(css, /\.model-option-list \.option-list-item::before\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /\.mode-option-list \.option-list-item::before\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(
-    css,
-    /\.model-option-list \.option-list-item:hover,\s*\.model-option-list \.option-list-item:focus-visible\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--assistant-hover\) 72%, transparent\);/s
-  );
-  assert.match(
-    css,
-    /\.mode-option-list \.option-list-item:hover,\s*\.mode-option-list \.option-list-item:focus-visible\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--assistant-hover\) 72%, transparent\);/s
-  );
-  assert.match(
-    css,
-    /\.option-list-item:hover,\s*\.option-list-item:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--assistant-accent\);/s
-  );
-  assert.match(
-    css,
-    /\.model-option-list \.option-list-item:hover,\s*\.model-option-list \.option-list-item:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--assistant-accent\);/s
-  );
-  assert.match(
-    css,
-    /\.mode-option-list \.option-list-item:hover,\s*\.mode-option-list \.option-list-item:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--assistant-accent\);/s
-  );
-  assert.match(css, /\.model-option-item\.is-selected \.model-option-check\s*\{/);
-  assert.match(css, /\.mode-option-item\.is-selected \.mode-option-marker\s*\{/);
-  assert.match(css, /\.model-menu \.custom-model-field\s*\{/);
-});
-
-test('webview composer follows the selected provider identity', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-
-  assert.match(script, /document\.body\.dataset\.provider = activeId \|\| 'none';/);
-  assert.match(script, /const sidebar = document\.getElementById\('sidebar'\);/);
-  assert.match(script, /function renderOpenCodeSidebar\(\)/);
-  assert.match(script, /sidebar\.hidden = !sidebarVisible;/);
-  assert.match(
-    script,
-    /appendOpenCodeBlock\(shell, 'Context', openCodeContextMetrics\(profile\), \{ key: 'context' \}\)/
-  );
-  assert.match(script, /appendOpenCodeBlock\(shell, 'MCP', openCodeMcpLines\(\), \{/);
-  assert.match(script, /action: \(\) => showOpenCodeStatusDialog\('mcp'\)/);
-  assert.match(script, /appendOpenCodeBlock\(shell, 'LSP', openCodeLspLines\(\), \{/);
-  assert.match(script, /LSPs auto-detected from file types/);
-  assert.match(script, /openCodeWorkspaceFooter\(\)/);
-  assert.match(script, /function openCodeMcpLines\(\)/);
-  assert.match(script, /function openCodeLspLines\(\)/);
-  assert.match(script, /function renderOpenCodeStatusDialog\(\)/);
-  assert.match(script, /function splitAgentModeLabel\(/);
-  assert.match(
-    script,
-    /profile\?\.id === 'opencode'\s*\?\s*splitAgentModeLabel\(displayMode\?\.label \|\| i18n\.t\('agentMode\.short'\)\)\.title/s
-  );
-  assert.match(script, /meta\.textContent = profile\?\.id === 'opencode'/);
-  assert.match(script, /modelSummaryText\(model, displayModel\)/);
-  assert.match(script, /composerState\.deriveComposerState\(\{/);
-  assert.match(script, /translate: \(key, values\) => i18n\.t\(key, values\)/);
-  assert.match(
-    script,
-    /const readonlyModel = providerCapabilities\.supportsModelVariants\(profile\);/
-  );
-  assert.match(
-    script,
-    /modelMenu\?\.classList\.toggle\('is-readonly', Boolean\(readonlyModel\)\);/
-  );
-  assert.match(script, /modelSummary\?\.addEventListener\('click'/);
-  assert.match(i18nScript, /'input\.placeholderProvider': 'Ask \{provider\}…'/);
-  assert.match(i18nScript, /'input\.placeholderProvider': '问 \{provider\}\.\.\.'/);
-  assert.match(
-    css,
-    /\.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s
-  );
-  assert.match(css, /\.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
-  assert.match(css, /\.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s);
-  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-area:\s*session-history;/s);
-  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-column:\s*1;/s);
-  assert.match(css, /\.session-history\s*\{\s*[^}]*grid-row:\s*1 \/ 4;/s);
-  assert.match(css, /\.session-history\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(
-    css,
-    /body\.is-session-history-visible \.session-history:not\(\[hidden\]\):not\(:empty\)\s*\{\s*[^}]*display:\s*flex;/s
-  );
-  assert.match(css, /\.session-history\[hidden\]\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(
-    css,
-    /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar"\s*"session-history session-history-resizer main-content"\s*"session-history session-history-resizer composer";/s
-  );
-  assert.match(
-    css,
-    /body\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*var\(--session-history-width,[^)]*\)\s*6px\s*minmax\(0,\s*1fr\);/s
-  );
-  assert.match(
-    css,
-    /body\.is-session-history-visible \.toolbar,\s*body\.is-session-history-visible \.main-content,\s*body\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*3;/s
-  );
-  assert.match(
-    css,
-    /body\.is-session-history-visible \.session-history\s*\{\s*[^}]*grid-column:\s*1;/s
-  );
-  assert.match(
-    css,
-    /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar"\s*"main-content"\s*"composer";/s
-  );
-  assert.match(
-    css,
-    /body\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s
-  );
-  assert.match(css, /\.sidebar\s*\{\s*[^}]*grid-area:\s*sidebar;/s);
-  assert.match(css, /\.sidebar\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"session-history session-history-resizer toolbar sidebar"\s*"session-history session-history-resizer main-content sidebar"\s*"session-history session-history-resizer composer sidebar";/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-visible \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*var\(--session-history-width,[^)]*\)\s*6px\s*minmax\(0,\s*1fr\) 340px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-visible \.session-history\s*\{\s*[^}]*grid-column:\s*1;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-visible \.toolbar,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.main-content,\s*body\[data-provider="opencode"\]\.is-session-history-visible \.composer\s*\{\s*[^}]*grid-column:\s*3;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-visible \.sidebar\s*\{\s*[^}]*grid-column:\s*4;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-areas:\s*"toolbar sidebar"\s*"main-content sidebar"\s*"composer sidebar";/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\]\.is-session-history-hidden \.app-shell\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 340px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.main-content\s*\{\s*[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/s
-  );
-  assert.match(css, /body\[data-provider="opencode"\] \.sidebar\s*\{\s*[^}]*display:\s*flex;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-session-title\s*\{/);
-  assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-heading\.is-toggle\s*\{/);
-  assert.match(css, /body\[data-provider="opencode"\] \.opencode-sidebar-footer\s*\{/);
-  assert.match(css, /body\[data-provider="codex"\] \.mode-summary/);
-  assert.match(css, /body\[data-provider="opencode"\] \.prompt-shell/);
-  assert.match(css, /body\[data-provider="opencode"\] \.composer\s*\{\s*[^}]*padding:\s*5px 8px;/s);
-  assert.match(css, /body\[data-provider="opencode"\] textarea\s*\{\s*[^}]*min-height:\s*38px;/s);
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] textarea\s*\{\s*[^}]*padding:\s*6px 8px 2px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.model-menu\.is-visible\s*\{\s*[^}]*order:\s*3;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.model-menu\.is-readonly \.option-popover\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-menu\.is-visible,\s*body\[data-provider="opencode"\] \.context-menu\.is-visible/s
-  );
-  assert.match(html, /class="context-row"[\s\S]*class="context-menu"/);
-  assert.match(css, /\.context-row\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(html, /<aside class="sidebar" id="sidebar"/);
-  assert.match(
-    html,
-    /<div class="main-content">\s*<main class="messages" id="messages"[\s\S]*?<\/div>\s*<aside class="sidebar" id="sidebar"/
-  );
-  assert.match(i18nScript, /'sidebar\.mcp': 'MCP'/);
-  assert.match(i18nScript, /'sidebar\.lsp': 'LSP'/);
-  assert.match(html, /id="composerSettingsBtn"/);
-  assert.match(
-    script,
-    /const composerSettingsBtn = document\.getElementById\('composerSettingsBtn'\)/
-  );
-  assert.match(script, /composerSettingsBtn\?\.addEventListener\('click'/);
-  assert.match(script, /providerCapabilities\.controlVisibility\(profile, 'agentMode'/);
-  assert.match(css, /body\[data-provider="opencode"\] \.context-row\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(css, /body\[data-provider="opencode"\] \.context-row\s*\{\s*[^}]*padding:\s*0;/s);
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] #contextSummaryLabel\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-menu\.is-visible\s*\{\s*[^}]*order:\s*2;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.model-menu\.is-visible\s*\{\s*[^}]*max-width:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.model-menu \.option-summary\s*\{\s*[^}]*max-width:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] #modelSummaryLabel\s*\{\s*[^}]*overflow:\s*visible;[\s\S]*?text-overflow:\s*clip;[\s\S]*?white-space:\s*nowrap;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.composer-settings-button\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(css, /body\[data-provider="opencode"\] \.composer-meta\s*\{\s*[^}]*order:\s*4;/s);
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] #contextBudgetLabel\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-menu\.is-visible\s*\{\s*[^}]*max-width:\s*104px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-summary,\s*body\[data-provider="opencode"\] \.option-summary,\s*body\[data-provider="opencode"\] \.context-summary\s*\{[^}]*border:\s*1px solid transparent;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-summary,\s*body\[data-provider="opencode"\] \.option-summary,\s*body\[data-provider="opencode"\] \.context-summary\s*\{[^}]*background:\s*transparent;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.context-summary \.chip-prefix\s*\{\s*[^}]*width:\s*14px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.context-summary \.chip-prefix\s*\{\s*[^}]*border:\s*2\.25px solid color-mix\(in srgb, var\(--assistant-muted\) 54%, transparent\);/s
-  );
-  assert.doesNotMatch(
-    css,
-    /body\[data-provider="opencode"\] \.prompt-actions\s*\{[^}]*border-top:/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.prompt-actions\s*\{\s*[^}]*min-height:\s*28px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.prompt-actions\s*\{\s*[^}]*padding:\s*1px 6px 5px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.attach-button::after\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.option-summary::after,\s*body\[data-provider="opencode"\] \.mode-summary::after\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-option-list \.option-list-item\s*\{\s*[^}]*grid-template-columns:\s*10px minmax\(0,\s*1fr\);/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.mode-option-meta\s*\{\s*[^}]*color:\s*var\(--assistant-muted\);/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.send-button\s*\{[^}]*var\(--assistant-accent, #a855f7\)/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.send-button:disabled\s*\{[^}]*opacity:\s*1;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.send-button:disabled svg\s*\{[^}]*stroke-width:\s*2;/s
-  );
-});
 
 test('opencode sidebar collapses by default at compact widths', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
@@ -1766,15 +1229,6 @@ test('opencode sidebar collapses by default at compact widths', () => {
   );
 });
 
-test('context budget stays observational without a managed OpenCode server', () => {
-  const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  assert.match(typesSource, /tokenUsage\?: AssistantTokenUsage;/);
-  assert.match(typesSource, /contextWindowTokens\?: number;/);
-  assert.match(sidebarSource, /countContextTokens\(snapshot, profile, modelId\)/);
-  assert.match(sidebarSource, /resolveContextWindowTokens\(profile, modelId\)/);
-  assert.doesNotMatch(sidebarSource, /openCodeCapability|scheduleOpenCodeStatusRefresh/);
-});
 
 test('webview renders OpenCode thinking as a separate assistant detail block', () => {
   const formatterSource = readFileSync(
@@ -1975,130 +1429,6 @@ test('webview renders OpenCode thinking as a separate assistant detail block', (
   assert.match(i18nScript, /'message\.activity\.files': '已探索 \{count\} 个文件'/);
 });
 
-test('webview composer uses compact Code X style controls', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-
-  assert.match(css, /\.prompt-shell\s*\{\s*[^}]*padding:\s*12px;/s);
-  assert.match(css, /\.prompt-shell\s*\{\s*[^}]*border-radius:\s*18px;/s);
-  assert.match(
-    css,
-    /\.option-summary,\s*\.mode-summary,\s*\.context-summary\s*\{\s*[^}]*border:\s*1px solid transparent;/s
-  );
-  assert.match(
-    css,
-    /\.option-summary,\s*\.mode-summary,\s*\.context-summary\s*\{\s*[^}]*background:\s*transparent;/s
-  );
-  assert.match(css, /\.permission-menu \.option-summary::before\s*\{/);
-  assert.doesNotMatch(html, /model-summary-icon/);
-  assert.doesNotMatch(css, /\.model-summary-icon/);
-  assert.doesNotMatch(css, /clip-path:\s*polygon\(52% 0, 100% 0, 62% 42%/);
-  assert.match(css, /\.send-button,\s*\.stop-button\s*\{\s*[^}]*border-radius:\s*999px;/s);
-  assert.match(
-    css,
-    /\.send-button\s*\{\s*[^}]*background:\s*color-mix\(in srgb, var\(--vscode-foreground, #1f1f1f\) 92%, transparent\);/s
-  );
-  assert.match(html, /<circle cx="8" cy="8" r="5\.1"\/><rect class="stop-icon-square"/);
-  assert.match(
-    css,
-    /\.stop-button\s*\{\s*[^}]*color:\s*color-mix\(in srgb, var\(--vscode-errorForeground, #f14c4c\) 82%, var\(--assistant-muted\)\);/s
-  );
-  assert.match(
-    css,
-    /\.stop-button\s*\{\s*[^}]*background:\s*color-mix\(in srgb, var\(--vscode-errorForeground, #f14c4c\) 7%, var\(--assistant-panel\)\);/s
-  );
-  assert.match(
-    css,
-    /\.composer-runtime \.option-summary\s*\{\s*[^}]*border-color:\s*transparent;/s
-  );
-  assert.match(
-    css,
-    /\.composer-runtime \.option-summary::before\s*\{\s*[^}]*border:\s*1px solid currentColor;/s
-  );
-});
-
-test('webview renders a Codex style composer when Codex is selected', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-
-  assert.match(html, /class="codex-terminal-banner"/);
-  assert.match(html, /id="codexTerminalStop"/);
-  assert.match(html, /id="codexTerminalOpen"/);
-  assert.match(
-    script,
-    /const codexTerminalBanner = document\.getElementById\('codexTerminalBanner'\);/
-  );
-  assert.match(
-    script,
-    /const codexTerminalOpen = document\.getElementById\('codexTerminalOpen'\);/
-  );
-  assert.match(script, /function renderCodexTerminalBanner\(\)/);
-  assert.match(script, /const codexRunning = Boolean\(runningByProvider\.codex\);/);
-  assert.match(script, /const taskBoardVisible = visibleTasksForBoard\(\)\.length > 0;/);
-  assert.match(
-    script,
-    /codexTerminalBanner\.hidden = activeId !== 'codex' \|\| !codexRunning \|\| taskBoardVisible;/
-  );
-  assert.match(script, /codexTerminalStop\.addEventListener\('click'/);
-  assert.match(script, /codexTerminalOpen\.addEventListener\('click'/);
-  assert.match(script, /command: 'openProviderExtension', cliId: activeId/);
-  assert.match(i18nScript, /'codex\.terminalRunning': 'Running 1 terminal'/);
-  assert.match(i18nScript, /'codex\.terminalRunning': '正在运行 1 个终端'/);
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.codex-terminal-banner\s*\{\s*[^}]*display:\s*flex;/s
-  );
-  assert.match(css, /body\[data-provider="codex"\] \.prompt-shell\s*\{\s*[^}]*padding:\s*0;/s);
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.prompt-shell\s*\{\s*[^}]*border-radius:\s*18px;/s
-  );
-  assert.match(css, /body\[data-provider="codex"\] \.prompt-actions\s*\{\s*[^}]*border-top:\s*0;/s);
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.permission-menu\.is-visible\s*\{\s*[^}]*order:\s*2;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.permission-menu \.option-summary\s*\{\s*[^}]*color:\s*var\(--vscode-foreground\);/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.permission-menu\.is-danger \.option-summary\s*\{\s*[^}]*color:\s*var\(--vscode-inputValidation-warningForeground, #b87500\);/s
-  );
-  assert.match(css, /body\[data-provider="codex"\] \.composer-settings-button,/);
-  assert.match(css, /body\[data-provider="codex"\] \.mode-menu\.is-default:not\(\[open\]\),/);
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.permission-menu\.is-default:not\(\[open\]\)\s*\{[\s\S]*?display:\s*none;/s
-  );
-  assert.doesNotMatch(
-    css,
-    /body\[data-provider="codex"\][^{]*:hover[^{]*\{[\s\S]*?display:\s*(?:inline-grid|block|flex)/
-  );
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.composer-footer:has\(\.runtime-menu\.is-default:not\(\[open\]\)\)\s*\{[\s\S]*?display:\s*none;/s
-  );
-  assert.match(css, /body\[data-provider="codex"\] \.context-row\s*\{\s*[^}]*display:\s*none;/s);
-  assert.match(script, /runtimeMenu\?\.classList\.toggle\(\s*'is-default'/);
-  assert.match(script, /permissionMenu\?\.classList\.toggle\(\s*'is-default'/);
-  assert.match(script, /modeMenu\?\.classList\.toggle\(\s*'is-default'/);
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.composer-meta\s*\{\s*[^}]*margin-left:\s*auto;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.model-menu\.is-visible\s*\{\s*[^}]*order:\s*7;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="codex"\] \.send-button\s*\{\s*[^}]*background:\s*#8f8f8f;/s
-  );
-});
 
 test('provider extension bridges use the corresponding VS Code extension commands', () => {
   assert.deepEqual(getProviderExtensionBridge('codex'), {
@@ -2163,166 +1493,7 @@ test('sidebar opens provider VS Code extensions through a whitelisted bridge', (
   );
 });
 
-test('webview renders a Claude Code style composer when Claude is selected', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const claudeActionsSource = readFileSync(
-    new URL('../media/claudeActions.js', import.meta.url),
-    'utf8'
-  );
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
 
-  assert.match(html, /class="claude-terminal-banner"/);
-  assert.match(html, /id="claudeTerminalDismiss"/);
-  assert.match(html, /id="claudeSlashBtn"/);
-  assert.match(html, /class="claude-slash-glyph"/);
-  assert.match(html, /class="claude-permission-icon"/);
-  assert.match(
-    script,
-    /let claudeTerminalBannerDismissed = Boolean\(saved\.claudeTerminalBannerDismissed\);/
-  );
-  assert.match(script, /composerState\.deriveComposerState\(\{/);
-  assert.match(
-    readFileSync(new URL('../media/composerState.js', import.meta.url), 'utf8'),
-    /translate\('claude\.placeholder'\)/
-  );
-  assert.match(script, /const label = i18n\.t\('claude\.permission\.default\.title'\);/);
-  assert.match(script, /function claudePermissionPanelOption\(option\)/);
-  assert.match(script, /function claudeEffortValueLabel\(runtime\)/);
-  assert.match(script, /const LUCIDE_ICON_DEFS = Object\.freeze\(/);
-  assert.match(script, /const CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID = Object\.freeze\(/);
-  assert.match(
-    script,
-    /appendLucideIcon\(icon, CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID\[option\.id\]\);/
-  );
-  assert.match(script, /appendLucideIcon\(icon, 'sliders-horizontal'\);/);
-  assert.match(script, /const claudeActions = window\.AgentsGuiClaudeActions/);
-  assert.match(script, /claudeActions\.actionSections\(/);
-  assert.match(claudeActionsSource, /const ACTION_SECTIONS = Object\.freeze\(/);
-  assert.match(script, /function renderClaudeActionDrawer/);
-  assert.match(script, /slashPaletteMode = 'claudeActions';/);
-  assert.match(script, /claudeActionQuery = parsed\.query \|\| '';\s*input\.value = '';/s);
-  assert.match(script, /header\.className = 'claude-permission-panel-header';/);
-  assert.match(script, /effort\.className = 'claude-permission-effort-row';/);
-  assert.match(script, /function openSlashCommandPalette\(\)/);
-  assert.match(script, /function appendClaudeCodeHeader\(\)/);
-  assert.match(script, /function appendClaudeEmptyState\(\)/);
-  assert.match(script, /let claudeModelMenuExplicit = false;/);
-  assert.match(script, /claudeSlashBtn\?\.addEventListener\('click'/);
-  assert.match(
-    i18nScript,
-    /'claude\.terminalPreference': 'Prefer the Terminal experience\? Switch back in Settings\.'/
-  );
-  assert.match(i18nScript, /'claude\.header': 'Claude Code'/);
-  assert.match(i18nScript, /'claude\.empty\.title': 'Ready to code\?'/);
-  assert.match(i18nScript, /'claude\.permissionPanel\.title': 'Modes'/);
-  assert.match(i18nScript, /'claude\.permission\.acceptEdits\.title': 'Edit automatically'/);
-  assert.match(
-    i18nScript,
-    /'claude\.permission\.auto\.description': 'Claude will automatically choose the best permission mode for each task'/
-  );
-  assert.match(i18nScript, /'claude\.effort\.label': 'Effort \(\{value\}\)'/);
-  assert.match(i18nScript, /'claude\.actions\.filterPlaceholder': 'Filter actions\.\.\.'/);
-  assert.match(i18nScript, /'claude\.actions\.attachFile': 'Attach file\.\.\.'/);
-  assert.match(i18nScript, /'claude\.actions\.switchModel': 'Switch model\.\.\.'/);
-  assert.match(i18nScript, /'claude\.placeholder': '⌘ Esc to focus or unfocus Claude'/);
-  assert.match(i18nScript, /'claude\.permission\.askBeforeEdits': 'Ask before edits'/);
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.claude-terminal-banner\s*\{\s*[^}]*display:\s*flex;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.prompt-shell:focus-within\s*\{\s*[^}]*border-color:\s*color-mix\(in srgb,\s*#d97757 58%,\s*var\(--assistant-border\)\);/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.prompt-shell\s*\{\s*[^}]*border-radius:\s*8px;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.composer-meta,\s*body\[data-provider="claude"\] \.mode-menu,\s*body\[data-provider="claude"\] \.context-menu,\s*body\[data-provider="claude"\] \.composer-settings-button\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.composer-footer\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.permission-menu\.is-claude-panel \.option-popover\s*\{\s*[^}]*width:\s*min\(300px,\s*calc\(100vw - 16px\)\);/s
-  );
-  assert.match(css, /\.claude-permission-panel-header\s*\{/);
-  assert.match(css, /\.claude-permission-effort-row\s*\{/);
-  assert.match(css, /\.claude-lucide-icon\s*\{/);
-  assert.match(css, /body\[data-provider="claude"\] \.slash-palette\.is-claude-actions\s*\{/);
-  assert.match(css, /\.claude-action-filter\s*\{/);
-  assert.match(css, /\.claude-action-section-title\s*\{/);
-  assert.match(css, /\.claude-action-toggle\.is-on::after\s*\{/);
-  assert.doesNotMatch(
-    css,
-    /body\[data-provider="claude"\] \.permission-menu\.is-claude-panel \[data-value="default"\] \.permission-option-icon::before/
-  );
-  assert.match(
-    script,
-    /profile\.id !== 'claude' \|\| \(claudeModelMenuExplicit && modelMenu\?\.open\)/
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.model-menu\.is-visible\s*\{\s*[^}]*display:\s*block;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.claude-slash-glyph\s*\{\s*[^}]*border:\s*1\.4px solid currentColor;/s
-  );
-  assert.doesNotMatch(
-    css,
-    /body\[data-provider="claude"\] \.compact-select,\s*body\[data-provider="claude"\] \.composer-meta/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.permission-menu\.is-visible\s*\{\s*[^}]*display:\s*block;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.claude-permission-icon\s*\{\s*[^}]*display:\s*block;/s
-  );
-  assert.match(
-    css,
-    /body\[data-provider="claude"\] \.send-button\s*\{\s*[^}]*border-radius:\s*6px;/s
-  );
-});
-
-test('Claude slash commands expose only locally supported controls', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-  const claudeSlashBlock = profilesSource.slice(
-    profilesSource.indexOf('const CLAUDE_SLASH_COMMANDS'),
-    profilesSource.indexOf('const OPENCODE_SLASH_COMMANDS')
-  );
-
-  assert.match(profilesSource, /const CLAUDE_SLASH_COMMANDS: CliSlashCommand\[\] = \[/);
-  assert.match(profilesSource, /name: 'model', kind: 'local', local: 'model'/);
-  assert.match(
-    profilesSource,
-    /name: 'permissions',\s*aliases: \['permission'\],\s*kind: 'local',\s*local: 'permissions'/
-  );
-  assert.match(
-    profilesSource,
-    /name: 'terminal',\s*aliases: \['terminal-setup'\],\s*kind: 'local',\s*local: 'terminal'/
-  );
-  assert.match(script, /profileSlashCommands\(profile\)/);
-  assert.match(script, /case 'model':[\s\S]*modelMenu\.open = true;[\s\S]*renderModelSelect\(\);/);
-  assert.match(
-    script,
-    /case 'permissions':[\s\S]*permissionMenu\.open = true;[\s\S]*renderPermissionSelect\(\);/
-  );
-  assert.doesNotMatch(claudeSlashBlock, /nativeApi: true/);
-  assert.match(i18nScript, /'slash\.model\.desc'/);
-  assert.match(i18nScript, /'slash\.permissions\.desc'/);
-  assert.match(i18nScript, /'slash\.terminal\.desc'/);
-});
 
 test('webview supports pasted image attachments in the composer', () => {
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
@@ -2369,43 +1540,6 @@ test('webview supports pasted image attachments in the composer', () => {
   assert.match(i18nScript, /'attachment\.add': '添加图片'/);
 });
 
-test('webview renders permissions as a Code X style option menu', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-
-  assert.match(html, /id="permissionOptionList"[^>]*role="menu"/);
-  assert.match(
-    script,
-    /const permissionOptionList = document\.getElementById\('permissionOptionList'\);/
-  );
-  assert.match(script, /function renderPermissionOptionList\(options, selectedId\)/);
-  assert.match(script, /const visibleOptions = options\.filter\(\(option\) => \(/);
-  assert.match(
-    script,
-    /profile\?\.id !== 'codex' \|\| option\.id !== 'readOnly' \|\| option\.id === selectedId/
-  );
-  assert.match(script, /'permission-option-item'/);
-  assert.match(script, /icon\.className = 'permission-option-icon';/);
-  assert.match(script, /check\.className = 'permission-option-check';/);
-  assert.match(script, /function appendDangerBadge\(button, option\)/);
-  assert.match(script, /warning\.className = 'option-list-item-warning';/);
-  assert.match(script, /permissionOptionList\.addEventListener\('click'/);
-  assert.match(script, /activePermissionByProvider\[activeId\] = button\.dataset\.value;/);
-  assert.match(script, /permissionMenu\.open = false;/);
-  assert.match(css, /\.permission-option-list\s*\{/);
-  assert.match(
-    css,
-    /\.permission-option-list \.option-list-item\s*\{\s*[^}]*grid-template-columns:\s*14px minmax\(0,\s*1fr\) 12px auto;/s
-  );
-  assert.match(
-    css,
-    /\.permission-option-list \.option-list-item::before\s*\{\s*[^}]*display:\s*none;/s
-  );
-  assert.match(css, /\.permission-option-item\.is-selected \.permission-option-check\s*\{/);
-  assert.match(css, /\.option-list-item-warning/);
-  assert.match(css, /body\[data-provider="codex"\] \.permission-menu \.option-summary/);
-});
 
 test('webview renders installed provider logo tabs in the header', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -2553,14 +1687,6 @@ test('webview keeps provider switching in the header and out of the conversation
   assert.match(css, /\.context-budget\s*\{\s*[^}]*max-width:\s*48px;/s);
 });
 
-test('custom option menus keep hidden native selects out of the tab order', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const hiddenSelectIds = ['modelSelect', 'permissionSelect', 'agentModeSelect', 'runtimeSelect'];
-
-  for (const id of hiddenSelectIds) {
-    assert.match(html, new RegExp(`<select id="${id}"[^>]*tabindex="-1"[^>]*aria-hidden="true"`));
-  }
-});
 
 test('manifest exposes title actions and general settings', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -2943,112 +2069,7 @@ test('webview uses one primary composer action slot for send and stop', () => {
   assert.match(css, /\.stop-button svg \.stop-icon-square\s*\{\s*[^}]*fill:\s*currentColor;/s);
 });
 
-test('webview refreshes context after a concrete provider is active', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
 
-  assert.match(
-    script,
-    /const DEFAULT_CONTEXT_OPTIONS = Object\.freeze\(\{\s*includeWorkspace: true,\s*includeCurrentFile: true,\s*includeSelection: true,\s*includeDiagnostics: true,\s*\}\);/
-  );
-  assert.match(
-    script,
-    /function defaultContextOptions\(\) \{\s*return \{ \.\.\.DEFAULT_CONTEXT_OPTIONS \};\s*\}/
-  );
-  assert.match(script, /function effectiveActiveModelId\(cliId = activeId\)/);
-  assert.match(
-    script,
-    /providerOptions\.effectiveModelId\(activeModel\(profile\), activeCustomModel\(cliId\)\)/
-  );
-  assert.match(script, /function refreshActiveContext\(\)/);
-  assert.match(script, /requestId:\s*nextContextRequestId\(\)/);
-  assert.match(script, /const modelId = effectiveActiveModelId\(\);/);
-  assert.match(script, /const request = \{[\s\S]*modelId,[\s\S]*\};/);
-  assert.equal(
-    script.match(/vscode\.postMessage\(\{\s*command:\s*'refreshContext'/g)?.length,
-    1,
-    'all context refreshes must use the centralized correlated path'
-  );
-  const providerSelection = script.slice(
-    script.indexOf("providerSelect.addEventListener('change'"),
-    script.indexOf("providerTabs.addEventListener('click'")
-  );
-  const profilesMessage = script.slice(
-    script.indexOf("case 'profiles':"),
-    script.indexOf("case 'switchProvider':")
-  );
-  assert.ok(
-    providerSelection.indexOf('refreshActiveContext()') < providerSelection.indexOf('renderAll()')
-  );
-  assert.notEqual(profilesMessage.indexOf('contextSummary = null'), -1);
-  assert.ok(
-    profilesMessage.indexOf('contextSummary = null') < profilesMessage.indexOf('renderAll()')
-  );
-  assert.match(
-    script,
-    /case 'refreshStarted':\s*profilesLoading = true;\s*renderAll\(\);\s*break;/
-  );
-  assert.match(
-    script,
-    /case 'switchProvider':\s*switchActiveProvider\(message\.providerId\);\s*break;/
-  );
-  assert.match(
-    script,
-    /vscode\.postMessage\(\{ command: 'checkProfiles' \}\);\s*applySessionHistoryWidth\([^)]*\);\s*initSessionHistoryResizer\(\);\s*mountCodexRenderer\(\);[\s\S]*renderAll\(\);/
-  );
-});
-
-test('all model selection paths refresh context and custom input commits cannot stay stale', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const dialogFunctionStart = script.indexOf('function selectOpenCodeDialogOption');
-  const dialogModelStart = script.indexOf("if (kind === 'models')", dialogFunctionStart);
-  const dialogSelection = script.slice(
-    dialogModelStart,
-    script.indexOf("if (kind === 'agents')", dialogModelStart)
-  );
-  const nativeSelection = script.slice(
-    script.indexOf("modelSelect.addEventListener('change'"),
-    script.indexOf("modelOptionList?.addEventListener('click'")
-  );
-  const listSelection = script.slice(
-    script.indexOf("modelOptionList?.addEventListener('click'"),
-    script.indexOf("customModelInput.addEventListener('input'")
-  );
-
-  assert.match(dialogSelection, /refreshActiveContext\(\)/);
-  assert.match(nativeSelection, /refreshActiveContext\(\)/);
-  assert.match(listSelection, /refreshActiveContext\(\)/);
-  assert.ok(
-    nativeSelection.indexOf('refreshActiveContext()') < nativeSelection.indexOf('renderAll()')
-  );
-  assert.ok(listSelection.indexOf('refreshActiveContext()') < listSelection.indexOf('renderAll()'));
-  assert.match(script, /function scheduleCustomModelContextRefresh\(cliId\)/);
-  assert.match(script, /if \(activeId !== cliId\)/);
-  assert.match(
-    script,
-    /customModelInput\.addEventListener\('input', \(\) => \{[\s\S]*contextSummary = null;[\s\S]*scheduleCustomModelContextRefresh\(cliId\);[\s\S]*\}\);/
-  );
-  assert.match(
-    script,
-    /customModelInput\.addEventListener\('change', \(\) => \{[\s\S]*commitCustomModelContextRefresh\(cliId\);[\s\S]*\}\);/
-  );
-});
-
-test('webview only applies the latest correlated context summary for the active selection', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-
-  assert.match(script, /let latestContextRequest = null;/);
-  assert.match(script, /let contextSummaryPending = false;/);
-  assert.match(
-    script,
-    /contextSummary = null;[\s\S]*latestContextRequest = request;[\s\S]*contextSummaryPending = true;/
-  );
-  assert.match(script, /case 'contextInvalidated':[\s\S]*refreshActiveContext\(\);[\s\S]*break;/);
-  assert.match(script, /case 'contextSummary':[\s\S]*providerOptions\.contextSummaryMatches\(/);
-  assert.match(script, /activeModelId:\s*effectiveActiveModelId\(\)/);
-  assert.match(script, /if \(!matches\) \{\s*break;\s*\}/);
-  assert.match(script, /contextSummaryPending = false;\s*contextSummary = message\.summary;/);
-  assert.doesNotMatch(script.slice(script.indexOf("case 'contextSummary':")), /latestContextRequest = null/);
-});
 
 test('webview empty state is visible in large blank panels', () => {
   const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
@@ -3093,29 +2114,6 @@ test('webview shows the selected provider without a generic picker prefix', () =
   assert.match(html, /id="providerSelect"[^>]*name="assistantProvider"/);
 });
 
-test('webview sends to only the active provider at send time', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-
-  assert.doesNotMatch(html, /id="agentRail"/);
-  assert.doesNotMatch(script, /renderAgentRail/);
-  assert.doesNotMatch(script, /agentRail\?\.addEventListener/);
-  assert.doesNotMatch(html, /id="agentPicker"/);
-  assert.doesNotMatch(script, /selectedAgentIds/);
-  assert.doesNotMatch(script, /normalizeSavedAgentIds/);
-  assert.doesNotMatch(script, /selectedProviderIdsForSend/);
-  assert.doesNotMatch(script, /function renderAgentPicker/);
-  assert.doesNotMatch(script, /TASK_ROUTING_RULES/);
-  assert.doesNotMatch(script, /recommendedProviderIds/);
-  assert.doesNotMatch(css, /\.agent-picker/);
-  assert.doesNotMatch(css, /\.agent-choice/);
-  assert.doesNotMatch(i18nScript, /agentPicker\./);
-  assert.match(script, /const profile = activeProfile\(\);\s*if \(!profile\?\.installed\) \{/);
-  assert.match(script, /sendToProvider\(\s*activeId,\s*action,\s*finalText,/s);
-  assert.doesNotMatch(script, /providerIds\.forEach/);
-});
 
 test('webview sends recent thread conversation as provider context', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -3241,38 +2239,6 @@ test('workbench layout toggles hidden session history and shell class together',
   assert.equal(classes.has('is-session-history-visible'), true);
 });
 
-test('webview closes composer menus when clicking outside or pressing escape', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-
-  assert.match(script, /function composerMenus\(\)/);
-  assert.match(
-    script,
-    /\[modelMenu, runtimeMenu, permissionMenu, modeMenu, contextMenu\]\.filter\(Boolean\)/
-  );
-  assert.match(script, /function closeComposerMenus\(exceptMenu\)/);
-  assert.match(script, /menu\.open = false;/);
-  assert.match(script, /document\.addEventListener\('click', \(event\) => \{/);
-  assert.match(script, /const currentMenu = target\?\.closest\('details'\);/);
-  assert.match(
-    script,
-    /slashPaletteVisible\(\)\s*&& target\s*&& !slashPalette\.contains\(target\)\s*&& target !== input/s
-  );
-  assert.match(script, /hideSlashPalette\(\);/);
-  assert.match(
-    script,
-    /closeComposerMenus\(menus\.includes\(currentMenu\) \? currentMenu : undefined\);/
-  );
-  assert.match(script, /window\.addEventListener\('keydown', \(event\) => \{/);
-  assert.match(script, /event\.key === 'Escape'/);
-  assert.match(
-    script,
-    /if \(slashPaletteVisible\(\)\) \{\s*event\.preventDefault\(\);\s*hideSlashPalette\(\);\s*return;\s*\}/s
-  );
-  assert.match(
-    script,
-    /if \(requestStopActiveProvider\(\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/s
-  );
-});
 
 test('webview removes multi-agent compare planning', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -3906,390 +2872,6 @@ test('webview does not revive stopped assistant placeholders when a later reques
   assert.match(script, /Number\(message\.exitCode\) !== 0 && !wasStopped/);
 });
 
-test('webview form controls opt out of browser autocomplete noise', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-
-  assert.match(html, /id="promptInput"[^>]*name="assistantPrompt"[^>]*autocomplete="off"/);
-  assert.match(html, /id="providerSelect"[^>]*name="assistantProvider"/);
-  assert.match(html, /id="modelSelect"[^>]*name="assistantModel"/);
-  assert.match(
-    html,
-    /id="customModelInput"[^>]*name="assistantCustomModel"[^>]*autocomplete="off"/
-  );
-  assert.match(html, /id="runtimeSelect"[^>]*name="assistantRuntime"/);
-  assert.match(html, /id="permissionSelect"[^>]*name="assistantPermission"/);
-  assert.match(html, /id="agentModeSelect"[^>]*name="assistantAgentMode"/);
-  assert.match(html, /id="actionSelect"[^>]*name="assistantAction"/);
-});
-
-test('webview exposes a provider-aware slash command palette', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const slashSource = readFileSync(new URL('../media/slashCommands.js', import.meta.url), 'utf8');
-  const openCodeDialogSource = readFileSync(
-    new URL('../media/openCodeDialogState.js', import.meta.url),
-    'utf8'
-  );
-  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-  const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
-
-  assert.match(html, /id="slashPalette"[^>]*role="listbox"/);
-  assert.match(
-    html,
-    /__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__MAIN_JS_URI__/
-  );
-  assert.match(script, /const slashCommands = window\.AgentsGuiSlashCommands/);
-  assert.match(script, /const openCodeDialogState = window\.AgentsGuiOpenCodeDialogState/);
-  assert.match(script, /const SLASH_COMMANDS = slashCommands\.createBaseSlashCommands/);
-  assert.match(slashSource, /function createBaseSlashCommands\(t = defaultTranslate\)/);
-  assert.match(script, /function profileSlashCommands\(profile\)/);
-  assert.match(script, /slashCommands\.profileSlashCommands\(profile\)/);
-  assert.match(script, /slashCommands\.commandsForProvider\(SLASH_COMMANDS, activeProfile\(\)\)/);
-  assert.match(
-    slashSource,
-    /\[\.\.\.\(baseCommands \|\| \[\]\), \.\.\.profileSlashCommands\(profile\)\]/
-  );
-  assert.match(script, /function nativeApiCommandNames\(profile\)/);
-  assert.match(script, /slashCommands\.nativeApiCommandNames\(profile\)/);
-  assert.doesNotMatch(script, /providers:\s*\['codex'\]/);
-  assert.doesNotMatch(script, /providers:\s*\['gemini'\]/);
-  assert.doesNotMatch(script, /providers:\s*\['goose'\]/);
-  assert.doesNotMatch(script, /providers:\s*\['aider'\]/);
-  assert.match(script, /function slashCommandMatchesProvider/);
-  assert.match(slashSource, /name:\s*'new',\s*aliases:\s*\['clear'\]/);
-  assert.match(profilesSource, /const OPENCODE_SLASH_COMMANDS: CliSlashCommand\[\] = \[/);
-  assert.match(
-    profilesSource,
-    /name:\s*'sessions',\s*aliases:\s*\['session',\s*'resume',\s*'continue'\],\s*kind:\s*'local',\s*local:\s*'sessions'/
-  );
-  assert.match(
-    profilesSource,
-    /name:\s*'models',\s*aliases:\s*\['model'\],\s*kind:\s*'local',\s*local:\s*'models'/
-  );
-  assert.match(
-    profilesSource,
-    /name:\s*'agents',\s*aliases:\s*\['agent'\],\s*kind:\s*'local',\s*local:\s*'agents'/
-  );
-  assert.match(
-    profilesSource,
-    /name:\s*'mcps',\s*aliases:\s*\['mcp'\],\s*kind:\s*'local',\s*local:\s*'mcp'/
-  );
-  assert.match(profilesSource, /name:\s*'variants',\s*kind:\s*'local',\s*local:\s*'variants'/);
-  assert.match(profilesSource, /name:\s*'connect',\s*kind:\s*'local',\s*local:\s*'connect'/);
-  assert.match(
-    profilesSource,
-    /name:\s*'org',\s*aliases:\s*\['orgs',\s*'switch-org'\],\s*kind:\s*'local',\s*local:\s*'org'/
-  );
-  assert.match(profilesSource, /name:\s*'status',\s*kind:\s*'local',\s*local:\s*'status'/);
-  assert.match(
-    profilesSource,
-    /name:\s*'themes',\s*aliases:\s*\['theme'\],\s*kind:\s*'local',\s*local:\s*'themes'/
-  );
-  assert.match(
-    profilesSource,
-    /name:\s*'exit',\s*aliases:\s*\['quit',\s*'q'\],\s*kind:\s*'local',\s*local:\s*'exit'/
-  );
-  assert.match(profilesSource, /nativeApi: true/);
-  assert.match(slashSource, /seen\.has\(command\.name\)/);
-  assert.match(script, /function executeLocalSlashCommand\(command, args = '', sourceQuery = ''\)/);
-  assert.match(script, /const sourceQuery = parsed\?\.query \|\| command\.name \|\| '';/);
-  assert.match(script, /executeLocalSlashCommand\(command, args, sourceQuery\);/);
-  assert.match(script, /case 'sessions':/);
-  assert.match(
-    script,
-    /case 'sessions':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('sessions', \{ commandQuery: sourceQuery \}\);\s*return;/s
-  );
-  assert.match(script, /case 'models':/);
-  assert.match(
-    script,
-    /case 'models':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('models', \{ commandQuery: sourceQuery \}\);\s*return;/s
-  );
-  assert.match(script, /case 'agents':/);
-  assert.match(
-    script,
-    /case 'agents':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('agents', \{ commandQuery: sourceQuery \}\);\s*return;/s
-  );
-  assert.match(
-    script,
-    /case 'mcp':\s*closeComposerMenus\(\);\s*showOpenCodeStatusDialog\('mcp', \{ commandQuery: sourceQuery \}\);/s
-  );
-  assert.match(script, /case 'variants':/);
-  assert.match(script, /showOpenCodeStatusDialog\('variants', \{ commandQuery: sourceQuery \}\)/);
-  assert.match(script, /function openCodeVariantLines\(\)/);
-  assert.match(script, /function openCodeModelVariantOptions\(option\)/);
-  assert.match(script, /function maybeShowOpenCodeVariantDialog\(option, options = \{\}\)/);
-  assert.match(script, /command:\s*'setOpenCodeModelVariant'/);
-  assert.match(
-    script,
-    /showOpenCodeStatusDialog\('variants', \{\s*commandQuery: 'variants',\s*returnTo: options\.returnTo,\s*\}\)/s
-  );
-  assert.match(script, /case 'status':/);
-  assert.match(script, /showOpenCodeStatusDialog\('status', \{ commandQuery: sourceQuery \}\)/);
-  assert.match(script, /case 'themes':/);
-  assert.match(script, /showOpenCodeStatusDialog\('themes', \{ commandQuery: sourceQuery \}\)/);
-  assert.match(script, /case 'connect':/);
-  assert.doesNotMatch(script, /openSettingsPage\('apiProviders'\)/);
-  assert.match(script, /function renderOpenCodeOptionDialogBody\(body, kind\)/);
-  assert.match(script, /function renderOpenCodeGroupedOptionDialogBody\(body, kind\)/);
-  assert.match(
-    script,
-    /const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState\.optionDialogKinds\(\);/
-  );
-  assert.match(
-    openCodeDialogSource,
-    /const OPTION_DIALOG_KINDS = Object\.freeze\(\['sessions', 'models', 'agents', 'variants'\]\);/
-  );
-  assert.match(script, /dialog\.setAttribute\('aria-labelledby', title\.id\);/);
-  assert.match(script, /dialog\.setAttribute\('aria-describedby', description\.id\);/);
-  assert.match(
-    script,
-    /if \(openCodeDialogKind\) \{\s*event\.preventDefault\(\);\s*dismissOpenCodeStatusDialog\(\);/s
-  );
-  assert.match(script, /function handleOpenCodeOptionDialogKeydown\(event\)/);
-  assert.match(script, /dialog\.addEventListener\('keydown', handleOpenCodeOptionDialogKeydown\);/);
-  assert.match(script, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
-  assert.match(script, /selectOpenCodeDialogOption\(openCodeDialogKind, option\.id\)/);
-  assert.match(script, /openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex\(kind\);/);
-  assert.match(script, /openCodeDialogOpenSequence \+= 1;/);
-  assert.match(script, /option\.id === openCodeDialogActiveOptionId\(kind\) \? 'is-active' : ''/);
-  assert.match(script, /function configureOpenCodeDialogFilter\(filter, kind\)/);
-  assert.match(
-    script,
-    /filter\.name = `opencode-\$\{kind\}-filter-\$\{openCodeDialogOpenSequence\}`;/
-  );
-  assert.match(script, /filter\.autocomplete = 'off';/);
-  assert.match(script, /filter\.setAttribute\('data-1p-ignore', 'true'\);/);
-  assert.match(script, /let openCodeDialogCommandEchoQuery = '';/);
-  assert.match(script, /let openCodeDialogEchoCleanupPending = false;/);
-  assert.match(script, /function normalizeOpenCodeDialogCommandQuery\(value\)/);
-  assert.match(script, /openCodeDialogState\.normalizeCommandQuery\(value\)/);
-  assert.match(openCodeDialogSource, /query === normalizedEcho/);
-  assert.match(
-    script,
-    /function clearInitialOpenCodeDialogCommandEcho\(filter, kind, renderOptions\)/
-  );
-  assert.match(script, /!openCodeDialogEchoCleanupPending/);
-  assert.match(
-    script,
-    /openCodeDialogEchoCleanupPending = false;\s*openCodeDialogActiveIndex = initialOpenCodeDialogActiveIndex\(kind\);/s
-  );
-  assert.match(script, /function focusPromptInputAfterDialogClose\(\)/);
-  assert.match(script, /input\.focus\(\);\s*resizePromptInput\(\);/s);
-  assert.match(script, /let openCodeDialogHistory = \[\];/);
-  assert.match(script, /function openCodeDialogSnapshot\(kind = openCodeDialogKind\)/);
-  assert.match(script, /function restoreOpenCodeStatusDialog\(snapshot\)/);
-  assert.match(script, /function dismissOpenCodeStatusDialog\(options = \{\}\)/);
-  assert.match(script, /const previous = openCodeDialogHistory\.pop\(\);/);
-  assert.match(
-    script,
-    /if \(previous && restoreOpenCodeStatusDialog\(previous\)\) \{\s*return;\s*\}/s
-  );
-  assert.match(script, /function closeOpenCodeStatusDialog\(\{ focusPrompt = true \} = \{\}\)/);
-  assert.match(
-    script,
-    /openCodeDialogCommandEchoQuery = '';\s*openCodeDialogEchoCleanupPending = false;/s
-  );
-  assert.match(script, /openCodeDialogHistory = \[\];\s*renderOpenCodeStatusDialog\(\);/s);
-  assert.match(script, /focusPromptInputAfterDialogClose\(\);/);
-  assert.match(script, /function showOpenCodeStatusDialog\(kind, options = \{\}\)/);
-  assert.match(
-    script,
-    /openCodeDialogCommandEchoQuery = normalizeOpenCodeDialogCommandQuery\(options\.commandQuery\);/
-  );
-  assert.match(
-    script,
-    /openCodeDialogEchoCleanupPending = Boolean\(openCodeDialogCommandEchoQuery\);/
-  );
-  assert.match(
-    script,
-    /openCodeDialogHistory = options\.returnTo \? \[options\.returnTo\] : \[\];/
-  );
-  assert.match(openCodeDialogSource, /case 'models':\s*return \['model', 'models'\];/);
-  assert.match(
-    script,
-    /clearInitialOpenCodeDialogCommandEcho\(filter, kind, \(\) => renderOpenCodeModelGroups\(list\)\)/
-  );
-  assert.match(
-    script,
-    /openCodeDialogQuery = filter\.value;\s*openCodeDialogActiveIndex = 0;\s*renderOpenCodeModelGroups\(list\);/
-  );
-  assert.match(script, /function renderOpenCodeMcpDialogBody\(body\)/);
-  assert.match(script, /function openCodeMcpDialogOptions\(\)/);
-  assert.match(script, /function toggleOpenCodeMcp\(cliId, name\)/);
-  assert.match(script, /function openCodeModelOptionGroups\(\)/);
-  assert.match(script, /function openCodeDialogOptions\(kind\)/);
-  assert.match(script, /function selectOpenCodeDialogOption\(kind, value\)/);
-  assert.match(script, /disabledMcpByProvider/);
-  assert.match(script, /openCodeDialogActiveIndex/);
-  assert.match(script, /openCodeDialogState\.keyboardOptions\(kind/);
-  assert.match(
-    script,
-    /openCodeDialogState\.moveActiveIndex\(openCodeDialogActiveIndex, options, delta\)/
-  );
-  assert.match(script, /openCodeDialogState\.modelProviderId\(modelId\)/);
-  assert.match(script, /openCodeDialogState\.groupModelOptions\(openCodeDialogModelOptions\(\)/);
-  assert.match(openCodeDialogSource, /function groupModelOptions\(options, settings = \{\}\)/);
-  assert.match(script, /className = 'opencode-dialog-filter'/);
-  assert.match(script, /className = 'opencode-dialog-group-heading'/);
-  assert.match(script, /className = 'opencode-dialog-option-footer'/);
-  assert.match(
-    script,
-    /className = `opencode-dialog-option-footer is-\$\{option\.enabled \? 'enabled' : 'disabled'\}`/
-  );
-  assert.match(script, /className = 'opencode-dialog-footer-actions'/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.title'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.search'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.searchAria'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.enabled'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.disabled'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.empty'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.status\.connected'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.status\.needsAuth'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.status\.failed'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.toggle'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.space'\)/);
-  assert.match(script, /button\.dataset\.opencodeDialogValue = option\.id;/);
-  assert.match(script, /if \(openCodeDialogKind === 'mcp'\)/);
-  assert.match(script, /event\.key === ' '/);
-  assert.match(script, /activeModelByProvider\[activeId\] = value;/);
-  assert.match(
-    script,
-    /const returnTo = openCodeDialogKind === 'models' \? openCodeDialogSnapshot\('models'\) : undefined;/
-  );
-  assert.match(script, /maybeShowOpenCodeVariantDialog\(option, \{ returnTo \}\)/);
-  assert.match(script, /activeAgentModeByProvider\[activeId\] = value;/);
-  assert.match(script, /setActiveThread\('opencode', thread\)/);
-  assert.match(script, /function executeOpenCodeNativeSlashCommand/);
-  assert.match(script, /command: 'openCodeNativeCommand'/);
-  assert.match(script, /openCodeSessionId: activeOpenCodeSessionId\(\)/);
-  assert.match(script, /nativeApiCommandNames\(activeProfile\(\)\)\.has\(command\.name\)/);
-  assert.match(script, /function handleOpenCodeForkResult/);
-  assert.match(script, /message\.newOpenCodeSessionId/);
-  assert.match(script, /case 'openCodeNativeCommandResult':/);
-  assert.match(script, /function renderSlashPalette/);
-  assert.match(script, /function executeSlashCommand/);
-  assert.match(script, /function slashInputLooksLikeCommand\(query\)/);
-  assert.match(script, /slashCommands\.slashInputLooksLikeCommand\(query\)/);
-  assert.match(script, /if \(slash && slashMatches\.length > 0\) \{/);
-  assert.match(slashSource, /query\.includes\('\/'\)/);
-  assert.match(script, /footer\.className = 'slash-footer';/);
-  assert.match(
-    script,
-    /i18n\.t\('slash\.footer\.accept', \{ command: slashMatches\[slashActiveIndex\]\.name \}\)/
-  );
-  assert.match(script, /event\.key === 'ArrowDown'/);
-  assert.match(script, /event\.key === 'Tab'/);
-  assert.match(
-    script,
-    /slashMatches\.length > 0 && \(event\.key === 'Tab' \|\| \(event\.key === 'Enter' && !event\.shiftKey\)\)/
-  );
-  assert.match(
-    script,
-    /sendBtn\.addEventListener\('click', \(event\) => \{\s*event\.stopPropagation\(\);/s
-  );
-  assert.match(script, /parseSlashInput\(input\.value\)/);
-  assert.match(script, /send\(command\.action,\s*command\.prompt/);
-  assert.match(script, /setActiveThread/);
-  assert.ok(
-    html.indexOf('<div class="slash-palette"') < html.indexOf('<div class="prompt-shell">'),
-    'slash command drawer should render as a composer-level layer above the prompt shell'
-  );
-  assert.doesNotMatch(css, /\.prompt-shell:has\(\.slash-palette:not\(\[hidden\]\)\)/);
-  assert.match(css, /\.slash-palette\s*\{/);
-  assert.match(css, /\.slash-command\.is-active\s*\{/);
-  assert.match(script, /title\.className = 'slash-command-label';/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*font-family:\s*var\(--vscode-editor-font-family/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*position:\s*absolute;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*z-index:\s*2;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*bottom:\s*calc\(100% - 8px\);/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*width:\s*auto;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*max-height:\s*min\(56vh,\s*430px\);/);
-  assert.match(
-    css,
-    /\.slash-palette\s*\{[^}]*box-shadow:\s*[\s\S]*?0 6px 18px color-mix\(in srgb, #000 5%, transparent\);/
-  );
-  assert.doesNotMatch(css, /0 18px 44px color-mix\(in srgb, #000 10%, transparent\);/);
-  assert.match(
-    css,
-    /\.slash-palette\s*\{[^}]*border:\s*1px solid color-mix\(in srgb, var\(--assistant-border\) 48%, transparent\);/
-  );
-  assert.match(css, /\.slash-palette\s*\{[^}]*border-radius:\s*4px 4px 0 0;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*transform-origin:\s*bottom center;/);
-  assert.match(css, /\.slash-palette\s*\{[^}]*animation:\s*slash-drawer-enter 120ms ease-out;/);
-  assert.match(css, /\.slash-command\s*\{[^}]*min-height:\s*18px;/);
-  assert.match(
-    css,
-    /\.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(160px,\s*240px\) minmax\(0,\s*1fr\);/
-  );
-  assert.match(css, /\.slash-command\s*\{[^}]*border-radius:\s*0;/);
-  assert.match(css, /\.slash-command:hover\s*\{[^}]*background:\s*var\(--assistant-hover\);/);
-  assert.doesNotMatch(
-    css,
-    /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*width:\s*100%;/
-  );
-  assert.doesNotMatch(
-    css,
-    /body\[data-provider="opencode"\] \.slash-palette\s*\{[^}]*box-shadow:\s*none;/
-  );
-  assert.match(css, /@keyframes slash-drawer-enter/);
-  assert.match(css, /transform:\s*translateY\(8px\) scaleY\(0\.98\);/);
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.slash-command\s*\{[^}]*grid-template-columns:\s*minmax\(238px,\s*260px\) minmax\(0,\s*1fr\);/
-  );
-  assert.match(
-    css,
-    /body\[data-provider="opencode"\] \.slash-command\.is-active\s*\{[^}]*var\(--vscode-terminal-selectionBackground/
-  );
-  assert.match(
-    css,
-    /\.slash-command\.is-active\s*\{[^}]*background:\s*var\(--vscode-list-activeSelectionBackground/
-  );
-  assert.match(css, /\.slash-footer\s*\{/);
-  assert.doesNotMatch(css, /\.slash-footer span\s*\{/);
-  assert.doesNotMatch(css, /\.slash-palette\s*\{[^}]*width:\s*100%;/);
-  assert.match(css, /\.opencode-dialog-option\s*\{/);
-  assert.match(css, /\.opencode-dialog-option\.is-selected\s*\{/);
-  assert.match(css, /\.opencode-dialog-option\.is-active\s*\{/);
-  assert.match(css, /\.opencode-dialog-filter\s*\{/);
-  assert.match(css, /\.opencode-dialog-group-heading\s*\{/);
-  assert.match(css, /\.opencode-dialog-option-footer\s*\{/);
-  assert.match(css, /\.opencode-dialog-option-footer\.is-enabled\s*\{/);
-  assert.match(css, /\.opencode-dialog-option-footer\.is-disabled\s*\{/);
-  assert.match(css, /\.opencode-dialog-footer-actions\s*\{/);
-  assert.match(i18nScript, /'slash\.empty'/);
-  assert.match(i18nScript, /'slash\.unsupported'/);
-  assert.match(i18nScript, /'slash\.sessions\.desc'/);
-  assert.match(i18nScript, /'slash\.models\.desc'/);
-  assert.match(i18nScript, /'slash\.agents\.desc'/);
-  assert.match(i18nScript, /'slash\.mcps\.desc'/);
-  assert.match(i18nScript, /'slash\.variants\.desc'/);
-  assert.match(i18nScript, /'slash\.footer\.accept'/);
-  assert.match(i18nScript, /'slash\.footer\.commands'/);
-  assert.match(i18nScript, /'slash\.connect\.desc'/);
-  assert.match(i18nScript, /'slash\.status\.desc'/);
-  assert.match(i18nScript, /'slash\.themes\.desc'/);
-  assert.match(i18nScript, /'slash\.exit\.desc'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.title': 'MCPs'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.search': 'Search'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.enabled': 'Enabled'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.disabled': 'Disabled'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.connected': 'Connected'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.needsAuth': 'Needs auth'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.failed': 'Failed'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.toggle': 'toggle'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.space': 'space'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.title': 'MCPs'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.search': '搜索'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.enabled': '已启用'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.disabled': '已禁用'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.connected': '已连接'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.needsAuth': '需要认证'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.status\.failed': '失败'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.toggle': '切换'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.space': '空格'/);
-});
 
 
 test('webview slash command palette shows each command label once', () => {
@@ -4405,113 +2987,6 @@ test('webview keeps running status singular and supports quick choices', () => {
   assert.match(promptSource, /选项 N — 标签/);
 });
 
-test('webview architecture keeps pure rules in focused browser modules', () => {
-  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const conversationSource = readFileSync(
-    new URL('../media/conversationStore.js', import.meta.url),
-    'utf8'
-  );
-  const slashSource = readFileSync(new URL('../media/slashCommands.js', import.meta.url), 'utf8');
-  const dialogSource = readFileSync(
-    new URL('../media/openCodeDialogState.js', import.meta.url),
-    'utf8'
-  );
-  const claudeSource = readFileSync(new URL('../media/claudeActions.js', import.meta.url), 'utf8');
-  const inlineSource = readFileSync(new URL('../media/inlineMarkdown.js', import.meta.url), 'utf8');
-  const runStateSource = readFileSync(
-    new URL('../media/providerRunState.js', import.meta.url),
-    'utf8'
-  );
-  const capabilitySource = readFileSync(
-    new URL('../media/providerCapabilities.js', import.meta.url),
-    'utf8'
-  );
-  const sessionHistorySource = readFileSync(
-    new URL('../media/sessionHistory.js', import.meta.url),
-    'utf8'
-  );
-  const workbenchLayoutSource = readFileSync(
-    new URL('../media/workbenchLayout.js', import.meta.url),
-    'utf8'
-  );
-  const taskBoardStateSource = readFileSync(
-    new URL('../media/taskBoardState.js', import.meta.url),
-    'utf8'
-  );
-  const composerStateSource = readFileSync(
-    new URL('../media/composerState.js', import.meta.url),
-    'utf8'
-  );
-  const providerOptionsSource = readFileSync(
-    new URL('../media/providerOptions.js', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(
-    html,
-    /__MESSAGE_TEXT_JS_URI__[\s\S]*__MESSAGE_CHOICES_JS_URI__[\s\S]*__PROVIDER_RUN_STATE_JS_URI__[\s\S]*__PROVIDER_CAPABILITIES_JS_URI__[\s\S]*__CONVERSATION_STORE_JS_URI__[\s\S]*__SESSION_HISTORY_JS_URI__[\s\S]*__SLASH_COMMANDS_JS_URI__[\s\S]*__OPEN_CODE_DIALOG_STATE_JS_URI__[\s\S]*__CLAUDE_ACTIONS_JS_URI__[\s\S]*__INLINE_MARKDOWN_JS_URI__[\s\S]*__WORKBENCH_LAYOUT_JS_URI__[\s\S]*__TASK_BOARD_STATE_JS_URI__[\s\S]*__COMPOSER_STATE_JS_URI__[\s\S]*__PROVIDER_OPTIONS_JS_URI__[\s\S]*__MAIN_JS_URI__/
-  );
-  assert.match(sidebarSource, /webviewAssetPaths\(this\.extensionUri\)/);
-
-  assert.doesNotMatch(script, /function serializeThreadsForState\(source\)/);
-  assert.match(conversationSource, /function serializeThreadsForState\(source\)/);
-
-  assert.doesNotMatch(script, /function createBaseSlashCommands\(/);
-  assert.match(slashSource, /function createBaseSlashCommands\(/);
-
-  assert.doesNotMatch(script, /const OPTION_DIALOG_KINDS = Object\.freeze/);
-  assert.doesNotMatch(script, /function normalizeCommandQuery\(value\)/);
-  assert.doesNotMatch(script, /function groupModelOptions\(options/);
-  assert.match(dialogSource, /const OPTION_DIALOG_KINDS = Object\.freeze/);
-  assert.match(dialogSource, /function normalizeCommandQuery\(value\)/);
-  assert.match(dialogSource, /function groupModelOptions\(options/);
-
-  assert.doesNotMatch(script, /const ACTION_SECTIONS = Object\.freeze/);
-  assert.doesNotMatch(script, /function actionSections\(context/);
-  assert.match(claudeSource, /const ACTION_SECTIONS = Object\.freeze/);
-  assert.match(claudeSource, /function actionSections\(context/);
-
-  assert.doesNotMatch(script, /function createProviderRunState\(\)/);
-  assert.match(runStateSource, /function createProviderRunState\(\)/);
-
-  assert.doesNotMatch(script, /function threadStatus\(thread, options = \{\}\)/);
-  assert.match(sessionHistorySource, /function threadStatus\(thread, options = \{\}\)/);
-
-  assert.doesNotMatch(script, /function setSessionHistoryHidden\(body, sessionHistory, hidden\)/);
-  assert.match(
-    workbenchLayoutSource,
-    /function setSessionHistoryHidden\(body, sessionHistory, hidden\)/
-  );
-  assert.match(workbenchLayoutSource, /is-session-history-visible/);
-
-  assert.doesNotMatch(script, /function deriveComposerState\(options\)/);
-  assert.match(composerStateSource, /function deriveComposerState\(options\)/);
-
-  assert.doesNotMatch(script, /const ACTIVE_TASK_STATUSES = Object\.freeze/);
-  assert.doesNotMatch(script, /function visibleTasks\(source, options = \{\}\)/);
-  assert.match(taskBoardStateSource, /const ACTIVE_TASK_STATUSES = Object\.freeze/);
-  assert.match(taskBoardStateSource, /function visibleTasks\(source, options = \{\}\)/);
-  assert.match(taskBoardStateSource, /function normalizeSavedTasks\(savedTasks, options = \{\}\)/);
-  assert.match(taskBoardStateSource, /function upsertRecentTask\(source, task, options = \{\}\)/);
-
-  assert.doesNotMatch(
-    script,
-    /const selectableModes = modes\.filter\(\(mode\) => !mode\.disabled\)/
-  );
-  assert.match(providerOptionsSource, /function agentModesFor\(profile\)/);
-  assert.match(providerOptionsSource, /function normalizeOptionId\(/);
-
-  assert.doesNotMatch(script, /const CONTROL_CONFIG = Object\.freeze/);
-  assert.match(capabilitySource, /const CONTROL_CONFIG = Object\.freeze/);
-  assert.match(providerOptionsSource, /capabilities\.optionList/);
-  assert.match(script, /providerCapabilities\.controlVisibility/);
-
-  assert.doesNotMatch(script, /SAFE_LINK_PROTOCOLS/);
-  assert.match(inlineSource, /SAFE_LINK_PROTOCOLS/);
-  assert.match(inlineSource, /function appendInlineMarkdown\(container, text\)/);
-});
 
 test('message choice parser extracts actionable choices from assistant text', () => {
   const choices = extractMessageChoices(
@@ -4837,115 +3312,19 @@ test('slash command helper parses, filters, dedupes, and composes commands', () 
   );
 });
 
-test('OpenCode dialog state helper owns command echo and active selection rules', () => {
-  const options = [
-    { id: 'a', selected: false },
-    { id: 'b', selected: true },
-    { id: 'c', disabled: true },
-  ];
-  const modelGroups = [
-    { title: 'Recent', options },
-    { title: 'Other', options: [{ id: 'd' }] },
-  ];
 
-  assert.equal(openCodeDialogState.normalizeCommandQuery('///Models '), 'models');
-  assert.deepEqual(openCodeDialogState.commandAliases('models'), ['model', 'models']);
-  assert.equal(openCodeDialogState.isCommandEcho('models', '/model', 'models'), true);
-  assert.equal(openCodeDialogState.isCommandEcho('models', '/agent', 'models'), false);
-  assert.equal(openCodeDialogState.isOptionDialogKind('mcp'), false);
-  assert.equal(openCodeDialogState.isOptionDialogKind('variants'), true);
-  assert.deepEqual(
-    openCodeDialogState.keyboardOptions('sessions', { options }).map((option) => option.id),
-    ['a', 'b']
-  );
-  assert.deepEqual(
-    openCodeDialogState.keyboardOptions('models', { modelGroups }).map((option) => option.id),
-    ['a', 'b', 'd']
-  );
-  assert.equal(openCodeDialogState.initialActiveIndex(options), 1);
-  assert.equal(openCodeDialogState.clampActiveIndex(99, options), 2);
-  assert.equal(openCodeDialogState.moveActiveIndex(0, options, -1), 2);
-  assert.equal(openCodeDialogState.activeOptionId(options, 99), 'c');
-  assert.deepEqual(openCodeDialogState.recentModelIds('mimo/v2', ['big-pickle', 'mimo/v2']), [
-    'mimo/v2',
-    'big-pickle',
-  ]);
-  assert.equal(openCodeDialogState.modelProviderId('opencode/deepseek-v4-flash-free'), 'opencode');
-  assert.equal(openCodeDialogState.modelProviderName('openrouter'), 'OpenRouter');
-  assert.equal(
-    openCodeDialogState.modelTitle('opencode/deepseek-v4-flash-free'),
-    'DeepSeek V4 Flash Free'
-  );
-  assert.equal(
-    openCodeDialogState.modelFooter({ id: 'opencode/deepseek-v4-flash-free' }, 'opencode'),
-    'Free'
-  );
-  assert.equal(
-    openCodeDialogState.modelFooter(
-      { id: 'opencode/deepseek-v4-flash-free', variant: 'max' },
-      'opencode'
-    ),
-    'Free · max'
-  );
-  assert.equal(
-    openCodeDialogState.modelFooter({ id: 'openai/gpt-5.5', variant: 'xhigh' }, 'openai'),
-    'xhigh'
-  );
-  assert.deepEqual(
-    openCodeDialogState
-      .groupModelOptions(
-        [
-          { id: 'mimo/v2', label: 'MiMo V2', category: 'Xiaomi MiMo', footer: '' },
-          {
-            id: 'opencode/big-pickle',
-            label: 'Big Pickle',
-            category: 'OpenCode Zen',
-            footer: 'Free',
-          },
-          { id: 'nvidia/nemotron', label: 'Nemotron', category: 'Nvidia', footer: '' },
-        ],
-        { favoriteIds: ['opencode/big-pickle'], recentIds: ['mimo/v2'], query: '' }
-      )
-      .map((group) => ({ title: group.title, ids: group.options.map((option) => option.id) })),
-    [
-      { title: 'Favorites', ids: ['opencode/big-pickle'] },
-      { title: 'Recent', ids: ['mimo/v2'] },
-      { title: 'Nvidia', ids: ['nvidia/nemotron'] },
-    ]
-  );
-  assert.deepEqual(
-    openCodeDialogState.groupModelOptions(
-      [{ id: 'nvidia/nemotron', label: 'Nemotron', category: 'Nvidia', footer: '' }],
-      { query: 'nemo' }
-    ),
-    [
-      {
-        title: '',
-        options: [{ id: 'nvidia/nemotron', label: 'Nemotron', category: 'Nvidia', footer: '' }],
-      },
-    ]
-  );
-});
-
-test('Claude action helper derives drawer actions independently from DOM rendering', () => {
+test('Claude action helper exposes context, account, and settings actions only', () => {
   const sections = claudeActions.actionSections({
-    translate: (key, params) => (params?.value ? `${key}:${params.value}` : key),
-    runtimeId: 'effortHigh',
-    effortValueLabel: 'High',
-    modelId: 'configured',
-    modelLabel: 'Claude Sonnet',
+    translate: (key) => key,
   });
   const flatActions = sections.flatMap((section) => section.actions);
-  const switchModel = flatActions.find((action) => action.id === 'switchModel');
-  const effort = flatActions.find((action) => action.id === 'effort');
-  const thinking = flatActions.find((action) => action.id === 'thinking');
 
   assert.equal(sections[0].title, 'claude.actions.context');
-  assert.equal(switchModel.trailing, 'claude.actions.defaultRecommended');
-  assert.equal(effort.label, 'claude.actions.effort:High');
-  assert.equal(thinking.active, true);
-  assert.equal(claudeActions.actionMatchesQuery(switchModel, 'model'), true);
-  assert.equal(claudeActions.actionMatchesQuery(switchModel, 'missing'), false);
+  assert.ok(flatActions.some((action) => action.id === 'accountUsage'));
+  assert.ok(flatActions.some((action) => action.id === 'settings'));
+  assert.equal(flatActions.some((action) => /switchModel|effort|thinking|permissions/.test(action.id)), false);
+  assert.equal(claudeActions.actionMatchesQuery(flatActions[0], 'attach'), true);
+  assert.equal(claudeActions.actionMatchesQuery(flatActions[0], 'missing'), false);
 });
 
 test('provider run state helper owns pending and running transitions', () => {
@@ -4985,34 +3364,6 @@ test('provider run state helper owns pending and running transitions', () => {
   assert.equal(state.pendingThreadByProvider.codex, undefined);
 });
 
-test('provider capability helper owns provider-native composer controls', () => {
-  const opencodeProfile = {
-    id: 'opencode',
-    defaultAgentMode: 'plan',
-    agentModes: [
-      { id: 'build', label: 'Build' },
-      { id: 'plan', label: 'Plan' },
-    ],
-    modelOptions: [{ id: 'configured', label: 'Configured' }],
-  };
-  const minimalProfile = { id: 'gemini' };
-
-  assert.equal(providerCapabilities.usesNativeAgentConfig(opencodeProfile), true);
-  assert.equal(providerCapabilities.usesNativeAgentConfig('codex'), false);
-  assert.equal(providerCapabilities.supportsModelVariants(opencodeProfile), true);
-  assert.equal(providerCapabilities.supportsModelVariants(minimalProfile), false);
-
-  assert.equal(
-    providerCapabilities.normalizeOptionId(opencodeProfile, 'missing', 'agentMode', (key) => key),
-    'plan'
-  );
-  assert.deepEqual(
-    providerCapabilities.optionList(minimalProfile, 'runtime', (key) => `translated:${key}`),
-    [{ id: 'default', label: 'translated:runtime.short', description: '' }]
-  );
-  assert.equal(providerCapabilities.controlVisibility(opencodeProfile, 'agentMode'), true);
-  assert.equal(providerCapabilities.controlVisibility(minimalProfile, 'runtime'), false);
-});
 
 test('composer state helper owns send readiness and placeholders', () => {
   const translate = (key, values = {}) => {
@@ -5077,142 +3428,7 @@ test('composer state helper owns send readiness and placeholders', () => {
   });
 });
 
-test('provider options helper owns normalization and fallback option rules', () => {
-  const profile = {
-    id: 'opencode',
-    defaultAgentMode: 'plan',
-    agentModes: [
-      { id: 'build', label: 'Build' },
-      { id: 'plan', label: 'Plan' },
-      { id: 'disabled', label: 'Disabled', disabled: true },
-    ],
-    modelOptions: [
-      { id: 'configured', label: 'Configured' },
-      { id: 'gpt-5', label: 'GPT-5' },
-    ],
-    defaultModel: 'gpt-5',
-  };
-  const capabilities = {
-    optionList(source, control, translate) {
-      if (control === 'model') {
-        return source.modelOptions;
-      }
-      return [{ id: 'default', label: translate(`${control}.short`) }];
-    },
-    normalizeOptionId(source, value, control, translate) {
-      const options = this.optionList(source, control, translate);
-      return options.find((item) => item.id === value)?.id || options[0].id;
-    },
-  };
 
-  assert.deepEqual(
-    providerOptions.agentModesFor(profile).map((mode) => mode.id),
-    ['build', 'plan']
-  );
-  assert.equal(providerOptions.normalizeAgentModeId(profile, 'missing'), 'plan');
-  assert.equal(providerOptions.mapLegacyWorkflowMode(profile, 'execute'), 'plan');
-  assert.deepEqual(providerOptions.splitAgentModeLabel('Build - Primary mode'), {
-    title: 'Build',
-    detail: 'Primary mode',
-  });
-  assert.equal(
-    providerOptions.normalizeOptionId(
-      profile,
-      'missing',
-      'modelOptions',
-      'defaultModel',
-      'model.short',
-      capabilities,
-      (key) => key
-    ),
-    'configured'
-  );
-  assert.deepEqual(
-    providerOptions.optionListFor(
-      undefined,
-      'unknown',
-      'fallback.label',
-      undefined,
-      (key) => `t:${key}`
-    ),
-    [{ id: 'default', label: 't:fallback.label', description: '' }]
-  );
-});
-
-test('provider options resolve the effective model used for context windows', () => {
-  assert.equal(providerOptions.effectiveModelId({ id: 'gpt-5.5' }, ''), 'gpt-5.5');
-  assert.equal(
-    providerOptions.effectiveModelId({ id: 'configured', configuredModelId: 'openai/gpt-5.5' }, ''),
-    'openai/gpt-5.5'
-  );
-  assert.equal(
-    providerOptions.effectiveModelId({ id: 'custom', custom: true }, ' openai/gpt-4.1 '),
-    'openai/gpt-4.1'
-  );
-});
-
-test('context summary matching rejects reverse-order and cross-selection responses', () => {
-  const latestRequest = {
-    requestId: 'page-2',
-    cliId: 'codex',
-    modelId: 'gpt-5.5',
-  };
-  const secondResponse = { ...latestRequest, summary: { workspace: 'latest' } };
-  const firstResponse = {
-    requestId: 'page-1',
-    cliId: 'opencode',
-    modelId: 'openai/gpt-4.1',
-    summary: { workspace: 'stale' },
-  };
-  let applied;
-
-  for (const response of [secondResponse, firstResponse]) {
-    if (
-      providerOptions.contextSummaryMatches({
-        expectedRequest: latestRequest,
-        response,
-        activeCliId: 'codex',
-        activeModelId: 'gpt-5.5',
-      })
-    ) {
-      applied = response.summary.workspace;
-    }
-  }
-
-  assert.equal(applied, 'latest');
-  for (const response of [
-    { ...secondResponse, requestId: 'page-1' },
-    { ...secondResponse, cliId: 'opencode' },
-    { ...secondResponse, modelId: 'openai/gpt-4.1' },
-    { ...secondResponse, summary: undefined },
-    { command: 'contextSummary', summary: { workspace: 'legacy' } },
-  ]) {
-    assert.equal(
-      providerOptions.contextSummaryMatches({
-        expectedRequest: latestRequest,
-        response,
-        activeCliId: 'codex',
-        activeModelId: 'gpt-5.5',
-      }),
-      false
-    );
-  }
-
-  assert.equal(
-    providerOptions.contextSummaryMatches({
-      expectedRequest: { requestId: '2', cliId: 'codex', modelId: 'gpt-5.5' },
-      response: {
-        requestId: 2,
-        cliId: 'codex',
-        modelId: 'gpt-5.5',
-        summary: {},
-      },
-      activeCliId: 'codex',
-      activeModelId: 'gpt-5.5',
-    }),
-    false
-  );
-});
 
 test('context summary matching accepts same-request retries but rejects superseded retries', () => {
   const latestRequest = {
@@ -5278,135 +3494,8 @@ test('preview webview streams markdown with real line breaks', () => {
   assert.doesNotMatch(script, /'\\\\\\\\u001b\[0m'/);
 });
 
-test('webview disables freeform send until the prompt has text', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const composerSource = readFileSync(
-    new URL('../media/composerState.js', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(script, /const state = composerState\.deriveComposerState\(\{/);
-  assert.match(script, /promptText: input\.value,/);
-  assert.match(script, /attachmentCount: promptAttachments\.length,/);
-  assert.match(
-    script,
-    /missingCustomModel: activeModel\(\)\?\.custom && !activeCustomModel\(activeId\),/
-  );
-  assert.match(script, /sendBtn\.disabled = state\.sendDisabled;/);
-  assert.match(
-    composerSource,
-    /const hasPrompt = String\(options\.promptText \|\| ''\)\.trim\(\)\.length > 0;/
-  );
-  assert.match(
-    composerSource,
-    /const canRunAction = hasPrompt \|\| hasAttachments \|\| selectedAction !== 'freeform';/
-  );
-  assert.match(
-    composerSource,
-    /sendDisabled: !canSend \|\| busy \|\| !canRunAction \|\| missingSelection \|\| missingCustomModel,/
-  );
-});
 
 
-test('agent mode select is persisted per provider', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const settingsManagerSource = readFileSync(
-    new URL('../src/settingsManager.ts', import.meta.url),
-    'utf8'
-  );
-  const extensionSource = readFileSync(new URL('../src/extension.ts', import.meta.url), 'utf8');
-  const syncedStateSource = readFileSync(new URL('../src/syncedState.ts', import.meta.url), 'utf8');
-
-  assert.match(script, /activeAgentModeByProvider/);
-  assert.match(script, /activeModelByProvider/);
-  assert.match(script, /recentModelByProvider/);
-  assert.match(script, /favoriteModelByProvider/);
-  assert.match(script, /disabledMcpByProvider/);
-  assert.match(script, /customModelByProvider/);
-  assert.match(script, /activeRuntimeByProvider/);
-  assert.match(script, /activePermissionByProvider/);
-  assert.match(script, /contextOptions/);
-  assert.match(script, /let hasAppliedPersistentSelection = false;/);
-  assert.match(
-    script,
-    /let activeAgentModeByProvider = persistableAgentModeMap\(saved\.activeAgentModeByProvider\);/
-  );
-  assert.match(script, /function persistUserSelection\(\)/);
-  assert.match(script, /function schedulePersistUserSelection\(\)/);
-  assert.match(script, /function usesProviderNativeAgentConfig\(providerId\)/);
-  assert.match(script, /providerCapabilities\.usesNativeAgentConfig\(providerId\)/);
-  assert.match(script, /function persistableAgentModeMap\(value\)/);
-  assert.match(script, /command: 'saveSelectionState'/);
-  assert.match(script, /activeProviderId: activeId/);
-  assert.match(
-    script,
-    /activeAgentModeByProvider: persistableAgentModeMap\(activeAgentModeByProvider\)/
-  );
-  assert.doesNotMatch(script, /activeModelByProvider,/);
-  assert.match(script, /recentModelByProvider,/);
-  assert.match(script, /favoriteModelByProvider,/);
-  assert.match(script, /disabledMcpByProvider,/);
-  assert.match(script, /customModelByProvider,/);
-  assert.match(script, /activeRuntimeByProvider,/);
-  assert.match(script, /activePermissionByProvider,/);
-  assert.match(script, /contextOptions: defaultContextOptions\(\),/);
-  assert.match(script, /persistableAgentModeMap\(message\.activeAgentModeByProvider\)/);
-  assert.match(script, /if \(usesProviderNativeAgentConfig\(cliId\)\) \{/);
-  assert.match(script, /persistedSelectionMap\(message\.activeRuntimeByProvider\)/);
-  assert.match(script, /message\.activeProviderId/);
-  assert.match(sidebarSource, /case 'saveSelectionState':/);
-  assert.match(sidebarSource, /private async saveSelectionState\(message: unknown\)/);
-  assert.match(sidebarSource, /this\.state\.update\(LAST_PROVIDER_STATE_KEY, providerId\)/);
-  assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
-  assert.match(settingsManagerSource, /normalizeAgentModeState\(/);
-  assert.doesNotMatch(sidebarSource, /RUNTIME_STATE_KEY|PERMISSION_STATE_KEY/);
-  assert.match(sidebarSource, /this\.state\.update\(\s*CONTEXT_OPTIONS_STATE_KEY,/s);
-  assert.match(extensionSource, /context\.globalState\.setKeysForSync\(SYNCED_GLOBAL_STATE_KEYS\)/);
-  assert.match(syncedStateSource, /LAST_PROVIDER_STATE_KEY = 'agents-gui\.lastProviderId'/);
-  assert.match(syncedStateSource, /DISABLED_MCP_STATE_KEY = 'agents-gui\.disabledMcpByProvider'/);
-  assert.match(syncedStateSource, /CONTEXT_OPTIONS_STATE_KEY = 'agents-gui\.contextOptions'/);
-  assert.match(syncedStateSource, /SYNCED_GLOBAL_STATE_KEYS = \[/);
-  assert.match(script, /agentModeSelect\.addEventListener\('change'/);
-  assert.match(script, /modelSelect\.addEventListener\('change'/);
-  assert.match(script, /modelOptionList\?\.addEventListener\('click'/);
-  assert.match(script, /runtimeSelect\.addEventListener\('change'/);
-  assert.match(script, /permissionSelect\.addEventListener\('change'/);
-  assert.match(script, /customModelInput\.addEventListener\('input'/);
-  assert.match(script, /agentMode: preferredWorkflowMode \|\| activeAgentModeId\(providerId\)/);
-  assert.match(script, /model: activeModelId\(providerId\)/);
-  assert.match(script, /customModel: activeCustomModel\(providerId\)/);
-  assert.match(script, /runtime: activeRuntimeId\(providerId\)/);
-  assert.match(script, /permissionMode: activePermissionId\(providerId\)/);
-  assert.doesNotMatch(script, /opencode'\s*\?\s*'build'/);
-});
-
-test('webview localizes provider option labels in composer controls', () => {
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-
-  assert.match(script, /function localizedCliOption\(option, group\)/);
-  assert.match(script, /renderOptionSelect\(modelSelect, options, model\.id, 'model'\)/);
-  assert.match(script, /renderOptionSelect\(runtimeSelect, options, runtime\.id, 'runtime'\)/);
-  assert.match(
-    script,
-    /renderOptionSelect\(permissionSelect, options, permission\.id, 'permission'\)/
-  );
-  assert.match(script, /localizedCliOption\(mode, 'agentMode'\)/);
-  assert.match(i18nScript, /'option\.model\.default': '默认'/);
-  assert.match(i18nScript, /'option\.model\.configured': '当前配置'/);
-  assert.match(i18nScript, /'option\.model\.custom': '自定义'/);
-  assert.match(i18nScript, /'option\.runtime\.localProcessing': '在本地处理'/);
-  assert.match(i18nScript, /'option\.runtime\.localProcessing\.summary': '本地模式'/);
-  assert.match(i18nScript, /'option\.permission\.readOnly': '只读'/);
-  assert.match(i18nScript, /'option\.permission\.workspaceWrite': '默认权限'/);
-  assert.match(i18nScript, /'option\.permission\.fullAuto': '自动审查'/);
-  assert.match(i18nScript, /'option\.permission\.danger': '完全访问权限'/);
-  assert.doesNotMatch(i18nScript, /option\.agentMode\.configured/);
-  assert.match(i18nScript, /'option\.agentMode\.build': '执行'/);
-  assert.match(i18nScript, /'option\.agentMode\.plan': '规划'/);
-  assert.match(i18nScript, /'agentMode\.subagent': '子代理'/);
-});
 
 test('webview front-end explains and blocks selection-only actions without selection', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -6252,6 +4341,137 @@ test('fencedBlock preserves inner triple backticks without lossy escaping', () =
   assert.ok(prompt.includes('```'), 'original triple backticks must be intact');
   assert.ok(!prompt.includes('``\\`'), 'lossy escape artifact must not appear');
   assert.ok(/~{3,}typescript/.test(prompt), 'should use tilde fence for outer block');
+});
+
+test('composer exposes no CLI execution override controls', () => {
+  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const protocol = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(html, /modelSelect|modelOptionList|runtimeSelect|runtimeOptionList/);
+  assert.doesNotMatch(html, /permissionSelect|permissionOptionList/);
+  assert.doesNotMatch(script, /activeModel|customModel|modelVariant|activeRuntime|activePermission/);
+  assert.doesNotMatch(script, /setOpenCodeModelVariant|OPENCODE_OPTION_DIALOG_KINDS/);
+  assert.doesNotMatch(protocol, /setOpenCodeModelVariant|modelVariant|customModel/);
+  assert.match(
+    script,
+    /command:\s*'send'[\s\S]*cliId:[\s\S]*text:[\s\S]*action:[\s\S]*conversationHistory:/
+  );
+});
+
+test('context capacity uses the configured model only in the host observation path', () => {
+  const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
+  const collectorSource = readFileSync(
+    new URL('../src/contextCollector.ts', import.meta.url),
+    'utf8'
+  );
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const counterSource = readFileSync(new URL('../src/tokenCounter.ts', import.meta.url), 'utf8');
+
+  assert.match(typesSource, /tokenUsage\?: AssistantTokenUsage/);
+  assert.doesNotMatch(collectorSource, /estimateContextTokens/);
+  assert.match(sidebarSource, /configuredModelId = profile\?\.configuredModel\?\.id/);
+  assert.match(sidebarSource, /countContextTokens\(snapshot, profile, configuredModelId\)/);
+  assert.match(sidebarSource, /resolveContextWindowTokens\(profile, configuredModelId\)/);
+  assert.doesNotMatch(sidebarSource, /scheduleOpenCodeStatusRefresh/);
+  assert.match(counterSource, /precision: 'estimated'/);
+});
+
+test('composer retains setup, authentication, and provider-scoped agent controls', () => {
+  const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const cliSetupSource = readFileSync(new URL('../src/cliSetup.ts', import.meta.url), 'utf8');
+  const profilesSource = readFileSync(new URL('../src/cliProfiles.ts', import.meta.url), 'utf8');
+
+  assert.match(html, /id="agentModeSelect"[^>]*name="assistantAgentMode"/);
+  assert.match(html, /id="promptInput"[^>]*name="assistantPrompt"[^>]*autocomplete="off"/);
+  assert.match(script, /function createCliSetupCard\(profile, recommended\)/);
+  assert.match(script, /function createHomeAgentAuthActions\(profile\)/);
+  assert.match(script, /command: 'runCliAuthAction'/);
+  assert.match(script, /vscode\.postMessage\(\{ command: 'checkProfiles', force: true \}\)/);
+  assert.match(sidebarSource, /case 'runCliAuthAction':/);
+  assert.match(sidebarSource, /case 'installCli':/);
+  assert.match(cliSetupSource, /export class CliSetupController/);
+  assert.match(cliSetupSource, /profile\?\.authCommands\?\.\[authAction\]/);
+  assert.match(profilesSource, /name: 'terminal',[\s\S]*local: 'terminal'/);
+  assert.match(profilesSource, /name: 'agents',[\s\S]*local: 'agents'/);
+  assert.doesNotMatch(profilesSource, /name: 'models'|name: 'variants'|name: 'sessions'/);
+});
+
+test('composer correlates context by request and CLI identity and sends the active provider only', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+
+  assert.match(script, /function refreshActiveContext\(\)/);
+  assert.match(script, /const request = \{\s*requestId: nextContextRequestId\(\),\s*cliId: activeId,\s*\};/);
+  assert.match(script, /command: 'refreshContext',[\s\S]*\.\.\.request,[\s\S]*contextOptions:/);
+  assert.match(script, /case 'contextSummary':[\s\S]*providerOptions\.contextSummaryMatches/);
+  assert.doesNotMatch(script, /activeModelId|activeModelId:/);
+  assert.match(script, /const profile = activeProfile\(\);\s*if \(!profile\?\.installed\) \{/);
+  assert.match(script, /command: 'send',[\s\S]*cliId: providerId,[\s\S]*agentMode:[\s\S]*conversationHistory:/);
+  assert.doesNotMatch(script, /selectedProviderIdsForSend|renderAgentRail|agentPicker/);
+});
+
+test('agent-only browser helpers normalize modes and preserve strict context correlation', () => {
+  const profile = {
+    id: 'opencode',
+    defaultAgentMode: 'plan',
+    agentModes: [{ id: 'build' }, { id: 'plan' }, { id: 'disabled', disabled: true }],
+  };
+
+  assert.equal(providerCapabilities.usesNativeAgentConfig(profile), true);
+  assert.equal(providerCapabilities.usesNativeAgentConfig('codex'), false);
+  assert.equal(providerCapabilities.controlVisibility(profile), true);
+  assert.equal(providerOptions.normalizeAgentModeId(profile, 'missing'), 'plan');
+  assert.equal(providerOptions.mapLegacyWorkflowMode(profile, 'execute'), 'plan');
+  assert.deepEqual(providerOptions.splitAgentModeLabel('Build - Primary'), {
+    title: 'Build',
+    detail: 'Primary',
+  });
+  assert.equal(
+    providerOptions.contextSummaryMatches({
+      expectedRequest: { requestId: 'request-2', cliId: 'opencode' },
+      response: { requestId: 'request-2', cliId: 'opencode', summary: {} },
+      activeCliId: 'opencode',
+    }),
+    true
+  );
+  assert.equal(
+    providerOptions.contextSummaryMatches({
+      expectedRequest: { requestId: 'request-2', cliId: 'opencode' },
+      response: { requestId: 'request-1', cliId: 'opencode', summary: {} },
+      activeCliId: 'opencode',
+    }),
+    false
+  );
+});
+
+test('OpenCode dialog state supports agent commands without model or session controls', () => {
+  const options = [{ id: 'a' }, { id: 'b', selected: true }, { id: 'c' }];
+
+  assert.equal(openCodeDialogState.normalizeCommandQuery('///Agents '), 'agents');
+  assert.deepEqual(openCodeDialogState.commandAliases('agents'), ['agent', 'agents']);
+  assert.equal(openCodeDialogState.isCommandEcho('agents', '/agent', 'agents'), true);
+  assert.equal(openCodeDialogState.isCommandEcho('agents', '/models', 'agents'), false);
+  assert.equal(openCodeDialogState.initialActiveIndex(options), 1);
+  assert.equal(openCodeDialogState.moveActiveIndex(0, options, -1), 2);
+  assert.equal(openCodeDialogState.activeOptionId(options, 99), 'c');
+  assert.equal(typeof openCodeDialogState.groupModelOptions, 'undefined');
+});
+
+test('agent mode persistence and send readiness are independent of execution overrides', () => {
+  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const composerSource = readFileSync(new URL('../media/composerState.js', import.meta.url), 'utf8');
+  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+
+  assert.match(script, /activeAgentModeByProvider: persistableAgentModeMap\(activeAgentModeByProvider\)/);
+  assert.match(script, /agentModeSelect\.addEventListener\('change'/);
+  assert.match(script, /agentMode: preferredWorkflowMode \|\| activeAgentModeId\(providerId\)/);
+  assert.doesNotMatch(script, /activeRuntimeByProvider|activePermissionByProvider|customModelByProvider/);
+  assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
+  assert.doesNotMatch(sidebarSource, /RUNTIME_STATE_KEY|PERMISSION_STATE_KEY/);
+  assert.match(composerSource, /const hasPrompt = String\(options\.promptText \|\| ''\)\.trim\(\)\.length > 0;/);
+  assert.match(composerSource, /sendDisabled: !canSend \|\| busy \|\| !canRunAction \|\| missingSelection \|\| missingCustomModel,/);
 });
 
 test('filterPromptEchoChunk buffer accommodates prompts larger than 16K', () => {

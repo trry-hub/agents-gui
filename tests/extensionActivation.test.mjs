@@ -153,11 +153,11 @@ test('context summary protocol is correlated and host invalidations replace unso
 
   assert.match(
     webviewProtocolSource,
-    /command: 'refreshContext';[\s\S]*requestId: string;[\s\S]*cliId: string;[\s\S]*modelId: string;/
+    /command: 'refreshContext';[\s\S]*requestId: string;[\s\S]*cliId: string;[\s\S]*contextOptions\?:/
   );
   assert.match(
     webviewProtocolSource,
-    /command: 'contextSummary';\s*requestId: string;\s*cliId: string;\s*modelId: string;\s*summary: AssistantContextSummary/
+    /command: 'contextSummary';\s*requestId: string;\s*cliId: string;\s*summary: AssistantContextSummary/
   );
   assert.match(webviewProtocolSource, /command: 'contextInvalidated'; cliId\?: string/);
   assert.equal(
@@ -167,16 +167,17 @@ test('context summary protocol is correlated and host invalidations replace unso
   );
   assert.match(
     sidebarSource,
-    /command: 'contextSummary',\s*requestId,\s*cliId,\s*modelId,\s*summary,/
+    /command: 'contextSummary',\s*requestId,\s*cliId,\s*summary,/
   );
+  assert.match(sidebarSource, /configuredModelId = profile\?\.configuredModel\?\.id/);
   assert.doesNotMatch(sidebarSource, /scheduleOpenCodeStatusRefresh/);
   assert.match(sidebarSource, /command: 'contextInvalidated'/);
   assert.match(previewSource, /requestId:\s*message\.requestId/);
   assert.match(previewSource, /cliId:\s*message\.cliId/);
-  assert.match(previewSource, /modelId:\s*message\.modelId/);
+  assert.doesNotMatch(previewSource, /modelId:\s*message\.modelId/);
   assert.match(
     extensionSmokeHarnessSource,
-    /command: 'refreshContext',[\s\S]*requestId: 'smoke-context-1',[\s\S]*cliId: 'opencode',[\s\S]*modelId:/
+    /command: 'refreshContext',[\s\S]*requestId: 'smoke-context-1',[\s\S]*cliId: 'opencode'/
   );
   assert.match(
     extensionSmokeHarnessSource,

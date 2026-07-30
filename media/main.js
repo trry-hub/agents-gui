@@ -61,54 +61,7 @@
   const THINKING_ICON_SVG = '<svg class="message-thinking-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.75a4.25 4.25 0 0 0-2.35 7.79c.45.3.72.74.72 1.21v.25h3.26v-.25c0-.47.27-.91.72-1.21A4.25 4.25 0 0 0 8 1.75Z"/><path d="M6.5 12.25h3M6.9 14h2.2"/></svg>';
   const THINKING_CHEVRON_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>';
   const ACTIVITY_INLINE_ICON_SVG = '<svg class="message-activity-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5h9v9h-9z"/><path d="m5.7 6 2 2-2 2M8.8 10h1.9"/></svg>';
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-  const LUCIDE_ICON_DEFS = Object.freeze({
-    hand: [
-      ['path', { d: 'M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2' }],
-      ['path', { d: 'M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2' }],
-      ['path', { d: 'M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8' }],
-      ['path', { d: 'M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15' }],
-    ],
-    'code-xml': [
-      ['path', { d: 'm18 16 4-4-4-4' }],
-      ['path', { d: 'm6 8-4 4 4 4' }],
-      ['path', { d: 'm14.5 4-5 16' }],
-    ],
-    'notebook-tabs': [
-      ['path', { d: 'M2 6h4' }],
-      ['path', { d: 'M2 10h4' }],
-      ['path', { d: 'M2 14h4' }],
-      ['path', { d: 'M2 18h4' }],
-      ['rect', { width: '16', height: '20', x: '4', y: '2', rx: '2' }],
-      ['path', { d: 'M15 2v20' }],
-      ['path', { d: 'M15 7h5' }],
-      ['path', { d: 'M15 12h5' }],
-      ['path', { d: 'M15 17h5' }],
-    ],
-    zap: [
-      ['path', { d: 'M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z' }],
-    ],
-    'sliders-horizontal': [
-      ['path', { d: 'M10 5H3' }],
-      ['path', { d: 'M12 19H3' }],
-      ['path', { d: 'M14 3v4' }],
-      ['path', { d: 'M16 17v4' }],
-      ['path', { d: 'M21 12h-9' }],
-      ['path', { d: 'M21 19h-5' }],
-      ['path', { d: 'M21 5h-7' }],
-      ['path', { d: 'M8 10v4' }],
-      ['path', { d: 'M8 12H3' }],
-    ],
-  });
-  const CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID = Object.freeze({
-    default: 'hand',
-    acceptEdits: 'code-xml',
-    plan: 'notebook-tabs',
-    auto: 'zap',
-  });
-  const OPENCODE_OPTION_DIALOG_KINDS = openCodeDialogState.optionDialogKinds();
   const SETTINGS_SAVE_STATUS_TIMEOUT_MS = 5000;
-  const CUSTOM_MODEL_CONTEXT_REFRESH_DELAY_MS = 160;
   const SESSION_HISTORY_MIN_WIDTH = 180;
   const SESSION_HISTORY_MAX_WIDTH = 480;
   const SESSION_HISTORY_DEFAULT_WIDTH = 220;
@@ -140,13 +93,7 @@
   let profilesLoading = true;
   let activeId = saved.activeId || '';
   let activeAgentModeByProvider = persistableAgentModeMap(saved.activeAgentModeByProvider);
-  let activeModelByProvider = {};
-  let recentModelByProvider = saved.recentModelByProvider || {};
-  let favoriteModelByProvider = saved.favoriteModelByProvider || {};
   let disabledMcpByProvider = saved.disabledMcpByProvider || {};
-  let customModelByProvider = saved.customModelByProvider || {};
-  let activeRuntimeByProvider = saved.activeRuntimeByProvider || {};
-  let activePermissionByProvider = saved.activePermissionByProvider || {};
   let homeAgentSettings = { visibleAgentIds: [], agentOrder: [] };
   let commitMessageSettings = { provider: 'default', language: 'auto', maxDiffChars: 60000 };
   let activeSettingsSection = 'agents';
@@ -158,7 +105,6 @@
   let editingMcpServerName = '';
   let mcpServerFormDirty = false;
   let claudeTerminalBannerDismissed = Boolean(saved.claudeTerminalBannerDismissed);
-  let claudeModelMenuExplicit = false;
   let taskBoardDismissed = Boolean(saved.taskBoardDismissed);
   let legacyWorkflowMode = saved.workflowMode || (saved.mode === 'agent' ? 'execute' : undefined);
   let hasAppliedPersistentSelection = false;
@@ -183,7 +129,6 @@
   let contextRequestSequence = 0;
   let latestContextRequest = null;
   let contextSummaryPending = false;
-  let customModelContextRefreshTimer = undefined;
   // Session history panel width (px), persisted across sessions via webview state.
   let sessionHistoryWidth = clampSessionHistoryWidth(saved.sessionHistoryWidth);
   let streamTargets = {};
@@ -220,17 +165,6 @@
   const providerSelect = document.getElementById('providerSelect');
   const providerTabs = document.getElementById('providerTabs');
   const providerHint = document.getElementById('providerHint');
-  const modelSelect = document.getElementById('modelSelect');
-  const modelSummaryLabel = document.getElementById('modelSummaryLabel');
-  const modelOptionList = document.getElementById('modelOptionList');
-  const customModelField = document.getElementById('customModelField');
-  const customModelInput = document.getElementById('customModelInput');
-  const runtimeSelect = document.getElementById('runtimeSelect');
-  const runtimeSummaryLabel = document.getElementById('runtimeSummaryLabel');
-  const runtimeOptionList = document.getElementById('runtimeOptionList');
-  const permissionSelect = document.getElementById('permissionSelect');
-  const permissionSummaryLabel = document.getElementById('permissionSummaryLabel');
-  const permissionOptionList = document.getElementById('permissionOptionList');
   const agentModeSelect = document.getElementById('agentModeSelect');
   const agentModeSummaryLabel = document.getElementById('agentModeSummaryLabel');
   const agentModeOptionList = document.getElementById('agentModeOptionList');
@@ -253,10 +187,6 @@
   const codexTerminalBanner = document.getElementById('codexTerminalBanner');
   const codexTerminalStop = document.getElementById('codexTerminalStop');
   const codexTerminalOpen = document.getElementById('codexTerminalOpen');
-  const modelMenu = document.querySelector('.model-menu');
-  const modelSummary = modelMenu?.querySelector('.option-summary');
-  const runtimeMenu = document.querySelector('.runtime-menu');
-  const permissionMenu = document.querySelector('.permission-menu');
   const modeMenu = document.querySelector('.mode-menu');
   const contextMenu = document.querySelector('.context-menu');
   const messages = document.getElementById('messages');
@@ -375,12 +305,7 @@
     vscode.setState({
       activeId,
       activeAgentModeByProvider: persistableAgentModeMap(activeAgentModeByProvider),
-      recentModelByProvider,
-      favoriteModelByProvider,
       disabledMcpByProvider,
-      customModelByProvider,
-      activeRuntimeByProvider,
-      activePermissionByProvider,
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
       conversationSnapshot: codexRendererEnabled
@@ -434,12 +359,7 @@
       command: 'saveSelectionState',
       activeProviderId: activeId,
       activeAgentModeByProvider: persistableAgentModeMap(activeAgentModeByProvider),
-      recentModelByProvider,
-      favoriteModelByProvider,
       disabledMcpByProvider,
-      customModelByProvider,
-      activeRuntimeByProvider,
-      activePermissionByProvider,
       contextOptions: defaultContextOptions(),
       claudeTerminalBannerDismissed,
       taskBoardDismissed,
@@ -562,42 +482,6 @@
       document.body.classList.contains('vscode-dark') ||
       document.body.classList.contains('vscode-high-contrast');
     return prefersDarkIcon ? icon.dark || icon.light || '' : icon.light || icon.dark || '';
-  }
-
-  function createLucideIcon(iconName) {
-    const iconDef = LUCIDE_ICON_DEFS[iconName];
-    if (!iconDef) {
-      return null;
-    }
-
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.classList.add('claude-lucide-icon');
-    svg.dataset.iconSource = 'lucide';
-    svg.dataset.iconName = iconName;
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '2');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-
-    iconDef.forEach(([tagName, attributes]) => {
-      const node = document.createElementNS(SVG_NS, tagName);
-      Object.entries(attributes).forEach(([name, value]) => {
-        node.setAttribute(name, value);
-      });
-      svg.appendChild(node);
-    });
-
-    return svg;
-  }
-
-  function appendLucideIcon(container, iconName) {
-    const icon = createLucideIcon(iconName);
-    if (icon) {
-      container.appendChild(icon);
-    }
   }
 
   function formatBytes(bytes) {
@@ -1161,44 +1045,6 @@
     return modes.find((mode) => mode.id === activeAgentModeId(profile.id)) || modes[0];
   }
 
-  function optionListFor(profile, key, fallbackLabelKey) {
-    return providerOptions.optionListFor(
-      profile,
-      key,
-      fallbackLabelKey,
-      providerCapabilities,
-      (labelKey) => i18n.t(labelKey)
-    );
-  }
-
-  function selectableOption(option) {
-    return providerCapabilities.selectableOption(option);
-  }
-
-  function normalizeOptionId(profile, value, key, defaultKey, fallbackLabelKey) {
-    return providerOptions.normalizeOptionId(
-      profile,
-      value,
-      key,
-      defaultKey,
-      fallbackLabelKey,
-      providerCapabilities,
-      (labelKey) => i18n.t(labelKey)
-    );
-  }
-
-  function modelOptionsFor(profile) {
-    return optionListFor(profile, 'modelOptions', 'model.short');
-  }
-
-  function runtimeModesFor(profile) {
-    return optionListFor(profile, 'runtimeModes', 'runtime.short');
-  }
-
-  function permissionModesFor(profile) {
-    return optionListFor(profile, 'permissionModes', 'permission.short');
-  }
-
   function localizedCliOption(option, group) {
     if (!option) {
       return option;
@@ -1221,126 +1067,6 @@
 
   function splitAgentModeLabel(label) {
     return providerOptions.splitAgentModeLabel(label);
-  }
-
-  function localizedPermissionOption(option) {
-    const displayOption = localizedCliOption(option, 'permission');
-    if (activeProfile()?.id === 'claude' && option?.id === 'default') {
-      const label = i18n.t('claude.permission.default.title');
-      return {
-        ...displayOption,
-        label,
-        summaryLabel: label,
-      };
-    }
-
-    return displayOption;
-  }
-
-  function claudePermissionPanelOption(option) {
-    const key = `claude.permission.${option?.id || 'default'}`;
-    const title = i18n.t(`${key}.title`);
-    const description = i18n.t(`${key}.description`);
-    return {
-      ...localizedPermissionOption(option),
-      label: title === `${key}.title` ? localizedPermissionOption(option).label : title,
-      description: description === `${key}.description`
-        ? localizedPermissionOption(option).description
-        : description,
-    };
-  }
-
-  function claudeEffortValueLabel(runtime) {
-    const key = `claude.effort.${runtime?.id || 'defaultEffort'}`;
-    const label = i18n.t(key);
-    if (label !== key) {
-      return label;
-    }
-    return localizedCliOption(runtime, 'runtime')?.label || i18n.t('claude.effort.defaultEffort');
-  }
-
-  function activeModelId(cliId = activeId) {
-    const profile = profiles.find((item) => item.id === cliId);
-    const requested = activeModelByProvider[cliId];
-    const normalized = normalizeOptionId(
-      profile,
-      requested,
-      'modelOptions',
-      'defaultModel',
-      'model.short'
-    );
-    if (!requested || requested !== normalized) {
-      delete activeModelByProvider[cliId];
-    }
-    return normalized;
-  }
-
-  function activeCustomModel(cliId = activeId) {
-    return String(customModelByProvider[cliId] || '').trim();
-  }
-
-  function effectiveActiveModelId(cliId = activeId) {
-    const profile = profiles.find((item) => item.id === cliId);
-    return providerOptions.effectiveModelId(activeModel(profile), activeCustomModel(cliId));
-  }
-
-  function activeRuntimeId(cliId = activeId) {
-    const profile = profiles.find((item) => item.id === cliId);
-    const normalized = normalizeOptionId(
-      profile,
-      activeRuntimeByProvider[cliId],
-      'runtimeModes',
-      'defaultRuntime',
-      'runtime.short'
-    );
-    activeRuntimeByProvider[cliId] = normalized;
-    return normalized;
-  }
-
-  function activePermissionId(cliId = activeId) {
-    const profile = profiles.find((item) => item.id === cliId);
-    const normalized = normalizeOptionId(
-      profile,
-      activePermissionByProvider[cliId],
-      'permissionModes',
-      'defaultPermissionMode',
-      'permission.short'
-    );
-    activePermissionByProvider[cliId] = normalized;
-    return normalized;
-  }
-
-  function activeModel(profile = activeProfile()) {
-    const options = modelOptionsFor(profile);
-    if (!profile) {
-      return options[0];
-    }
-    return options.find((option) => option.id === activeModelId(profile?.id)) || options[0];
-  }
-
-  function activeModelVariant(cliId = activeId) {
-    const profile = profiles.find((item) => item.id === cliId);
-    if (!providerCapabilities.supportsModelVariants(profile)) {
-      return '';
-    }
-
-    return openCodeSelectedModelVariant(activeModel(profile));
-  }
-
-  function activeRuntime(profile = activeProfile()) {
-    const options = runtimeModesFor(profile);
-    if (!profile) {
-      return options[0];
-    }
-    return options.find((option) => option.id === activeRuntimeId(profile?.id)) || options[0];
-  }
-
-  function activePermission(profile = activeProfile()) {
-    const options = permissionModesFor(profile);
-    if (!profile) {
-      return options[0];
-    }
-    return options.find((option) => option.id === activePermissionId(profile?.id)) || options[0];
   }
 
   function mapLegacyWorkflowMode(profile, value) {
@@ -1379,9 +1105,6 @@
 
     ensureActiveThread(activeId);
     activeAgentModeId(activeId);
-    activeModelId(activeId);
-    activeRuntimeId(activeId);
-    activePermissionId(activeId);
 
     for (const profile of availableProfiles) {
       const option = document.createElement('option');
@@ -2206,7 +1929,7 @@
   }
 
   function composerMenus() {
-    return [modelMenu, runtimeMenu, permissionMenu, modeMenu, contextMenu].filter(Boolean);
+    return [modeMenu, contextMenu].filter(Boolean);
   }
 
   function closeComposerMenus(exceptMenu) {
@@ -2215,9 +1938,6 @@
         menu.open = false;
       }
     });
-    if (exceptMenu !== modelMenu) {
-      claudeModelMenuExplicit = false;
-    }
   }
 
   function composerPopoverFor(menu) {
@@ -2261,7 +1981,7 @@
     const openAbove = spaceAbove >= Math.min(popoverRect.height || 0, 240) || spaceAbove >= spaceBelow;
     const availableHeight = Math.max(120, openAbove ? spaceAbove : spaceBelow);
     const popoverHeight = Math.min(popoverRect.height || availableHeight, availableHeight);
-    const alignToEnd = menu === modelMenu || menu === permissionMenu || menu === modeMenu || menu === runtimeMenu;
+    const alignToEnd = menu === modeMenu;
 
     let left = alignToEnd ? triggerRect.right - popoverWidth : triggerRect.left;
     left = Math.min(left, viewportWidth - viewportPadding - popoverWidth);
@@ -2285,14 +2005,9 @@
     if (!activeId) {
       return;
     }
-    const modelId = effectiveActiveModelId();
-    if (!modelId) {
-      return;
-    }
     const request = {
       requestId: nextContextRequestId(),
       cliId: activeId,
-      modelId,
     };
     contextSummary = null;
     latestContextRequest = request;
@@ -2309,33 +2024,6 @@
     });
   }
 
-  function scheduleCustomModelContextRefresh(cliId) {
-    if (customModelContextRefreshTimer) {
-      clearTimeout(customModelContextRefreshTimer);
-    }
-    const modelId = effectiveActiveModelId(cliId);
-    customModelContextRefreshTimer = setTimeout(() => {
-      customModelContextRefreshTimer = undefined;
-      if (activeId !== cliId) {
-        return;
-      }
-      if (effectiveActiveModelId(cliId) !== modelId) {
-        return;
-      }
-      refreshActiveContext();
-    }, CUSTOM_MODEL_CONTEXT_REFRESH_DELAY_MS);
-  }
-
-  function commitCustomModelContextRefresh(cliId) {
-    if (customModelContextRefreshTimer) {
-      clearTimeout(customModelContextRefreshTimer);
-      customModelContextRefreshTimer = undefined;
-    }
-    if (activeId === cliId) {
-      refreshActiveContext();
-    }
-  }
-
   function switchActiveProvider(providerId) {
     const profile = profiles.find((item) => item.id === providerId);
     if (!profile?.installed || activeId === providerId) {
@@ -2345,10 +2033,6 @@
     activeId = providerId;
     ensureActiveThread(activeId);
     activeAgentModeId(activeId);
-    activeModelId(activeId);
-    activeRuntimeId(activeId);
-    activePermissionId(activeId);
-    claudeModelMenuExplicit = false;
     closeComposerMenus();
     persist();
     persistUserSelection();
@@ -2722,10 +2406,6 @@
     activeId = providerId;
     activeThreadByProvider[providerId] = thread.id;
     activeAgentModeId(activeId);
-    activeModelId(activeId);
-    activeRuntimeId(activeId);
-    activePermissionId(activeId);
-    claudeModelMenuExplicit = false;
     closeComposerMenus();
     persist();
     persistUserSelection();
@@ -2850,15 +2530,9 @@
   }
 
   function claudeActionDrawerSections(profile = activeProfile()) {
-    const runtime = activeRuntime(profile);
-    const runtimeId = runtime?.id || 'defaultEffort';
-    const model = activeModel(profile);
     return claudeActions.actionSections({
       translate: (key, params) => i18n.t(key, params),
-      runtimeId,
-      effortValueLabel: claudeEffortValueLabel(runtime),
-      modelId: model?.id || '',
-      modelLabel: localizedCliOption(model, 'model')?.label || model?.label || '',
+      profile,
     });
   }
 
@@ -2930,23 +2604,6 @@
         label.className = 'claude-action-label';
         label.textContent = action.label;
         button.appendChild(label);
-
-        if (action.kind === 'effort') {
-          const dots = document.createElement('span');
-          dots.className = 'claude-action-effort-dots';
-          dots.setAttribute('aria-hidden', 'true');
-          button.appendChild(dots);
-        } else if (action.kind === 'toggle') {
-          const toggle = document.createElement('span');
-          toggle.className = `claude-action-toggle${action.active ? ' is-on' : ''}`;
-          toggle.setAttribute('aria-hidden', 'true');
-          button.appendChild(toggle);
-        } else if (action.trailing) {
-          const trailing = document.createElement('span');
-          trailing.className = 'claude-action-trailing';
-          trailing.textContent = action.trailing;
-          button.appendChild(trailing);
-        }
 
         group.appendChild(button);
       });
@@ -3125,25 +2782,6 @@
         }
         renderContextSummaryLabel();
         return;
-      case 'model':
-        claudeModelMenuExplicit = activeProfile()?.id === 'claude';
-        closeComposerMenus(modelMenu);
-        modelMenu?.classList.add('is-visible');
-        if (modelMenu) {
-          modelMenu.open = true;
-        }
-        renderModelSelect();
-        scheduleComposerPopoverPosition();
-        return;
-      case 'permissions':
-        closeComposerMenus(permissionMenu);
-        permissionMenu?.classList.add('is-visible');
-        if (permissionMenu) {
-          permissionMenu.open = true;
-        }
-        renderPermissionSelect();
-        scheduleComposerPopoverPosition();
-        return;
       case 'refresh':
         vscode.postMessage({ command: 'checkProfiles', force: true });
         refreshActiveContext();
@@ -3166,14 +2804,6 @@
           addMessage(activeId, 'system', i18n.t('slash.copied'));
         }
         return;
-      case 'sessions':
-        closeComposerMenus();
-        showOpenCodeStatusDialog('sessions', { commandQuery: sourceQuery });
-        return;
-      case 'models':
-        closeComposerMenus();
-        showOpenCodeStatusDialog('models', { commandQuery: sourceQuery });
-        return;
       case 'agents':
         closeComposerMenus();
         showOpenCodeStatusDialog('agents', { commandQuery: sourceQuery });
@@ -3182,10 +2812,6 @@
         closeComposerMenus();
         showOpenCodeStatusDialog('mcp', { commandQuery: sourceQuery });
         refreshActiveContext();
-        return;
-      case 'variants':
-        closeComposerMenus();
-        showOpenCodeStatusDialog('variants', { commandQuery: sourceQuery });
         return;
       case 'connect':
         closeComposerMenus();
@@ -3218,40 +2844,6 @@
       default:
         return;
     }
-  }
-
-  function setClaudeRuntime(value) {
-    const profile = activeProfile();
-    const options = runtimeModesFor(profile);
-    if (!options.some((option) => option.id === value)) {
-      return;
-    }
-
-    activeRuntimeByProvider[activeId] = value;
-    runtimeSelect.value = value;
-    persist();
-    persistUserSelection();
-    renderAll();
-  }
-
-  function cycleClaudeEffort() {
-    const profile = activeProfile();
-    const effortIds = runtimeModesFor(profile)
-      .map((option) => option.id)
-      .filter((id) => id === 'defaultEffort' || id.startsWith('effort'));
-    if (effortIds.length === 0) {
-      return;
-    }
-
-    const current = activeRuntimeId(activeId);
-    const currentIndex = Math.max(0, effortIds.indexOf(current));
-    const next = effortIds[(currentIndex + 1) % effortIds.length];
-    setClaudeRuntime(next);
-  }
-
-  function toggleClaudeThinking() {
-    const current = activeRuntimeId(activeId);
-    setClaudeRuntime(current === 'defaultEffort' ? 'effortHigh' : 'defaultEffort');
   }
 
   function rewindActiveConversation() {
@@ -3295,38 +2887,9 @@
         hideSlashPalette();
         rewindActiveConversation();
         return;
-      case 'switchModel':
-        hideSlashPalette();
-        claudeModelMenuExplicit = true;
-        closeComposerMenus(modelMenu);
-        modelMenu?.classList.add('is-visible');
-        if (modelMenu) {
-          modelMenu.open = true;
-        }
-        renderModelSelect();
-        scheduleComposerPopoverPosition();
-        return;
-      case 'effort':
-        cycleClaudeEffort();
-        renderClaudeActionDrawer();
-        return;
-      case 'thinking':
-        toggleClaudeThinking();
-        renderClaudeActionDrawer();
-        return;
       case 'accountUsage':
         hideSlashPalette();
         vscode.postMessage({ command: 'openProviderExtension', cliId: activeId });
-        return;
-      case 'permissions':
-        hideSlashPalette();
-        closeComposerMenus(permissionMenu);
-        permissionMenu?.classList.add('is-visible');
-        if (permissionMenu) {
-          permissionMenu.open = true;
-        }
-        renderPermissionSelect();
-        scheduleComposerPopoverPosition();
         return;
       case 'settings':
         hideSlashPalette();
@@ -3972,201 +3535,7 @@
     return branch ? `${workspace}:${branch}` : workspace;
   }
 
-  function normalizedModelMemory(value) {
-    return openCodeDialogState.normalizedModelMemory(value);
-  }
-
-  function recentModelIds(cliId = activeId) {
-    return openCodeDialogState.recentModelIds(activeModelId(cliId), recentModelByProvider[cliId]);
-  }
-
-  function favoriteModelIds(cliId = activeId) {
-    return openCodeDialogState.favoriteModelIds(favoriteModelByProvider[cliId]);
-  }
-
-  function rememberRecentModel(cliId, modelId) {
-    if (!cliId || !modelId) {
-      return;
-    }
-    const recent = normalizedModelMemory(recentModelByProvider[cliId]);
-    recentModelByProvider[cliId] = [modelId, ...recent.filter((item) => item !== modelId)].slice(0, 8);
-  }
-
-  function toggleFavoriteModel(cliId, modelId) {
-    if (!cliId || !modelId) {
-      return;
-    }
-    const favorites = new Set(favoriteModelIds(cliId));
-    if (favorites.has(modelId)) {
-      favorites.delete(modelId);
-    } else {
-      favorites.add(modelId);
-    }
-    favoriteModelByProvider[cliId] = Array.from(favorites).slice(0, 12);
-    persist();
-  }
-
-  function openCodeModelProviderId(modelId) {
-    return openCodeDialogState.modelProviderId(modelId);
-  }
-
-  function openCodeModelProviderName(providerId) {
-    return openCodeDialogState.modelProviderName(providerId);
-  }
-
-  function openCodeModelTokenTitle(token) {
-    return openCodeDialogState.modelTokenTitle(token);
-  }
-
-  function openCodeModelTitle(modelId, fallback) {
-    return openCodeDialogState.modelTitle(modelId, fallback);
-  }
-
-  function openCodeModelFooter(option, providerId) {
-    return openCodeDialogState.modelFooter(option, providerId);
-  }
-
-  function modelSummaryText(option, displayOption) {
-    const base = displayOption?.summaryLabel || displayOption?.label || option?.label || i18n.t('model.short');
-    const variant = String(option?.variant || '').trim();
-    return variant && !base.includes(`· ${variant}`) ? `${base} · ${variant}` : base;
-  }
-
-  function openCodeVariantLabel(variant) {
-    const id = String(variant || '').trim();
-    const key = `opencode.variant.${id}`;
-    const translated = i18n.t(key);
-    return translated === key ? id : translated;
-  }
-
-  function openCodeModelVariantModelId(option) {
-    const id = String(option?.configuredModelId || option?.id || '').trim();
-    return id && id.includes('/') ? id : '';
-  }
-
-  function openCodeModelVariantOptions(option) {
-    const seen = new Set();
-    const values = [];
-    const push = (value) => {
-      const cleanValue = String(value || '').trim();
-      if (!cleanValue || seen.has(cleanValue)) {
-        return;
-      }
-
-      seen.add(cleanValue);
-      values.push(cleanValue);
-    };
-    if (Array.isArray(option?.variantOptions)) {
-      option.variantOptions.forEach(push);
-    }
-    push(option?.variant);
-    return values;
-  }
-
-  function openCodeSelectedModelVariant(option) {
-    const current = String(option?.variant || '').trim();
-    const options = openCodeModelVariantOptions(option);
-    return current && options.includes(current) ? current : '';
-  }
-
-  function openCodeActiveVariantModel(profile = activeProfile()) {
-    const option = activeModel(profile);
-    const modelId = openCodeModelVariantModelId(option);
-    const variants = openCodeModelVariantOptions(option);
-    return {
-      option,
-      modelId,
-      variants,
-      selected: openCodeSelectedModelVariant(option),
-    };
-  }
-
-  function updateOpenCodeModelVariant(profile, modelId, variant) {
-    if (!profile || !modelId || !variant) {
-      return;
-    }
-
-    for (const option of modelOptionsFor(profile)) {
-      const optionModelId = openCodeModelVariantModelId(option);
-      if (option.id !== modelId && optionModelId !== modelId) {
-        continue;
-      }
-
-      option.variant = variant;
-      if (option.id === 'configured') {
-        const [, ...modelParts] = modelId.split('/');
-        const modelLabel = modelParts.join('/') || modelId;
-        option.summaryLabel = `${modelLabel} · ${variant}`;
-      }
-    }
-  }
-
-  function maybeShowOpenCodeVariantDialog(option, options = {}) {
-    if (!providerCapabilities.supportsModelVariants(activeProfile()) || openCodeModelVariantOptions(option).length === 0) {
-      return false;
-    }
-
-    showOpenCodeStatusDialog('variants', {
-      commandQuery: 'variants',
-      returnTo: options.returnTo,
-    });
-    return true;
-  }
-
-  function openCodeDialogModelOptions() {
-    const profile = activeProfile();
-    const selectedId = activeModel(profile).id;
-    const favorites = new Set(favoriteModelIds(activeId));
-    return modelOptionsFor(profile).filter(selectableOption).map((option) => {
-      const display = localizedCliOption(option, 'model');
-      const providerId = openCodeModelProviderId(option.id);
-      return {
-        id: option.id,
-        label: option.custom && activeCustomModel(activeId)
-          ? activeCustomModel(activeId)
-          : openCodeModelTitle(option.id, display.label),
-        meta: option.custom ? display.description : openCodeModelProviderName(providerId),
-        category: openCodeModelProviderName(providerId),
-        providerId,
-        footer: openCodeModelFooter(option, providerId),
-        selected: option.id === selectedId,
-        favorite: favorites.has(option.id),
-        disabled: Boolean(option.disabled),
-      };
-    });
-  }
-
-  function openCodeModelOptionGroups() {
-    return openCodeDialogState.groupModelOptions(openCodeDialogModelOptions(), {
-      query: openCodeDialogQuery,
-      favoriteIds: favoriteModelIds(activeId),
-      recentIds: recentModelIds(activeId),
-    });
-  }
-
-  function openCodeSessionOptions() {
-    ensureActiveThread('opencode');
-    const selectedId = activeThreadId('opencode');
-    return ensureThreadList('opencode')
-      .slice()
-      .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0))
-      .map((thread) => ({
-        id: thread.id,
-        label: openCodeSessionTitle(thread),
-        meta: [
-          thread.openCodeSessionId || '',
-          formatOpenCodeTimestamp(thread.updatedAt || thread.createdAt),
-        ].filter(Boolean).join(' · '),
-        selected: thread.id === selectedId,
-      }));
-  }
-
   function openCodeStatusLines(profile) {
-    const model = activeModel(profile);
-    const displayModel = localizedCliOption(model, 'model');
-    const modelLabel = model.custom && activeCustomModel(activeId)
-      ? activeCustomModel(activeId)
-      : modelSummaryText(model, displayModel);
     const mode = localizedCliOption(activeAgentMode(profile), 'agentMode');
     const mcpServers = Array.isArray(contextSummary?.mcpServers) ? contextSummary.mcpServers : [];
     const connectedMcpCount = mcpServers.filter((entry) => entry?.status === 'connected').length;
@@ -4175,7 +3544,6 @@
     return [
       { text: versionLabel ? `OpenCode ${versionLabel}` : 'OpenCode' },
       { text: `Session ${activeOpenCodeSessionId() || activeThreadId('opencode') || 'local'}` },
-      { text: `Model ${modelLabel || 'Default'}` },
       { text: `Agent ${mode?.label || 'Default'}` },
       { text: `MCP ${connectedMcpCount}/${mcpServers.length}` },
       ...openCodeContextMetrics(profile),
@@ -4193,52 +3561,20 @@
     return [{ text: 'Theme follows the active VS Code color theme' }];
   }
 
-  function openCodeVariantLines() {
-    const state = openCodeActiveVariantModel(activeProfile());
-    if (state.variants.length === 0) {
-      return [{ text: 'Current model does not expose reasoning depth options' }];
-    }
-
-    const display = localizedCliOption(state.option, 'model');
-    return [
-      { text: `Model ${display.summaryLabel || display.label || state.modelId || 'Configured'}` },
-      { text: `Current reasoning depth ${state.selected ? openCodeVariantLabel(state.selected) : 'Configured default'}` },
-      { text: `Available ${state.variants.map(openCodeVariantLabel).join(', ')}` },
-    ];
-  }
-
   function openCodeOrgLines() {
     return [{ text: 'Organizations are managed by the configured OpenCode provider' }];
   }
 
   function openCodeDialogEmptyText(kind) {
-    if (kind === 'sessions') {
-      return 'No sessions';
-    }
-    if (kind === 'models') {
-      return 'No models';
-    }
     if (kind === 'mcp') {
       return contextSummary?.mcpStatusPending ? i18n.t('opencode.dialog.mcp.loading') : i18n.t('opencode.dialog.mcp.empty');
-    }
-    if (kind === 'variants') {
-      return 'Current model does not expose reasoning depth options';
     }
     return 'No options';
   }
 
   function openCodeDialogTitle(kind) {
-    if (kind === 'sessions') {
-      return 'Sessions';
-    }
-    if (kind === 'models') {
-      return 'Select model';
-    }
     if (kind === 'agents') {
       return 'Agents';
-    }
-    if (kind === 'variants') {
-      return 'Variants';
     }
     if (kind === 'mcp') {
       return i18n.t('opencode.dialog.mcp.title');
@@ -4262,13 +3598,6 @@
   }
 
   function openCodeDialogDescription(kind) {
-    if (kind === 'sessions') {
-      const count = ensureThreadList('opencode').length;
-      return `${count} ${count === 1 ? 'session' : 'sessions'}`;
-    }
-    if (kind === 'models') {
-      return '';
-    }
     if (kind === 'agents') {
       const mode = localizedCliOption(activeAgentMode(), 'agentMode');
       return mode?.label ? `Current agent: ${mode.label}` : 'Select an agent';
@@ -4278,11 +3607,6 @@
     }
     if (kind === 'lsp') {
       return 'LSPs auto-detected from file types';
-    }
-    if (kind === 'variants') {
-      const state = openCodeActiveVariantModel(activeProfile());
-      const display = localizedCliOption(state.option, 'model');
-      return `Current model: ${display.summaryLabel || display.label || state.modelId || 'Configured'}`;
     }
     if (kind === 'org') {
       return 'Switch OpenCode organization';
@@ -4312,9 +3636,6 @@
     if (kind === 'themes') {
       return openCodeThemeLines();
     }
-    if (kind === 'variants') {
-      return openCodeVariantLines();
-    }
     if (kind === 'org') {
       return openCodeOrgLines();
     }
@@ -4326,24 +3647,6 @@
 
   function openCodeDialogOptions(kind) {
     const profile = activeProfile();
-    if (kind === 'sessions') {
-      return openCodeSessionOptions();
-    }
-
-    if (kind === 'models') {
-      const selectedId = activeModel(profile).id;
-      return modelOptionsFor(profile).filter(selectableOption).map((option) => {
-        const display = localizedCliOption(option, 'model');
-        return {
-          id: option.id,
-          label: option.custom && activeCustomModel(activeId) ? activeCustomModel(activeId) : display.label,
-          meta: display.description || display.summaryLabel || '',
-          selected: option.id === selectedId,
-          disabled: Boolean(option.disabled),
-        };
-      });
-    }
-
     if (kind === 'agents') {
       const selectedId = activeAgentModeId(activeId);
       return agentModesFor(profile).map((mode) => {
@@ -4359,26 +3662,11 @@
       });
     }
 
-    if (kind === 'variants') {
-      const state = openCodeActiveVariantModel(profile);
-      const display = localizedCliOption(state.option, 'model');
-      const modelLabel = display.summaryLabel || display.label || state.modelId || 'Configured';
-      return state.variants.map((variant) => ({
-        id: variant,
-        label: openCodeVariantLabel(variant),
-        meta: modelLabel,
-        selected: variant === state.selected,
-      }));
-    }
-
     return [];
   }
 
   function openCodeDialogKeyboardOptions(kind) {
-    return openCodeDialogState.keyboardOptions(kind, {
-      modelGroups: kind === 'models' ? openCodeModelOptionGroups() : [],
-      options: OPENCODE_OPTION_DIALOG_KINDS.has(kind) ? openCodeDialogOptions(kind) : [],
-    });
+    return openCodeDialogOptions(kind).filter((option) => !option.disabled);
   }
 
   function initialOpenCodeDialogActiveIndex(kind) {
@@ -4554,15 +3842,6 @@
 
     const body = document.createElement('div');
     body.className = 'opencode-dialog-body';
-    if (openCodeDialogKind === 'models') {
-      dialog.addEventListener('keydown', handleOpenCodeOptionDialogKeydown);
-      renderOpenCodeGroupedOptionDialogBody(body, openCodeDialogKind);
-      dialog.appendChild(body);
-      backdrop.appendChild(dialog);
-      document.body.appendChild(backdrop);
-      body.querySelector('.opencode-dialog-filter')?.focus();
-      return;
-    }
     if (openCodeDialogKind === 'mcp') {
       dialog.addEventListener('keydown', handleOpenCodeMcpDialogKeydown);
       renderOpenCodeMcpDialogBody(body);
@@ -4572,7 +3851,7 @@
       body.querySelector('.opencode-dialog-filter')?.focus();
       return;
     }
-    if (OPENCODE_OPTION_DIALOG_KINDS.has(openCodeDialogKind)) {
+    if (openCodeDialogKind === 'agents') {
       dialog.addEventListener('keydown', handleOpenCodeOptionDialogKeydown);
       renderOpenCodeOptionDialogBody(body, openCodeDialogKind);
       dialog.appendChild(body);
@@ -4600,74 +3879,6 @@
 
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
-  }
-
-  function renderOpenCodeGroupedOptionDialogBody(body, kind) {
-    const filter = document.createElement('input');
-    filter.className = 'opencode-dialog-filter';
-    filter.type = 'text';
-    configureOpenCodeDialogFilter(filter, kind);
-    filter.value = openCodeDialogQuery;
-    filter.placeholder = 'Search';
-    filter.setAttribute('aria-label', 'Search');
-    filter.addEventListener('input', () => {
-      if (clearInitialOpenCodeDialogCommandEcho(filter, kind, () => renderOpenCodeModelGroups(list))) {
-        return;
-      }
-
-      openCodeDialogQuery = filter.value;
-      openCodeDialogActiveIndex = 0;
-      renderOpenCodeModelGroups(list);
-    });
-    body.appendChild(filter);
-
-    const list = document.createElement('div');
-    list.className = 'opencode-dialog-grouped-options';
-    body.appendChild(list);
-    renderOpenCodeModelGroups(list);
-    const openSequence = openCodeDialogOpenSequence;
-    requestAnimationFrame(() => {
-      if (openSequence !== openCodeDialogOpenSequence || openCodeDialogKind !== kind) {
-        return;
-      }
-
-      clearInitialOpenCodeDialogCommandEcho(filter, kind, () => renderOpenCodeModelGroups(list));
-    });
-
-    const actions = document.createElement('div');
-    actions.className = 'opencode-dialog-footer-actions';
-
-    const connect = document.createElement('button');
-    connect.type = 'button';
-    connect.className = 'opencode-dialog-footer-action';
-    connect.textContent = 'Connect provider';
-    connect.addEventListener('click', () => {
-      closeOpenCodeStatusDialog({ focusPrompt: false });
-      openSettingsPage('agents');
-    });
-    actions.appendChild(connect);
-
-    const connectKey = document.createElement('span');
-    connectKey.className = 'opencode-dialog-footer-key';
-    connectKey.textContent = 'ctrl+a';
-    actions.appendChild(connectKey);
-
-    const favorite = document.createElement('button');
-    favorite.type = 'button';
-    favorite.className = 'opencode-dialog-footer-action';
-    favorite.textContent = 'Favorite';
-    favorite.addEventListener('click', () => {
-      toggleFavoriteModel(activeId, activeModelId(activeId));
-      renderOpenCodeModelGroups(list);
-    });
-    actions.appendChild(favorite);
-
-    const favoriteKey = document.createElement('span');
-    favoriteKey.className = 'opencode-dialog-footer-key';
-    favoriteKey.textContent = 'ctrl+f';
-    actions.appendChild(favoriteKey);
-
-    body.appendChild(actions);
   }
 
   function renderOpenCodeMcpDialogBody(body) {
@@ -4820,7 +4031,7 @@
   }
 
   function handleOpenCodeOptionDialogKeydown(event) {
-    if (!OPENCODE_OPTION_DIALOG_KINDS.has(openCodeDialogKind)) {
+    if (openCodeDialogKind !== 'agents') {
       return;
     }
 
@@ -4857,33 +4068,6 @@
 
   function focusOpenCodeMcpActiveOption() {
     document.querySelector('.opencode-dialog.is-mcp .opencode-dialog-option.is-active')?.focus();
-  }
-
-  function renderOpenCodeModelGroups(parent) {
-    parent.innerHTML = '';
-    syncOpenCodeDialogActiveIndex('models');
-    const groups = openCodeModelOptionGroups().filter((group) => group.options.length > 0);
-    if (groups.length === 0) {
-      openCodeDialogActiveIndex = 0;
-      const empty = document.createElement('div');
-      empty.className = 'opencode-dialog-row';
-      empty.textContent = openCodeDialogEmptyText('models');
-      parent.appendChild(empty);
-      return;
-    }
-
-    groups.forEach((group) => {
-      if (group.title) {
-        const heading = document.createElement('div');
-        heading.className = 'opencode-dialog-group-heading';
-        heading.textContent = group.title;
-        parent.appendChild(heading);
-      }
-
-      group.options.forEach((option) => {
-        parent.appendChild(createOpenCodeDialogOptionButton('models', option));
-      });
-    });
   }
 
   function renderOpenCodeOptionDialogBody(body, kind) {
@@ -4952,69 +4136,12 @@
   }
 
   function selectOpenCodeDialogOption(kind, value) {
-    if (kind === 'sessions') {
-      const thread = findThread('opencode', value);
-      if (!thread) {
-        return;
-      }
-
-      setActiveThread('opencode', thread);
-      activeId = 'opencode';
-      persist();
-      closeOpenCodeStatusDialog();
-      renderAll();
-      return;
-    }
-
-    if (kind === 'models') {
-      const option = modelOptionsFor(activeProfile()).find((item) => item.id === value);
-      const returnTo = openCodeDialogKind === 'models' ? openCodeDialogSnapshot('models') : undefined;
-      activeModelByProvider[activeId] = value;
-      modelSelect.value = value;
-      rememberRecentModel(activeId, value);
-      persist();
-      persistUserSelection();
-      refreshActiveContext();
-      if (option?.custom) {
-        closeOpenCodeStatusDialog();
-        renderAll();
-        modelMenu.open = true;
-        customModelInput.focus();
-      } else if (maybeShowOpenCodeVariantDialog(option, { returnTo })) {
-        renderAll();
-        return;
-      } else {
-        closeOpenCodeStatusDialog();
-        renderAll();
-      }
-      return;
-    }
-
     if (kind === 'agents') {
       activeAgentModeByProvider[activeId] = value;
       agentModeSelect.value = value;
       legacyWorkflowMode = undefined;
       persist();
       persistUserSelection();
-      closeOpenCodeStatusDialog();
-      renderAll();
-      return;
-    }
-
-    if (kind === 'variants') {
-      const profile = activeProfile();
-      const state = openCodeActiveVariantModel(profile);
-      const selectedVariant = state.variants.includes(value) ? value : '';
-      if (!state.modelId || !selectedVariant) {
-        return;
-      }
-
-      updateOpenCodeModelVariant(profile, state.modelId, selectedVariant);
-      vscode.postMessage({
-        command: 'setOpenCodeModelVariant',
-        modelId: state.modelId,
-        variant: selectedVariant,
-      });
       closeOpenCodeStatusDialog();
       renderAll();
       return;
@@ -5932,338 +5059,7 @@
   }
 
   function renderWorkflowMode() {
-    renderModelSelect();
-    renderRuntimeSelect();
-    renderPermissionSelect();
     renderAgentModeSelect();
-  }
-
-  function renderOptionSelect(select, options, value, group) {
-    select.innerHTML = '';
-    options.filter(selectableOption).forEach((option) => {
-      const displayOption = localizedCliOption(option, group);
-      const item = document.createElement('option');
-      item.value = option.id;
-      item.textContent = displayOption.label;
-      item.title = displayOption.description || displayOption.label;
-      if (option.dangerous) {
-        item.dataset.dangerous = 'true';
-      }
-      select.appendChild(item);
-    });
-    select.value = value;
-  }
-
-  function appendDangerBadge(button, option) {
-    if (!option?.dangerous) {
-      return;
-    }
-
-    const warning = document.createElement('span');
-    warning.className = 'option-list-item-warning';
-    warning.textContent = '!';
-    warning.title = i18n.t('option.danger');
-    warning.setAttribute('aria-label', i18n.t('option.danger'));
-    button.appendChild(warning);
-  }
-
-  function renderRuntimeOptionList(options, selectedId) {
-    if (!runtimeOptionList) {
-      return;
-    }
-
-    runtimeOptionList.innerHTML = '';
-    const title = document.createElement('div');
-    title.className = 'option-list-title';
-    title.textContent = i18n.t('runtime.continue');
-    runtimeOptionList.appendChild(title);
-
-    options.forEach((option) => {
-      const displayOption = localizedCliOption(option, 'runtime');
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = [
-        'option-list-item',
-        option.id === selectedId ? 'is-selected' : '',
-        option.disabled ? 'is-disabled' : '',
-        option.actionOnly ? 'is-action' : '',
-        option.external ? 'is-external' : '',
-        option.dividerBefore ? 'has-divider' : '',
-      ].filter(Boolean).join(' ');
-      button.dataset.value = option.id;
-      button.disabled = Boolean(option.disabled);
-      button.setAttribute('role', selectableOption(option) ? 'menuitemradio' : 'menuitem');
-      button.setAttribute('aria-checked', option.id === selectedId ? 'true' : 'false');
-      button.title = displayOption.description || displayOption.label;
-
-      const icon = document.createElement('span');
-      icon.className = 'option-list-item-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      button.appendChild(icon);
-
-      const label = document.createElement('span');
-      label.textContent = displayOption.label;
-      button.appendChild(label);
-
-      const trailing = document.createElement('span');
-      trailing.className = 'option-list-item-trailing';
-      trailing.setAttribute('aria-hidden', 'true');
-      trailing.textContent = option.external ? '↗' : (option.actionOnly ? '›' : '');
-      button.appendChild(trailing);
-      appendDangerBadge(button, option);
-
-      runtimeOptionList.appendChild(button);
-    });
-  }
-
-  function renderPermissionOptionList(options, selectedId) {
-    if (!permissionOptionList) {
-      return;
-    }
-
-    permissionOptionList.innerHTML = '';
-    const profile = activeProfile();
-    const isClaude = profile?.id === 'claude';
-    permissionMenu?.classList.toggle('is-claude-panel', isClaude);
-    const popover = permissionOptionList.closest('.option-popover');
-    popover?.querySelectorAll('.claude-permission-panel-header, .claude-permission-effort-row').forEach((node) => {
-      node.remove();
-    });
-
-    if (isClaude && popover) {
-      const header = document.createElement('div');
-      header.className = 'claude-permission-panel-header';
-
-      const title = document.createElement('span');
-      title.textContent = i18n.t('claude.permissionPanel.title');
-      header.appendChild(title);
-
-      const shortcut = document.createElement('span');
-      shortcut.className = 'claude-permission-panel-shortcut';
-      shortcut.innerHTML = '<kbd>⇧</kbd><span>+</span><kbd>tab</kbd><span></span>';
-      shortcut.lastElementChild.textContent = i18n.t('claude.permissionPanel.shortcut');
-      header.appendChild(shortcut);
-
-      popover.insertBefore(header, permissionOptionList);
-    }
-
-    const claudeVisibleIds = new Set(['default', 'acceptEdits', 'plan', 'auto']);
-    const visibleOptions = options.filter((option) => (
-      (profile?.id !== 'codex' || option.id !== 'readOnly' || option.id === selectedId)
-      && (!isClaude || claudeVisibleIds.has(option.id))
-    ));
-
-    visibleOptions.forEach((option) => {
-      const displayOption = isClaude ? claudePermissionPanelOption(option) : localizedPermissionOption(option);
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = [
-        'option-list-item',
-        'permission-option-item',
-        isClaude ? 'claude-permission-option-item' : '',
-        option.id === selectedId ? 'is-selected' : '',
-        option.dangerous ? 'is-danger' : '',
-      ].filter(Boolean).join(' ');
-      button.dataset.value = option.id;
-      button.setAttribute('role', 'menuitemradio');
-      button.setAttribute('aria-checked', option.id === selectedId ? 'true' : 'false');
-      button.title = displayOption.description || displayOption.label;
-
-      const icon = document.createElement('span');
-      icon.className = 'permission-option-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      if (isClaude) {
-        appendLucideIcon(icon, CLAUDE_PERMISSION_LUCIDE_ICON_BY_ID[option.id]);
-      }
-      button.appendChild(icon);
-
-      if (isClaude) {
-        const copy = document.createElement('span');
-        copy.className = 'claude-permission-option-copy';
-
-        const label = document.createElement('span');
-        label.className = 'claude-permission-option-title';
-        label.textContent = displayOption.label;
-        copy.appendChild(label);
-
-        const description = document.createElement('span');
-        description.className = 'claude-permission-option-description';
-        description.textContent = displayOption.description || '';
-        copy.appendChild(description);
-
-        button.appendChild(copy);
-      } else {
-        const label = document.createElement('span');
-        label.textContent = displayOption.label;
-        button.appendChild(label);
-      }
-
-      const check = document.createElement('span');
-      check.className = 'permission-option-check';
-      check.setAttribute('aria-hidden', 'true');
-      button.appendChild(check);
-      appendDangerBadge(button, option);
-
-      permissionOptionList.appendChild(button);
-    });
-
-    if (isClaude && popover) {
-      const effort = document.createElement('button');
-      effort.type = 'button';
-      effort.className = 'claude-permission-effort-row';
-      effort.tabIndex = -1;
-
-      const icon = document.createElement('span');
-      icon.className = 'claude-effort-icon';
-      icon.setAttribute('aria-hidden', 'true');
-      appendLucideIcon(icon, 'sliders-horizontal');
-      effort.appendChild(icon);
-
-      const label = document.createElement('span');
-      label.textContent = i18n.t('claude.effort.label', {
-        value: claudeEffortValueLabel(activeRuntime(profile)),
-      });
-      effort.appendChild(label);
-
-      const dots = document.createElement('span');
-      dots.className = 'claude-effort-dots';
-      dots.setAttribute('aria-hidden', 'true');
-      effort.appendChild(dots);
-
-      popover.appendChild(effort);
-    }
-  }
-
-  function renderModelOptionList(options, selectedId) {
-    if (!modelOptionList) {
-      return;
-    }
-
-    modelOptionList.innerHTML = '';
-    options.forEach((option) => {
-      const displayOption = localizedCliOption(option, 'model');
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = [
-        'option-list-item',
-        'model-option-item',
-        option.id === selectedId ? 'is-selected' : '',
-        option.custom ? 'is-custom' : '',
-      ].filter(Boolean).join(' ');
-      button.dataset.value = option.id;
-      button.setAttribute('role', 'menuitemradio');
-      button.setAttribute('aria-checked', option.id === selectedId ? 'true' : 'false');
-      button.title = displayOption.description || displayOption.label;
-
-      const label = document.createElement('span');
-      label.textContent = displayOption.label;
-      button.appendChild(label);
-
-      const check = document.createElement('span');
-      check.className = 'model-option-check';
-      check.setAttribute('aria-hidden', 'true');
-      button.appendChild(check);
-
-      modelOptionList.appendChild(button);
-    });
-  }
-
-  function renderModelSelect() {
-    const profile = activeProfile();
-    const options = modelOptionsFor(profile);
-    const model = activeModel(profile);
-    const displayModel = localizedCliOption(model, 'model');
-    renderOptionSelect(modelSelect, options, model.id, 'model');
-    renderModelOptionList(options, model.id);
-    modelSelect.title = displayModel.description || i18n.t('model.label');
-    modelSummaryLabel.textContent = model.custom && activeCustomModel(activeId)
-      ? activeCustomModel(activeId)
-      : modelSummaryText(model, displayModel);
-    modelSummary?.setAttribute('title', displayModel.description || i18n.t('model.label'));
-    const readonlyModel = providerCapabilities.supportsModelVariants(profile);
-    modelMenu?.classList.toggle('is-readonly', Boolean(readonlyModel));
-    if (modelSummary) {
-      if (readonlyModel) {
-        modelSummary.setAttribute('aria-disabled', 'true');
-        modelSummary.tabIndex = -1;
-      } else {
-        modelSummary.removeAttribute('aria-disabled');
-        modelSummary.removeAttribute('tabindex');
-      }
-    }
-    if ((readonlyModel || (profile?.id === 'claude' && !claudeModelMenuExplicit)) && modelMenu) {
-      modelMenu.open = false;
-    }
-    modelMenu?.classList.toggle(
-      'is-visible',
-      Boolean(
-        profile &&
-        (
-          readonlyModel ||
-          (
-            providerCapabilities.controlVisibility(profile, 'model', { translate: (labelKey) => i18n.t(labelKey) }) &&
-            (profile.id !== 'claude' || (claudeModelMenuExplicit && modelMenu?.open))
-          )
-        )
-      )
-    );
-    customModelField.hidden = !model.custom;
-    customModelInput.value = activeCustomModel(activeId);
-    customModelInput.disabled = !profile || !profile.installed;
-  }
-
-  function renderRuntimeSelect() {
-    const profile = activeProfile();
-    const options = runtimeModesFor(profile);
-    const runtime = activeRuntime(profile);
-    const displayRuntime = localizedCliOption(runtime, 'runtime');
-    renderOptionSelect(runtimeSelect, options, runtime.id, 'runtime');
-    renderRuntimeOptionList(options, runtime.id);
-    runtimeSelect.title = displayRuntime.description || i18n.t('runtime.label');
-    runtimeSummaryLabel.textContent = displayRuntime.summaryLabel || displayRuntime.label || i18n.t('runtime.short');
-    runtimeSummaryLabel.closest('.option-summary')?.setAttribute(
-      'title',
-      [
-        displayRuntime.description || i18n.t('runtime.label'),
-        runtime.dangerous ? i18n.t('option.danger') : '',
-      ].filter(Boolean).join(' · ')
-    );
-    runtimeMenu?.classList.toggle(
-      'is-visible',
-      providerCapabilities.controlVisibility(profile, 'runtime', { translate: (labelKey) => i18n.t(labelKey) })
-    );
-    runtimeMenu?.classList.toggle('is-danger', Boolean(runtime?.dangerous));
-    runtimeMenu?.classList.toggle(
-      'is-default',
-      Boolean(profile && runtime?.id === normalizeOptionId(profile, profile?.defaultRuntime, 'runtimeModes', 'defaultRuntime', 'runtime.short'))
-    );
-  }
-
-  function renderPermissionSelect() {
-    const profile = activeProfile();
-    const options = permissionModesFor(profile);
-    const permission = activePermission(profile);
-    const displayPermission = localizedPermissionOption(permission);
-    renderOptionSelect(permissionSelect, options, permission.id, 'permission');
-    renderPermissionOptionList(options, permission.id);
-    permissionSelect.title = displayPermission.description || i18n.t('permission.label');
-    permissionSummaryLabel.textContent = displayPermission.label || i18n.t('permission.short');
-    permissionSummaryLabel.closest('.option-summary')?.setAttribute(
-      'title',
-      [
-        displayPermission.description || i18n.t('permission.label'),
-        permission.dangerous ? i18n.t('option.danger') : '',
-      ].filter(Boolean).join(' · ')
-    );
-    permissionMenu?.classList.toggle(
-      'is-visible',
-      providerCapabilities.controlVisibility(profile, 'permission', { translate: (labelKey) => i18n.t(labelKey) })
-    );
-    permissionMenu?.classList.toggle('is-danger', Boolean(permission.dangerous));
-    permissionMenu?.classList.toggle(
-      'is-default',
-      Boolean(profile && permission?.id === normalizeOptionId(profile, profile?.defaultPermissionMode, 'permissionModes', 'defaultPermissionMode', 'permission.short'))
-    );
   }
 
   function renderAgentModeSelect() {
@@ -6401,7 +5197,6 @@
       selectedAction,
       requiresSelection: actionRequiresSelection(selectedAction),
       hasSelection: hasSelectionContext(),
-      missingCustomModel: activeModel()?.custom && !activeCustomModel(activeId),
       installedProviderCount: visibleInstalledProfiles().length,
       profilesLoading,
       translate: (key, values) => i18n.t(key, values),
@@ -6425,9 +5220,6 @@
     actionSelect.disabled = state.actionSelectDisabled;
     providerSelect.disabled = state.providerSelectDisabled;
     threadSelect.disabled = state.threadSelectDisabled;
-    modelSelect.disabled = state.optionSelectDisabled;
-    runtimeSelect.disabled = state.optionSelectDisabled;
-    permissionSelect.disabled = state.optionSelectDisabled;
     agentModeSelect.disabled = state.optionSelectDisabled;
     if (attachImageBtn) {
       attachImageBtn.disabled = state.attachmentDisabled;
@@ -6435,15 +5227,6 @@
     if (imageFileInput) {
       imageFileInput.disabled = state.attachmentDisabled;
     }
-    modelOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
-      button.disabled = state.optionSelectDisabled;
-    });
-    runtimeOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
-      button.disabled = button.classList.contains('is-disabled') || state.optionSelectDisabled;
-    });
-    permissionOptionList?.querySelectorAll('.option-list-item').forEach((button) => {
-      button.disabled = state.optionSelectDisabled;
-    });
     input.placeholder = state.placeholder;
     stopBtn.hidden = !state.running;
     sendBtn.hidden = state.running;
@@ -6599,30 +5382,17 @@
       return false;
     }
 
-    const model = activeModel(profile);
-    if (model?.custom && !activeCustomModel(providerId)) {
-      if (providerId === activeId) {
-        customModelInput.focus();
-      }
-      return false;
-    }
-
     const task = createRunTask(providerId, action, text, preferredWorkflowMode);
     providerRunState.setProviderPending(providerRunStore, providerId, activeThreadId(providerId), task.id);
     renderAll();
 
     vscode.postMessage({
-      command: action === 'freeform' ? 'send' : 'quickAction',
+      command: 'send',
       cliId: providerId,
-      text,
+      text: text,
       mode: 'agent',
       agentMode: preferredWorkflowMode || activeAgentModeId(providerId),
-      model: activeModelId(providerId),
-      modelVariant: activeModelVariant(providerId),
-      customModel: activeCustomModel(providerId),
-      runtime: activeRuntimeId(providerId),
-      permissionMode: activePermissionId(providerId),
-      action,
+      action: action,
       attachments,
       threadId: activeThreadId(providerId),
       conversationHistory: conversationHistoryForSend(providerId),
@@ -9418,10 +8188,6 @@
     activeId = providerSelect.value;
     ensureActiveThread(activeId);
     activeAgentModeId(activeId);
-    activeModelId(activeId);
-    activeRuntimeId(activeId);
-    activePermissionId(activeId);
-    claudeModelMenuExplicit = false;
     closeComposerMenus();
     persist();
     persistUserSelection();
@@ -9467,135 +8233,6 @@
 
     event.preventDefault();
     switchAgentModeByDelta(event.shiftKey ? -1 : 1);
-  });
-
-  modelSummary?.addEventListener('click', (event) => {
-    if (!modelMenu?.classList.contains('is-readonly')) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    modelMenu.open = false;
-  });
-
-  modelSummary?.addEventListener('keydown', (event) => {
-    if (!modelMenu?.classList.contains('is-readonly')) {
-      return;
-    }
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      modelMenu.open = false;
-    }
-  });
-
-  modelSelect.addEventListener('change', () => {
-    const option = modelOptionsFor(activeProfile()).find((item) => item.id === modelSelect.value);
-    activeModelByProvider[activeId] = modelSelect.value;
-    rememberRecentModel(activeId, modelSelect.value);
-    persist();
-    persistUserSelection();
-    refreshActiveContext();
-    renderAll();
-    if (option && !option.custom) {
-      maybeShowOpenCodeVariantDialog(option);
-    }
-  });
-
-  modelOptionList?.addEventListener('click', (event) => {
-    const button = event.target.closest('.option-list-item');
-    if (!button || button.disabled) {
-      return;
-    }
-
-    const option = modelOptionsFor(activeProfile()).find((item) => item.id === button.dataset.value);
-    activeModelByProvider[activeId] = button.dataset.value;
-    modelSelect.value = button.dataset.value;
-    rememberRecentModel(activeId, button.dataset.value);
-    persist();
-    persistUserSelection();
-    refreshActiveContext();
-    renderAll();
-
-    if (option?.custom) {
-      modelMenu.open = true;
-      customModelInput.focus();
-    } else if (maybeShowOpenCodeVariantDialog(option)) {
-      claudeModelMenuExplicit = false;
-      modelMenu.open = false;
-    } else {
-      claudeModelMenuExplicit = false;
-      modelMenu.open = false;
-    }
-  });
-
-  customModelInput.addEventListener('input', () => {
-    const cliId = activeId;
-    customModelByProvider[cliId] = customModelInput.value;
-    contextSummary = null;
-    contextSummaryPending = false;
-    persist();
-    renderProviderHint();
-    renderContextSummaryLabel();
-    renderContextBudget();
-    renderOpenCodeSidebar();
-    renderOpenCodeStatusDialog();
-    renderComposer();
-    scheduleCustomModelContextRefresh(cliId);
-  });
-
-  customModelInput.addEventListener('change', () => {
-    const cliId = activeId;
-    customModelByProvider[cliId] = customModelInput.value;
-    persist();
-    commitCustomModelContextRefresh(cliId);
-  });
-
-  runtimeSelect.addEventListener('change', () => {
-    activeRuntimeByProvider[activeId] = runtimeSelect.value;
-    persist();
-    renderAll();
-  });
-
-  runtimeOptionList?.addEventListener('click', (event) => {
-    const button = event.target.closest('.option-list-item');
-    if (!button || button.disabled) {
-      return;
-    }
-
-    if (button.classList.contains('is-action')) {
-      runtimeMenu.open = false;
-      vscode.postMessage({
-        command: 'openProviderExtension',
-        cliId: activeId,
-        runtimeAction: button.dataset.value,
-      });
-      return;
-    }
-
-    activeRuntimeByProvider[activeId] = button.dataset.value;
-    runtimeSelect.value = button.dataset.value;
-    runtimeMenu.open = false;
-    persist();
-    renderAll();
-  });
-
-  permissionSelect.addEventListener('change', () => {
-    activePermissionByProvider[activeId] = permissionSelect.value;
-    persist();
-    renderAll();
-  });
-
-  permissionOptionList.addEventListener('click', (event) => {
-    const button = event.target.closest('.option-list-item');
-    if (!button || button.disabled) {
-      return;
-    }
-
-    activePermissionByProvider[activeId] = button.dataset.value;
-    permissionSelect.value = button.dataset.value;
-    permissionMenu.open = false;
-    persist();
-    renderAll();
   });
 
   document.querySelectorAll('[data-context]').forEach((checkbox) => {
@@ -9793,33 +8430,12 @@
         {
           const availableProfiles = visibleInstalledProfiles();
           const storedAgentModes = persistableAgentModeMap(message.activeAgentModeByProvider);
-          const storedRecentModels = persistedSelectionMap(message.recentModelByProvider);
-          const storedFavoriteModels = persistedSelectionMap(message.favoriteModelByProvider);
-          const storedCustomModels = persistedSelectionMap(message.customModelByProvider);
-          const storedRuntimes = persistedSelectionMap(message.activeRuntimeByProvider);
-          const storedPermissions = persistedSelectionMap(message.activePermissionByProvider);
           activeAgentModeByProvider = hasAppliedPersistentSelection
             ? { ...storedAgentModes, ...activeAgentModeByProvider }
             : { ...activeAgentModeByProvider, ...storedAgentModes };
-          activeModelByProvider = {};
-          recentModelByProvider = hasAppliedPersistentSelection
-            ? { ...storedRecentModels, ...recentModelByProvider }
-            : { ...recentModelByProvider, ...storedRecentModels };
-          favoriteModelByProvider = hasAppliedPersistentSelection
-            ? { ...storedFavoriteModels, ...favoriteModelByProvider }
-            : { ...favoriteModelByProvider, ...storedFavoriteModels };
           disabledMcpByProvider = hasAppliedPersistentSelection
             ? { ...(message.disabledMcpByProvider || {}), ...disabledMcpByProvider }
             : { ...disabledMcpByProvider, ...(message.disabledMcpByProvider || {}) };
-          customModelByProvider = hasAppliedPersistentSelection
-            ? { ...storedCustomModels, ...customModelByProvider }
-            : { ...customModelByProvider, ...storedCustomModels };
-          activeRuntimeByProvider = hasAppliedPersistentSelection
-            ? { ...storedRuntimes, ...activeRuntimeByProvider }
-            : { ...activeRuntimeByProvider, ...storedRuntimes };
-          activePermissionByProvider = hasAppliedPersistentSelection
-            ? { ...storedPermissions, ...activePermissionByProvider }
-            : { ...activePermissionByProvider, ...storedPermissions };
           contextOptions = defaultContextOptions();
           if (!hasAppliedPersistentSelection) {
             claudeTerminalBannerDismissed = Boolean(message.claudeTerminalBannerDismissed);
@@ -9840,7 +8456,6 @@
           }
           if (activeId) {
             activeAgentModeId(activeId);
-            activeModelId(activeId);
           }
         }
         persist();
@@ -9864,7 +8479,6 @@
             expectedRequest: latestContextRequest,
             response: message,
             activeCliId: activeId,
-            activeModelId: effectiveActiveModelId(),
           });
           if (!matches) {
             break;

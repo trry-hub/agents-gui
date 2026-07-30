@@ -77,30 +77,8 @@ test('OpenCodeLocalState uses shared resolver for pure Windows paths', () => {
   });
 });
 
-test('OpenCodeLocalState writes variants in host-native temp directories', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'agents-gui-opencode-win-state-'));
-  try {
-    const stateHome = join(root, 'state');
-    const cacheHome = join(root, 'cache');
-    const env =
-      process.platform === 'win32'
-        ? { ...process.env, LOCALAPPDATA: stateHome }
-        : { ...process.env, XDG_STATE_HOME: stateHome, XDG_CACHE_HOME: cacheHome };
-    const localState = new OpenCodeLocalState({
-      env,
-    });
+test('OpenCodeLocalState does not mutate configured model variants', () => {
+  const localState = new OpenCodeLocalState();
 
-    assert.equal(localState.paths().modelStatePath, join(stateHome, 'opencode', 'model.json'));
-
-    await localState.updateModelVariant('openai/gpt-5.5', 'high');
-    await localState.updateModelVariant('openai/gpt-5.4', 'low');
-
-    const state = JSON.parse(readFileSync(localState.paths().modelStatePath, 'utf8'));
-    assert.deepEqual(state.variant, {
-      'openai/gpt-5.5': 'high',
-      'openai/gpt-5.4': 'low',
-    });
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  assert.equal(typeof localState.updateModelVariant, 'undefined');
 });

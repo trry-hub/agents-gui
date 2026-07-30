@@ -18,20 +18,10 @@
       ]),
     },
     {
-      id: 'model',
-      titleKey: 'claude.actions.model',
-      actions: Object.freeze([
-        { id: 'switchModel', labelKey: 'claude.actions.switchModel', trailingKey: 'claude.actions.defaultRecommended' },
-        { id: 'effort', labelKey: 'claude.actions.effort', kind: 'effort' },
-        { id: 'thinking', labelKey: 'claude.actions.thinking', kind: 'toggle' },
-        { id: 'accountUsage', labelKey: 'claude.actions.accountUsage' },
-      ]),
-    },
-    {
       id: 'customize',
       titleKey: 'claude.actions.customize',
       actions: Object.freeze([
-        { id: 'permissions', labelKey: 'claude.actions.permissions' },
+        { id: 'accountUsage', labelKey: 'claude.actions.accountUsage' },
         { id: 'settings', labelKey: 'claude.actions.settings' },
       ]),
     },
@@ -39,29 +29,15 @@
 
   function actionSections(context = {}) {
     const translate = typeof context.translate === 'function' ? context.translate : defaultTranslate;
-    const runtimeId = context.runtimeId || 'defaultEffort';
-    const modelId = context.modelId || '';
-    const modelLabel = context.modelLabel || '';
-    const effortValueLabel = context.effortValueLabel || '';
-
     return ACTION_SECTIONS.map((section) => ({
       ...section,
       title: translate(section.titleKey),
       actions: section.actions.map((action) => {
-        const label = action.kind === 'effort'
-          ? translate(action.labelKey, { value: effortValueLabel })
-          : translate(action.labelKey);
-        const trailing = action.id === 'switchModel'
-          ? (modelId === 'configured' ? translate(action.trailingKey) : modelLabel)
-          : '';
-
         return {
           ...action,
           name: action.id,
           sectionId: section.id,
-          label,
-          trailing,
-          active: action.kind === 'toggle' && runtimeId !== 'defaultEffort',
+          label: translate(action.labelKey),
         };
       }),
     }));

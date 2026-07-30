@@ -287,37 +287,6 @@
                 </div>
               </div>
             </div>
-            <details class="option-menu model-menu">
-              <summary class="option-summary" data-i18n-title="model.label">
-                <span id="modelSummaryLabel"></span>
-              </summary>
-              <div class="option-popover option-popover-single" aria-label="Model" data-i18n-aria="model.label">
-                <label class="select-field agent-select native-option-field">
-                  <span class="sr-only" data-i18n="model.label"></span>
-                  <select id="modelSelect" name="assistantModel" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
-                </label>
-                <div class="option-list model-option-list" id="modelOptionList" role="menu"></div>
-                <label class="custom-model-field" id="customModelField" hidden>
-                  <span class="sr-only" data-i18n="model.custom"></span>
-                  <input id="customModelInput" name="assistantCustomModel" autocomplete="off" spellcheck="false" data-i18n-placeholder="model.customPlaceholder">
-                </label>
-              </div>
-            </details>
-            <details class="option-menu permission-menu">
-              <summary class="option-summary" data-i18n-title="permission.label">
-                <svg class="claude-permission-icon" viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M6.2 8.2V3.8a1 1 0 0 1 2 0v3.7M8.2 7.5V3.1a1 1 0 0 1 2 0v4.7M10.2 8V4.4a1 1 0 1 1 2 0v5.3c0 2.3-1.8 4-4.1 4H7a3.5 3.5 0 0 1-2.8-1.4L2.5 10a1.1 1.1 0 0 1 1.6-1.5l1.2 1.2V5a1 1 0 0 1 2 0v3.2"/>
-                </svg>
-                <span id="permissionSummaryLabel"></span>
-              </summary>
-              <div class="option-popover option-popover-single" aria-label="Permission" data-i18n-aria="permission.label">
-                <label class="select-field agent-select native-option-field">
-                  <span class="sr-only" data-i18n="permission.label"></span>
-                  <select id="permissionSelect" name="assistantPermission" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
-                </label>
-                <div class="option-list permission-option-list" id="permissionOptionList" role="menu"></div>
-              </div>
-            </details>
             <details class="mode-menu">
               <summary class="mode-summary" data-i18n-title="agentMode.label">
                 <span id="agentModeSummaryLabel"></span>
@@ -382,22 +351,6 @@
         </div>
       </div>
 
-      <div class="composer-footer">
-        <div class="composer-runtime" data-i18n-aria="runtime.label" aria-label="Runtime">
-          <details class="option-menu runtime-menu">
-            <summary class="option-summary" data-i18n-title="runtime.label">
-              <span id="runtimeSummaryLabel"></span>
-            </summary>
-            <div class="option-popover option-popover-single" aria-label="Runtime" data-i18n-aria="runtime.label">
-              <label class="select-field agent-select native-option-field">
-                <span class="sr-only" data-i18n="runtime.label"></span>
-                <select id="runtimeSelect" name="assistantRuntime" autocomplete="off" tabindex="-1" aria-hidden="true"></select>
-              </label>
-              <div class="option-list runtime-option-list" id="runtimeOptionList" role="menu"></div>
-            </div>
-          </details>
-        </div>
-      </div>
     </footer>
   </div>
 

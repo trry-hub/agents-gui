@@ -192,12 +192,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           {
             const requestId = typeof message.requestId === 'string' ? message.requestId.trim() : '';
             const cliId = this.settingsManager.resolveCliId(message);
-            const modelId = typeof message.modelId === 'string' ? message.modelId.trim() : '';
-            if (!requestId || !cliId || !modelId) {
+            if (!requestId || !cliId) {
               break;
             }
             this.latestContextRequestByCli.set(cliId, requestId);
-            await this.sendContextSummary(message.contextOptions ?? {}, cliId, modelId, requestId);
+            await this.sendContextSummary(message.contextOptions ?? {}, cliId, requestId);
           }
           break;
         case 'openFilePalette':
@@ -591,7 +590,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private async sendContextSummary(
     contextOptions: Partial<AssistantContextOptions>,
     cliId: string,
-    modelId: string,
     requestId: string
   ): Promise<void> {
     if (this.latestContextRequestByCli.get(cliId) !== requestId) {
@@ -603,14 +601,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       this.settingsManager.getContextLimits()
     );
     const profile = getCliProfile(cliId) ?? getCliProfile(this.settingsManager.getDefaultCliId());
+    const configuredModelId = profile?.configuredModel?.id;
     const baseSummary = this.contextCollector.summarize(snapshot);
     const workspaceBranch = await this.getWorkspaceBranch(baseSummary.workspacePath);
     const summary = profile
       ? {
           ...baseSummary,
           workspaceBranch,
-          tokenUsage: countContextTokens(snapshot, profile, modelId),
-          contextWindowTokens: resolveContextWindowTokens(profile, modelId),
+          tokenUsage: countContextTokens(snapshot, profile, configuredModelId),
+          contextWindowTokens: resolveContextWindowTokens(profile, configuredModelId),
         }
       : {
           ...baseSummary,
@@ -623,7 +622,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       command: 'contextSummary',
       requestId,
       cliId,
-      modelId,
       summary,
     });
   }
@@ -714,7 +712,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const mode = normalizeMode(message.mode);
     const action = normalizeAction(message.action);
     const agentMode = getCliAgentMode(profile, message.agentMode);
-    const effectiveModel = profile.configuredModel ?? { id: 'configured', label: 'Configured' };
+    const configuredModelId = profile.configuredModel?.id;
     const capabilityPolicy = resolveAgentCapabilityPolicy({
       intent: resolveAgentTaskIntent(action, agentMode.id),
       permissionPosture: 'workspace-write',
@@ -751,7 +749,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const baseContextSummary: AssistantContextSummary = this.contextCollector.summarize(snapshot);
     const contextSummary = {
       ...baseContextSummary,
-      tokenUsage: countContextTokens(snapshot, profile, effectiveModel.id),
+      tokenUsage: countContextTokens(snapshot, profile, configuredModelId),
     };
     if (actionRequiresActiveFile(action) && !snapshot.activeFile) {
       this.postError(cliId, runtimeT(this.locale, 'error.missingActiveFile'), message.threadId);

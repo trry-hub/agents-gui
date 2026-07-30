@@ -39,7 +39,6 @@ export type WebviewToHostMessage =
       requestId: string;
       cliId: string;
       contextOptions?: Partial<AssistantContextOptions>;
-      modelId: string;
     }
   | { command: 'openFilePalette' }
   | { command: 'openProviderExtension'; cliId?: string; providerId?: string }
@@ -116,6 +115,5 @@ export type HostToWebviewMessage =
       command: 'contextSummary';
       requestId: string;
       cliId: string;
-      modelId: string;
       summary: AssistantContextSummary;
     };

@@ -53,7 +53,6 @@ export async function runExtensionSmokeProbe(
       command: 'refreshContext',
       requestId: 'smoke-context-1',
       cliId: 'opencode',
-      modelId: 'mimo/mimo-v2.5-pro',
       contextOptions: defaultContextOptions(),
     });
     await webview.receive({
@@ -116,8 +115,7 @@ export async function runExtensionSmokeProbe(
     (message) =>
       message.command === 'contextSummary' &&
       message.requestId === 'smoke-context-1' &&
-      message.cliId === 'opencode' &&
-      message.modelId === 'mimo/mimo-v2.5-pro'
+      message.cliId === 'opencode'
   );
   if (!correlatedContextSummary) {
     missing.push('correlated context summary');
