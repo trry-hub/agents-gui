@@ -139,7 +139,7 @@ test('provider activities become stable typed thread items', () => {
   assert.equal(secondEvent.activity.detail, 'passed');
 });
 
-test('bound session feedback becomes typed system items', () => {
+test('bound session notices become typed system items', () => {
   const adapter = new ThreadEventAdapter({ now: () => 42, streamId: 'host-a' });
   adapter.accept({
     command: 'requestStarted',
@@ -154,16 +154,7 @@ test('bound session feedback becomes typed system items', () => {
     sessionId: 'runtime-1',
     text: 'No output yet',
   });
-  const inputFailure = adapter.accept({
-    command: 'sessionInputResult',
-    cliId: 'codex',
-    sessionId: 'runtime-1',
-    ok: false,
-    text: 'Cannot send input',
-  });
-
   assert.equal(notice[0].event.item.type, 'system-message');
-  assert.equal(inputFailure[0].event.item.type, 'system-error');
 });
 
 test('thread event adapter has no API provider warning contract', () => {

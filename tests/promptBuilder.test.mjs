@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -296,7 +294,7 @@ test('buildAssistantPrompt keeps OpenCode freeform chat raw when no IDE context 
   assert.doesNotMatch(prompt, /No IDE context was attached/);
 });
 
-test('buildAssistantPrompt tells OpenCode the selected runtime model when provided', () => {
+test('buildAssistantPrompt does not inject runtime selections into OpenCode prompts', () => {
   const prompt = buildAssistantPrompt({
     provider: { id: 'opencode', name: 'OpenCode' },
     mode: 'agent',
@@ -304,15 +302,6 @@ test('buildAssistantPrompt tells OpenCode the selected runtime model when provid
       id: 'atlas',
       label: 'Atlas',
       instruction: 'Use provider-native behavior.',
-    },
-    runtime: {
-      modelId: 'mimo/mimo-v2.5-pro',
-      modelLabel: 'mimo-v2.5-pro',
-      modelVariant: 'high',
-      runtimeId: 'default',
-      runtimeLabel: 'Default',
-      permissionModeId: 'ask',
-      permissionModeLabel: 'Ask first',
     },
     action: 'freeform',
     message: '你用的什么模型呢',
@@ -322,14 +311,25 @@ test('buildAssistantPrompt tells OpenCode the selected runtime model when provid
   });
 
   assert.match(prompt, /^你用的什么模型呢/);
-  assert.match(prompt, /Runtime selection from Agents GUI:/);
-  assert.match(prompt, /Selected model: mimo-v2\.5-pro \(mimo\/mimo-v2\.5-pro\)/);
-  assert.match(prompt, /Reasoning depth: high/);
-  assert.match(
-    prompt,
-    /If the user asks which model, reasoning depth, agent, runtime, or permission mode is selected/
-  );
+  assert.doesNotMatch(prompt, /Runtime selection from Agents GUI:/);
+  assert.doesNotMatch(prompt, /Selected model:/);
+  assert.doesNotMatch(prompt, /Reasoning depth:/);
   assert.doesNotMatch(prompt, /No IDE context was attached/);
+});
+
+test('interactive requests carry task text but no execution selections', () => {
+  const sidebar = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+  const promptBuilder = readFileSync(new URL('../src/promptBuilder.ts', import.meta.url), 'utf8');
+  const assistantTypes = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(sidebar, /buildCliOptionArgs|getCliRuntimeMode|getCliPermissionMode/);
+  assert.doesNotMatch(sidebar, /continueSessionId|optionKey|apiProviderWarning/);
+  assert.doesNotMatch(promptBuilder, /Runtime selection from Agents GUI|renderRuntimeSelection/);
+  assert.doesNotMatch(
+    assistantTypes,
+    /modelVariant|customModel|permissionMode|AssistantRuntimeSelection/
+  );
+  assert.match(sidebar, /agentRuntime\.startPrompt\(\s*cliId,\s*profile\.inputMode === 'argument' \? prompt : undefined\s*\)/s);
 });
 
 test('buildAssistantPrompt gives OpenCode workspace context even without an active editor', () => {
@@ -697,7 +697,7 @@ test('opencode debug config text exposes default agent without parsing full prom
 });
 
 
-test('headless stdin prompts close stdin unless a profile opts into a persistent session', () => {
+test('headless stdin prompts close stdin for one-shot requests', () => {
   const managerSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const sessionControllerSource = readFileSync(
@@ -710,12 +710,8 @@ test('headless stdin prompts close stdin unless a profile opts into a persistent
     /sendInput\(sessionId:\s*string,\s*text:\s*string,\s*closeAfterWrite = false\)/
   );
   assert.match(managerSource, /session\.process\.stdin\.end\(\);/);
-  assert.match(sessionControllerSource, /session\.profile\.keepStdinOpen === true/);
-  assert.match(sidebarSource, /this\.agentRuntime\.startPrompt\([\s\S]*prompt,/);
-  assert.match(
-    sessionControllerSource,
-    /this\.options\.agentRuntime\.sendInput\(session\.id, text\)/
-  );
+  assert.match(sidebarSource, /this\.agentRuntime\.startPrompt\([\s\S]*profile\.inputMode === 'argument' \? prompt : undefined/);
+  assert.doesNotMatch(sessionControllerSource, /canReuse|sendInput\(cliId/);
 });
 
 
@@ -1767,38 +1763,14 @@ test('opencode sidebar collapses by default at compact widths', () => {
   );
 });
 
-test('opencode MCP sidebar retries while server status is warming up', () => {
+test('context budget stays observational without a managed OpenCode server', () => {
   const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-
-  assert.match(typesSource, /mcpStatusPending\?: boolean;/);
-  assert.match(sidebarSource, /OPENCODE_STATUS_REFRESH_DELAYS_MS/);
-  assert.match(sidebarSource, /openCodeStatusRefreshTimers = new Map/);
-  assert.match(sidebarSource, /openCodeStatusRefreshAttempts = new Map/);
-  assert.match(
-    sidebarSource,
-    /const mcpStatusPending = this\.shouldRetryOpenCodeStatus\(profile\?\.id, openCodeStatus\)/
-  );
-  assert.match(sidebarSource, /mcpStatusPending,/);
-  assert.match(
-    sidebarSource,
-    /this\.scheduleOpenCodeStatusRefresh\([\s\S]*profile\?\.id,[\s\S]*openCodeStatus,[\s\S]*contextOptions,[\s\S]*modelId,[\s\S]*requestId[\s\S]*\)/
-  );
-  assert.match(sidebarSource, /private scheduleOpenCodeStatusRefresh/);
-  assert.match(
-    sidebarSource,
-    /this\.sendContextSummary\(contextOptions, 'opencode', modelId, requestId\)/
-  );
-  assert.match(sidebarSource, /private clearOpenCodeStatusRefreshTimers/);
-  assert.match(script, /contextSummary\?\.mcpStatusPending/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.loading'\)/);
-  assert.match(script, /i18n\.t\('opencode\.dialog\.mcp\.unavailable'\)/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.loading': 'Loading MCPs\.\.\.'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.unavailable': 'MCP status unavailable'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.loading': '正在加载 MCP\.\.\.'/);
-  assert.match(i18nScript, /'opencode\.dialog\.mcp\.unavailable': 'MCP 状态不可用'/);
+  assert.match(typesSource, /tokenUsage\?: AssistantTokenUsage;/);
+  assert.match(typesSource, /contextWindowTokens\?: number;/);
+  assert.match(sidebarSource, /countContextTokens\(snapshot, profile, modelId\)/);
+  assert.match(sidebarSource, /resolveContextWindowTokens\(profile, modelId\)/);
+  assert.doesNotMatch(sidebarSource, /openCodeCapability|scheduleOpenCodeStatusRefresh/);
 });
 
 test('webview renders OpenCode thinking as a separate assistant detail block', () => {
@@ -3072,13 +3044,7 @@ test('webview only applies the latest correlated context summary for the active 
   assert.match(script, /activeModelId:\s*effectiveActiveModelId\(\)/);
   assert.match(script, /if \(!matches\) \{\s*break;\s*\}/);
   assert.match(script, /contextSummaryPending = false;\s*contextSummary = message\.summary;/);
-  assert.doesNotMatch(
-    script.slice(
-      script.indexOf("case 'contextSummary':"),
-      script.indexOf("case 'openCodeNativeCommandResult':")
-    ),
-    /latestContextRequest = null/
-  );
+  assert.doesNotMatch(script.slice(script.indexOf("case 'contextSummary':")), /latestContextRequest = null/);
 });
 
 test('webview empty state is visible in large blank panels', () => {
@@ -3897,17 +3863,8 @@ test('webview does not persist transient running message state', () => {
   assert.match(sessionControllerSource, /const DEFAULT_NO_OUTPUT_NOTICE_MS = 45_000;/);
   assert.match(sessionControllerSource, /private readonly noOutputNoticeTimers = new Map/);
   assert.match(sessionControllerSource, /command:\s*'sessionNotice'/);
-  assert.match(
-    providerSource,
-    /case 'sendSessionInput':\s*await this\.handleSessionInput\(message\);/
-  );
-  assert.match(providerSource, /private async handleSessionInput/);
-  assert.match(providerSource, /this\.sessionController\.sendInput\(cliId, text\)/);
-  assert.match(
-    sessionControllerSource,
-    /this\.options\.agentRuntime\.sendInput\(session\.id, text\)/
-  );
-  assert.match(providerSource, /command:\s*'sessionInputResult'/);
+  assert.doesNotMatch(providerSource, /sendSessionInput|handleSessionInput|sessionInputResult/);
+  assert.doesNotMatch(sessionControllerSource, /sendInput\(cliId, text\)/);
   assert.match(sessionControllerSource, /runtimeT\(this\.options\.locale,\s*'warning\.noOutput'/);
   assert.match(
     script,
@@ -3928,7 +3885,6 @@ test('webview does not persist transient running message state', () => {
     script,
     /case 'sessionNotice':\s*if \(!codexRendererEnabled\) \{\s*updateSessionNotice\(message\);\s*\}/
   );
-  assert.match(script, /case 'sessionInputResult':/);
   assert.match(script, /i18n\.t\('claude\.approval\.unavailable'\)/);
   assert.match(script, /item\.runningNotice = normalizeMessageText\(message\.text\);/);
   assert.match(script, /delete item\.runningNotice;/);
@@ -5401,8 +5357,7 @@ test('agent mode select is persisted per provider', () => {
   assert.match(sidebarSource, /this\.state\.update\(LAST_PROVIDER_STATE_KEY, providerId\)/);
   assert.match(sidebarSource, /this\.state\.update\(\s*AGENT_MODE_STATE_KEY,/s);
   assert.match(settingsManagerSource, /normalizeAgentModeState\(/);
-  assert.match(sidebarSource, /this\.state\.update\(\s*RUNTIME_STATE_KEY,/s);
-  assert.match(sidebarSource, /this\.state\.update\(\s*PERMISSION_STATE_KEY,/s);
+  assert.doesNotMatch(sidebarSource, /RUNTIME_STATE_KEY|PERMISSION_STATE_KEY/);
   assert.match(sidebarSource, /this\.state\.update\(\s*CONTEXT_OPTIONS_STATE_KEY,/s);
   assert.match(extensionSource, /context\.globalState\.setKeysForSync\(SYNCED_GLOBAL_STATE_KEYS\)/);
   assert.match(syncedStateSource, /LAST_PROVIDER_STATE_KEY = 'agents-gui\.lastProviderId'/);
@@ -5791,184 +5746,6 @@ test('normalizeCliOutputChunk maps OpenCode tool parts into activity updates', (
   );
 });
 
-test('OpenCode event stream keeps command details and logs from tool parts', () => {
-  const client = createOpenCodeServerClient();
-  const block = [
-    'event: message.part.updated',
-    `data: ${JSON.stringify({
-      properties: {
-        part: {
-          id: 'prt_bash_sse',
-          type: 'tool',
-          tool: 'bash',
-          input: '{"command":"npm run build"}',
-          state: {
-            output: 'Build complete.',
-          },
-        },
-      },
-    })}`,
-  ].join('\n');
-
-  assert.deepEqual(
-    normalizeCliOutputChunk(client.renderSseBlock(block, new Map(), new Map()), 'opencode'),
-    {
-      text: '',
-      buffer: '',
-      status: 'thinking',
-      activities: [
-        {
-          id: 'prt_bash_sse',
-          kind: 'command',
-          name: 'bash',
-          target: 'npm run build',
-          detail: 'Build complete.',
-        },
-      ],
-    }
-  );
-});
-
-test('OpenCode event stream only emits output for the owned session', async () => {
-  const client = createOpenCodeServerClient();
-  const outputs = [];
-  const originalGet = http.get;
-  const response = new EventEmitter();
-  response.setEncoding = () => {};
-  const request = new EventEmitter();
-  request.destroy = () => {};
-  http.get = (_url, _options, callback) => {
-    callback(response);
-    queueMicrotask(() => {
-      response.emit(
-        'data',
-        openCodeSse('message.part.delta', {
-          type: 'message.part.delta',
-          sessionID: 'ses_other',
-          partID: 'prt_other',
-          field: 'text',
-          delta: 'You are generating a Git commit message.',
-        })
-      );
-      response.emit(
-        'data',
-        openCodeSse('message.part.delta', {
-          type: 'message.part.delta',
-          sessionID: 'ses_target',
-          partID: 'prt_target',
-          field: 'text',
-          delta: 'visible reply',
-        })
-      );
-    });
-    return request;
-  };
-
-  const stream = client.openEventStream('http://127.0.0.1:17017', {
-    fire(value) {
-      outputs.push(value);
-    },
-  });
-
-  try {
-    await sleep(20);
-    assert.deepEqual(outputs, []);
-
-    stream.setSessionId('ses_target');
-    await sleep(20);
-
-    assert.equal(stream.hasOutput(), true);
-    assert.deepEqual(outputs, [
-      '{"type":"message.part.delta","sessionID":"ses_target","partID":"prt_target","field":"text","delta":"visible reply","properties":{"delta":"visible reply"}}\n',
-    ]);
-  } finally {
-    stream.close();
-    http.get = originalGet;
-  }
-});
-
-test('OpenCode server commit generation still resolves from session text when SSE completion never arrives', async () => {
-  const client = createOpenCodeServerClient();
-  const originalFetchJson = client.fetchJson;
-  const originalSetTimeout = globalThis.setTimeout;
-  const originalClearTimeout = globalThis.clearTimeout;
-  const originalDateNow = Date.now;
-  let nowCalls = 0;
-  const token = {
-    isCancellationRequested: false,
-    onCancellationRequested() {
-      return { dispose() {} };
-    },
-  };
-  const eventStream = {
-    ready: Promise.resolve(true),
-    failed() {
-      return false;
-    },
-    error() {
-      return undefined;
-    },
-    close() {},
-    outputText() {
-      return 'partial output';
-    },
-    completed: new Promise(() => {}),
-  };
-
-  Date.now = () => (nowCalls++ < 2 ? 0 : 100_000);
-  globalThis.setTimeout = (callback, _delay, ...args) => {
-    callback(...args);
-    return 0;
-  };
-  globalThis.clearTimeout = () => {};
-  client.fetchJson = async (url) => {
-    const href = String(url);
-    if (href.includes('/session/status')) {
-      return { ses_live: {} };
-    }
-
-    if (href.includes('/message')) {
-      return [
-        {
-          info: {
-            role: 'assistant',
-            status: 'completed',
-            time: {
-              completed: 1,
-            },
-          },
-          parts: [
-            {
-              type: 'text',
-              text: 'feat: add commit message fallback',
-            },
-          ],
-        },
-      ];
-    }
-
-    return undefined;
-  };
-
-  try {
-    const text = await client.waitForServerText(
-      'http://127.0.0.1:17017',
-      'ses_live',
-      process.cwd(),
-      token,
-      undefined,
-      eventStream
-    );
-
-    assert.equal(text, 'feat: add commit message fallback');
-  } finally {
-    client.fetchJson = originalFetchJson;
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
-    Date.now = originalDateNow;
-  }
-});
-
 test('normalizeCliOutputChunk handles OpenCode run JSON text events', () => {
   assert.deepEqual(
     normalizeCliOutputChunk(
@@ -6109,25 +5886,6 @@ test('normalizeCliOutput surfaces OpenCode top-level provider errors', () => {
 });
 
 
-test('OpenCode server commit generation listens for current-session provider errors', () => {
-  const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-
-  assert.match(source, /interface OpenCodePromptEventStream/);
-  assert.doesNotMatch(source, /interface OpenCodeErrorStream/);
-  assert.match(source, /interface OpenCodeSseConnection/);
-  assert.match(source, /openPromptEventStream\(serverUrl, sessionId, onPartial\)/);
-  assert.match(source, /const connection = this\.openSseConnection\(serverUrl\);/);
-  assert.match(source, /connection\.onEvent\(\(event, block\) =>/);
-  assert.match(source, /eventBelongsToSession\(event, sessionId\)/);
-  assert.match(source, /eventErrorMessage\(event\)/);
-  assert.match(source, /eventStream\?\.error\(\)/);
-  assert.match(source, /eventIsAssistantCompleted\(event\)/);
-  assert.match(source, /responseBodyMessage/);
-  assert.match(source, /isGenericServerError/);
-  assert.match(source, /FreeUsageLimitError/);
-  assert.match(source, /rate limit exceeded/i);
-});
-
 test('normalizeCliOutput condenses Codex JSON errors into a readable message', () => {
   assert.equal(
     normalizeCliOutput(
@@ -6212,99 +5970,6 @@ test('normalizeCliOutput removes echoed OpenCode prompt wrappers before display'
     normalizeCliOutput('[search-mode] should stay when it is plain response text', 'opencode'),
     '[search-mode] should stay when it is plain response text'
   );
-});
-
-test('normalizeCliOutput removes echoed OpenCode runtime prompt before display', () => {
-  const prompt = buildAssistantPrompt({
-    provider: { id: 'opencode', name: 'OpenCode' },
-    mode: 'agent',
-    agentMode: {
-      id: 'plan',
-      label: 'plan',
-      instruction: 'Plan before editing.',
-    },
-    runtime: {
-      modelId: 'openai/gpt-5.5',
-      modelLabel: 'gpt-5.5 · xhigh',
-      modelVariant: 'xhigh',
-      runtimeId: 'default',
-      runtimeLabel: 'Default',
-      permissionModeId: 'default',
-      permissionModeLabel: 'Default',
-    },
-    action: 'freeform',
-    message: '你能干什么呢',
-    context: {
-      workspace: {
-        name: 'agents-gui',
-        rootPath: '/Users/t/6bt/myproject/agents-gui',
-      },
-      diagnostics: [],
-    },
-    locale: 'zh-cn',
-  });
-
-  assert.match(prompt, /Runtime selection from Agents GUI:/);
-  assert.equal(normalizeCliOutput(`"${prompt}`, 'opencode'), '');
-  assert.equal(
-    normalizeCliOutput(`"${prompt}"我可以帮你处理代码任务。`, 'opencode'),
-    '我可以帮你处理代码任务。'
-  );
-});
-
-test('filterPromptEchoChunk buffers streamed OpenCode runtime prompt echoes', () => {
-  const prompt = buildAssistantPrompt({
-    provider: { id: 'opencode', name: 'OpenCode' },
-    mode: 'agent',
-    agentMode: {
-      id: 'plan',
-      label: 'plan',
-      instruction: 'Plan before editing.',
-    },
-    runtime: {
-      modelId: 'openai/gpt-5.5',
-      modelLabel: 'gpt-5.5 · xhigh',
-      modelVariant: 'xhigh',
-      runtimeId: 'default',
-      runtimeLabel: 'Default',
-      permissionModeId: 'default',
-      permissionModeLabel: 'Default',
-    },
-    action: 'freeform',
-    message: '你能干什么呢',
-    context: {
-      workspace: {
-        name: 'agents-gui',
-        rootPath: '/Users/t/6bt/myproject/agents-gui',
-      },
-      diagnostics: [],
-    },
-    locale: 'zh-cn',
-  });
-  const runtimeIndex = prompt.indexOf('Runtime selection from Agents GUI:');
-  const endIndex = prompt.indexOf(
-    '- Risks and caveats: call out assumptions, follow-up work, and edge cases.'
-  );
-
-  const first = filterPromptEchoChunk(`"${prompt.slice(0, runtimeIndex)}`, 'opencode');
-  assert.equal(first.text, '');
-  assert.ok(first.buffer);
-
-  const second = filterPromptEchoChunk(
-    prompt.slice(runtimeIndex, endIndex),
-    'opencode',
-    first.buffer
-  );
-  assert.equal(second.text, '');
-  assert.ok(second.buffer);
-
-  const third = filterPromptEchoChunk(
-    `${prompt.slice(endIndex)}"我可以帮你读代码、改代码和跑验证。`,
-    'opencode',
-    second.buffer
-  );
-  assert.equal(third.text, '我可以帮你读代码、改代码和跑验证。');
-  assert.equal(third.buffer, '');
 });
 
 test('normalizeCliOutputChunk removes echoed OpenCode prompt wrappers from thinking details', () => {
@@ -6416,17 +6081,16 @@ test('sidebar blocks current-file actions before building a CLI prompt', () => {
   assert.match(source, /error\.missingActiveFile/);
 });
 
-test('editor explain action prefers provider plan mode without permission argv', () => {
+test('editor actions carry only action and prompt context', () => {
   const source = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
 
-  assert.match(
-    source,
-    /agentMode:\s*action === 'explainSelection' \? preferredReadOnlyMode\(profile\) : undefined/
+  const editorAction = source.slice(
+    source.indexOf('async runEditorAction'),
+    source.indexOf('private async handleLoadMcpServers')
   );
-  assert.doesNotMatch(source, /permissionModes\?/);
-  assert.match(source, /item\.id === 'plan'/);
-  assert.match(source, /item\.id === 'suggest'/);
-  assert.doesNotMatch(source, /permissionModes\?/);
+  assert.doesNotMatch(editorAction, /agentMode|permissionMode|preferredReadOnlyMode/);
+  assert.match(editorAction, /action,/);
+  assert.match(editorAction, /contextOptions:/);
 });
 
 test('context collector keeps the last active editor when the sidebar has focus', async () => {
@@ -6659,20 +6323,4 @@ function loadContextCollectorWithVscode(fakeVscode) {
   } finally {
     Module._load = previousLoad;
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function openCodeSse(event, payload) {
-  return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
-}
-
-function createOpenCodeServerClient() {
-  const { OpenCodeServerClient } = require('../.test-dist/openCodeServerClient.js');
-  return new OpenCodeServerClient({
-    resolveServerUrl: async () => undefined,
-    workspaceRoot: () => process.cwd(),
-  });
 }

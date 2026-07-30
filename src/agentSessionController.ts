@@ -59,16 +59,6 @@ export class AgentSessionController {
     this.options.postToWebview({ command: 'stopped', cliId, sessionId: session.id });
   }
 
-  canReuse(session: AgentSession | undefined): session is AgentSession {
-    return Boolean(
-      session &&
-      session.process.exitCode === null &&
-      !session.process.killed &&
-      session.profile.inputMode === 'stdin' &&
-      session.profile.keepStdinOpen === true
-    );
-  }
-
   armNoOutputNotice(session: AgentSession): void {
     this.clearNoOutputNoticeTimer(session.id);
     const timer = setTimeout(() => {
@@ -112,12 +102,6 @@ export class AgentSessionController {
     this.activeSessions.clear();
     this.wiredSessionIds.clear();
     this.clearNoOutputNoticeTimers();
-  }
-
-  sendInput(cliId: string, text: string): { ok: boolean; session?: AgentSession } {
-    const session = this.activeSessions.get(cliId);
-    const ok = Boolean(text && session && this.options.agentRuntime.sendInput(session.id, text));
-    return { ok, session };
   }
 
   dispose(): void {

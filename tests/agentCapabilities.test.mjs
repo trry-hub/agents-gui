@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   AgentCapabilityRegistry,
@@ -97,7 +98,7 @@ test('freeform follows the selected permission posture', () => {
   );
 });
 
-test('session continuation becomes an explicit required capability', () => {
+test('capability policy has no session continuation contract', () => {
   assert.deepEqual(
     resolveAgentCapabilityPolicy({
       intent: 'freeform',
@@ -105,11 +106,13 @@ test('session continuation becomes an explicit required capability', () => {
       resumeSession: true,
     }),
     {
-      required: ['workspace.read', 'session.resume'],
-      allowed: ['workspace.read', 'workspace.write', 'terminal.execute', 'session.resume'],
+      required: ['workspace.read'],
+      allowed: ['workspace.read', 'workspace.write', 'terminal.execute'],
       denied: ['sandbox.bypass'],
     }
   );
+  const source = readFileSync(new URL('../src/agentCapabilities.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /session\.resume|resumeSession/);
 });
 
 test('capability registry selects the preferred compatible transport', () => {
@@ -158,20 +161,20 @@ test('capability registry falls back to a richer native transport', () => {
         },
         {
           kind: 'native',
-          capabilities: ['workspace.read', 'session.resume'],
+          capabilities: ['workspace.read', 'terminal.execute'],
         },
       ],
     },
   ]);
 
   const resolution = registry.resolve('demo', {
-    required: ['workspace.read', 'session.resume'],
-    allowed: ['workspace.read', 'session.resume'],
+    required: ['workspace.read', 'terminal.execute'],
+    allowed: ['workspace.read', 'terminal.execute'],
     denied: [],
   });
 
   assert.equal(resolution.transport, 'native');
-  assert.deepEqual(resolution.granted, ['workspace.read', 'session.resume']);
+  assert.deepEqual(resolution.granted, ['workspace.read', 'terminal.execute']);
 });
 
 test('capability registry reports unknown and incompatible providers', () => {
@@ -226,7 +229,7 @@ test('CLI profiles declare runtime capabilities and permission posture explicitl
   }
 });
 
-test('CLI capability declarations omit unsupported continuation and override capabilities', () => {
+test('CLI capability declarations omit session continuation capabilities', () => {
   const openCode = CLI_PROFILES.find((profile) => profile.id === 'opencode');
   assert.ok(openCode);
   assert.equal(openCode.executionCapabilities.includes('session.resume'), false);

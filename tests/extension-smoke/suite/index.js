@@ -18,8 +18,6 @@ async function run() {
     'contextSummary',
     'requestStarted',
     'output',
-    'sessionInputResult',
-    'openCodeNativeCommandResult',
     'stopped',
   ]) {
     assert.ok(
@@ -28,10 +26,9 @@ async function run() {
     );
   }
 
-  assert.equal(result.startedPrompts, 1);
-  assert.equal(result.sentInputs, 1);
+  assert.equal(result.startedPrompts, 2);
+  assert.equal(result.sentInputs, 0);
   assert.ok(result.stoppedSessions.some((sessionId) => sessionId.startsWith('smoke-opencode-')));
-  assert.deepEqual(result.nativeCommands, ['compact']);
   assert.ok(result.outputTexts.some((text) => text.includes('smoke reply')));
 }
 

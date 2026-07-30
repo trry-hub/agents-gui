@@ -6,7 +6,7 @@ export type AgentTaskIntent =
 export type AgentPermissionPosture = 'read-only' | 'workspace-write' | 'unrestricted';
 
 export type AgentCapability =
-  'workspace.read' | 'workspace.write' | 'terminal.execute' | 'sandbox.bypass' | 'session.resume';
+  'workspace.read' | 'workspace.write' | 'terminal.execute' | 'sandbox.bypass';
 
 export interface AgentCapabilityPolicy {
   required: AgentCapability[];
@@ -57,7 +57,6 @@ export class AgentCapabilityResolutionError extends Error {
 export interface ResolveAgentCapabilityPolicyOptions {
   intent: AgentTaskIntent;
   permissionPosture: AgentPermissionPosture;
-  resumeSession?: boolean;
 }
 
 const TRANSPORT_PREFERENCE: AgentTransportKind[] = ['acp', 'native', 'cli'];
@@ -98,11 +97,6 @@ export function resolveAgentCapabilityPolicy(
   options: ResolveAgentCapabilityPolicyOptions
 ): AgentCapabilityPolicy {
   const policy = baseCapabilityPolicy(options.intent, options.permissionPosture);
-
-  if (options.resumeSession) {
-    policy.required.push('session.resume');
-    policy.allowed.push('session.resume');
-  }
 
   return policy;
 }

@@ -1,8 +1,6 @@
 import type {
   AssistantContextOptions,
   AssistantContextSummary,
-  AssistantOpenCodeNativeCommand,
-  AssistantOpenCodeNativeCommandResult,
   AssistantWebviewRequest,
 } from './assistantTypes';
 import type { CliAuthAction, CliProfile } from './cliProfiles';
@@ -35,7 +33,6 @@ export type WebviewToHostMessage =
   | { command: 'deleteMcpServer'; cliId?: string; name?: string }
   | { command: 'toggleMcpServer'; cliId?: string; name?: string; enabled?: boolean }
   | { command: 'stop'; cliId?: string; providerId?: string }
-  | { command: 'sendSessionInput'; cliId?: string; providerId?: string; text?: string }
   | { command: 'checkProfiles'; force?: boolean }
   | {
       command: 'refreshContext';
@@ -44,12 +41,6 @@ export type WebviewToHostMessage =
       contextOptions?: Partial<AssistantContextOptions>;
       modelId: string;
     }
-  | {
-      command: 'openCodeNativeCommand';
-      nativeCommand?: AssistantOpenCodeNativeCommand;
-      openCodeSessionId?: string;
-    }
-  | { command: 'deleteOpenCodeSession'; openCodeSessionId?: string }
   | { command: 'openFilePalette' }
   | { command: 'openProviderExtension'; cliId?: string; providerId?: string }
   | { command: 'runCliAuthAction'; cliId?: string; action?: CliAuthAction }
@@ -71,12 +62,7 @@ export type HostToWebviewMessage =
       defaultProviderId?: string;
       activeProviderId?: string;
       activeAgentModeByProvider?: Record<string, string>;
-      recentModelByProvider?: Record<string, string>;
-      favoriteModelByProvider?: Record<string, string>;
       disabledMcpByProvider?: Record<string, string[]>;
-      customModelByProvider?: Record<string, string>;
-      activeRuntimeByProvider?: Record<string, string>;
-      activePermissionByProvider?: Record<string, string>;
       contextOptions?: Partial<AssistantContextOptions>;
       claudeTerminalBannerDismissed?: boolean;
       taskBoardDismissed?: boolean;
@@ -105,13 +91,6 @@ export type HostToWebviewMessage =
       sessionId: string;
       text: string;
       contextSummary: AssistantContextSummary;
-      modelId?: string;
-      modelLabel?: string;
-      modelVariant?: string;
-      runtimeId?: string;
-      runtimeLabel?: string;
-      permissionModeId?: string;
-      permissionModeLabel?: string;
     } & Record<string, unknown>)
   | ({
       command: 'output';
@@ -119,29 +98,12 @@ export type HostToWebviewMessage =
       text: string;
       sessionId?: string;
     } & Record<string, unknown>)
-  | {
-      command: 'openCodeNativeCommandResult';
-      nativeCommand: AssistantOpenCodeNativeCommandResult['command'];
-      ok: boolean;
-      message?: string;
-      url?: string;
-      newOpenCodeSessionId?: string;
-      title?: string;
-    }
   | { command: 'sessionNotice'; cliId: string; sessionId?: string; text: string }
-  | {
-      command: 'sessionInputResult';
-      cliId: string;
-      sessionId?: string;
-      ok: boolean;
-      text?: string;
-    }
   | {
       command: 'sessionEnd';
       cliId: string;
       exitCode: number;
       sessionId?: string;
-      openCodeSessionId?: string;
     }
   | { command: 'stopped'; cliId: string; sessionId?: string }
   | {

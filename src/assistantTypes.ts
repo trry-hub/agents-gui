@@ -89,23 +89,12 @@ export interface AssistantPromptRequest {
   provider: AssistantProviderRef;
   mode: AssistantMode;
   agentMode: AssistantAgentModeRef;
-  runtime?: AssistantRuntimeSelection;
   action: AssistantActionId;
   message: string;
   attachments?: AssistantImageAttachment[];
   conversationHistory?: AssistantConversationHistoryMessage[];
   context: AssistantContextSnapshot;
   locale?: string;
-}
-
-export interface AssistantRuntimeSelection {
-  modelId?: string;
-  modelLabel?: string;
-  modelVariant?: string;
-  runtimeId?: string;
-  runtimeLabel?: string;
-  permissionModeId?: string;
-  permissionModeLabel?: string;
 }
 
 export interface AssistantWebviewRequest {
@@ -115,11 +104,6 @@ export interface AssistantWebviewRequest {
   text?: string;
   mode?: AssistantMode;
   agentMode?: string;
-  model?: string;
-  modelVariant?: string;
-  customModel?: string;
-  runtime?: string;
-  permissionMode?: string;
   workflowMode?: string;
   action?: AssistantActionId;
   attachments?: AssistantImageAttachmentInput[];
@@ -132,10 +116,6 @@ export interface AssistantContextSummary {
   workspacePath?: string;
   workspaceFolders?: AssistantWorkspaceFolderContext[];
   workspaceBranch?: string;
-  openCodeProject?: AssistantOpenCodeProject;
-  mcpServers?: AssistantMcpServerStatus[];
-  mcpStatusPending?: boolean;
-  lspServers?: AssistantLspServerStatus[];
   activeFile?: string;
   selection?: string;
   diagnostics: number;
@@ -143,39 +123,9 @@ export interface AssistantContextSummary {
   contextWindowTokens?: number;
 }
 
-export interface AssistantOpenCodeStatus {
-  project?: AssistantOpenCodeProject;
-  mcpServers?: AssistantMcpServerStatus[];
-  lspServers?: AssistantLspServerStatus[];
-}
-
-export type AssistantOpenCodeNativeCommand =
-  'share' | 'unshare' | 'compact' | 'fork' | 'undo' | 'redo';
-
-export interface AssistantOpenCodeNativeCommandResult {
-  command: AssistantOpenCodeNativeCommand;
-  ok: boolean;
-  message?: string;
-  url?: string;
-  newOpenCodeSessionId?: string;
-  title?: string;
-}
-
-export interface AssistantOpenCodeProject {
-  id?: string;
-  worktree?: string;
-  vcs?: string;
-}
-
 export interface AssistantMcpServerStatus {
   name: string;
   status: string;
-  error?: string;
-}
-
-export interface AssistantLspServerStatus {
-  name: string;
-  status?: string;
   error?: string;
 }
 

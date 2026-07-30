@@ -4,13 +4,9 @@ import type {
   AssistantContextOptions,
   AssistantContextSnapshot,
   AssistantContextSummary,
-  AssistantOpenCodeNativeCommand,
-  AssistantOpenCodeNativeCommandResult,
-  AssistantOpenCodeStatus,
 } from './assistantTypes';
 import type { AgentRunEvent } from './cliManager';
 import { getCliProfile, type CliProfile } from './cliProfiles';
-import type { OpenCodeAgentCapability } from './openCodeAgentCapability';
 import { SidebarProvider } from './sidebarProvider';
 import type { HostToWebviewMessage, WebviewToHostMessage } from './webviewProtocol';
 
@@ -21,7 +17,6 @@ export interface ExtensionSmokeProbeResult {
   sentInputs: number;
   stoppedSessions: string[];
   stopAllCount: number;
-  nativeCommands: AssistantOpenCodeNativeCommand[];
   outputTexts: string[];
   missing: string[];
 }
@@ -31,14 +26,12 @@ export async function runExtensionSmokeProbe(
   options: { storageUri?: vscode.Uri } = {}
 ): Promise<ExtensionSmokeProbeResult> {
   const runtime = new SmokeAgentRuntime();
-  const openCodeCapability = new SmokeOpenCodeCapability();
   const contextCollector = new SmokeContextCollector();
   const postedMessages: HostToWebviewMessage[] = [];
   const webview = createSmokeWebview(postedMessages);
   const provider = new SidebarProvider(extensionUri, runtime, {
     contextCollector: contextCollector as never,
     extensionMode: vscode.ExtensionMode.Test,
-    openCodeCapability,
     state: new SmokeMemento() as never,
     storageUri: options.storageUri,
   });
@@ -87,14 +80,16 @@ export async function runExtensionSmokeProbe(
     );
 
     await webview.receive({
-      command: 'sendSessionInput',
+      command: 'send',
       cliId: 'opencode',
+      mode: 'agent',
+      action: 'freeform',
       text: 'smoke follow-up',
-    });
-    await webview.receive({
-      command: 'openCodeNativeCommand',
-      nativeCommand: 'compact',
-      openCodeSessionId: 'ses_smoke',
+      conversationHistory: [
+        { role: 'user', text: 'smoke send' },
+        { role: 'assistant', text: 'smoke reply' },
+      ],
+      contextOptions: defaultContextOptions(),
     });
     await webview.receive({ command: 'stop', cliId: 'opencode' });
     provider.stopAll();
@@ -114,8 +109,6 @@ export async function runExtensionSmokeProbe(
     'contextSummary',
     'requestStarted',
     'output',
-    'sessionInputResult',
-    'openCodeNativeCommandResult',
     'stopped',
   ];
   const missing = requiredCommands.filter((command) => !postedCommands.includes(command));
@@ -129,17 +122,18 @@ export async function runExtensionSmokeProbe(
   if (!correlatedContextSummary) {
     missing.push('correlated context summary');
   }
-  if (runtime.startedPrompts.length !== 1) {
-    missing.push('single startPrompt call');
-  }
-  if (runtime.sentInputs.length !== 1) {
-    missing.push('sendSessionInput call');
+  if (runtime.startedPrompts.length !== 2) {
+    missing.push('two startPrompt calls');
   }
   if (!runtime.stoppedSessions.some((sessionId) => sessionId.startsWith('smoke-opencode-'))) {
     missing.push('stop call');
   }
-  if (!openCodeCapability.nativeCommands.includes('compact')) {
-    missing.push('OpenCode native command');
+  const followUpPrompt = runtime.startedPrompts[1]?.initialInput ?? '';
+  if (
+    !followUpPrompt.includes('User: smoke send') ||
+    !followUpPrompt.includes('Assistant: smoke reply')
+  ) {
+    missing.push('follow-up prompt history');
   }
 
   return {
@@ -149,7 +143,6 @@ export async function runExtensionSmokeProbe(
     sentInputs: runtime.sentInputs.length,
     stoppedSessions: runtime.stoppedSessions,
     stopAllCount: runtime.stopAllCount,
-    nativeCommands: openCodeCapability.nativeCommands,
     outputTexts,
     missing,
   };
@@ -178,6 +171,7 @@ class SmokeAgentRuntime implements AgentRuntime {
   readonly startedPrompts: Array<{
     cliId: string;
     initialInput?: string;
+    options?: { cwd?: string };
   }> = [];
   readonly sentInputs: Array<{ sessionId: string; text: string; closeAfterWrite?: boolean }> = [];
   readonly stoppedSessions: string[] = [];
@@ -208,7 +202,11 @@ class SmokeAgentRuntime implements AgentRuntime {
     return [this.profile];
   }
 
-  async startPrompt(cliId: string, initialInput?: string): Promise<AgentSession | null> {
+  async startPrompt(
+    cliId: string,
+    initialInput?: string,
+    options?: { cwd?: string }
+  ): Promise<AgentSession | null> {
     if (cliId !== this.profile.id) {
       return null;
     }
@@ -227,7 +225,7 @@ class SmokeAgentRuntime implements AgentRuntime {
       onEvent,
     };
 
-    this.startedPrompts.push({ cliId, initialInput });
+    this.startedPrompts.push({ cliId, initialInput, options });
     this.sessions.set(id, session);
     this.eventEmitters.set(id, onEvent);
     return session;
@@ -269,39 +267,6 @@ class SmokeAgentRuntime implements AgentRuntime {
 
   lastSessionId(): string | undefined {
     return Array.from(this.sessions.keys()).at(-1);
-  }
-}
-
-class SmokeOpenCodeCapability implements OpenCodeAgentCapability {
-  readonly nativeCommands: AssistantOpenCodeNativeCommand[] = [];
-
-  async runPrompt(): Promise<string> {
-    return 'smoke reply';
-  }
-
-  async getStatus(): Promise<AssistantOpenCodeStatus> {
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-    return {
-      project: { id: 'smoke-project', worktree: workspaceRoot, vcs: 'git' },
-      mcpServers: [{ name: 'smoke', status: 'connected' }],
-      lspServers: [{ name: 'typescript', status: 'running' }],
-    };
-  }
-
-  async executeNativeCommand(
-    command: AssistantOpenCodeNativeCommand,
-    sessionId: string | undefined
-  ): Promise<AssistantOpenCodeNativeCommandResult> {
-    this.nativeCommands.push(command);
-    return {
-      command,
-      ok: true,
-      message: sessionId ? `smoke ${command} ok` : `smoke ${command} ok without session`,
-    };
-  }
-
-  async deleteSession(): Promise<boolean> {
-    return true;
   }
 }
 

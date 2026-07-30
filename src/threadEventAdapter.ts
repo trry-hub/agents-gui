@@ -83,9 +83,6 @@ export class ThreadEventAdapter {
       case 'sessionNotice':
         envelopes = this.forwardFeedback(message, false);
         break;
-      case 'sessionInputResult':
-        envelopes = message.ok ? [] : this.forwardFeedback(message, true);
-        break;
       default:
         envelopes = [];
         break;

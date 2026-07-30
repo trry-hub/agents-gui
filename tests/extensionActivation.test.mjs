@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -20,20 +20,12 @@ const attachmentStoreSource = readFileSync(
   new URL('../src/attachmentStore.ts', import.meta.url),
   'utf8'
 );
-const openCodeAgentCapabilitySource = readFileSync(
-  new URL('../src/openCodeAgentCapability.ts', import.meta.url),
-  'utf8'
-);
 const openCodeLocalStateSource = readFileSync(
   new URL('../src/openCodeLocalState.ts', import.meta.url),
   'utf8'
 );
 const openCodePathsSource = readFileSync(
   new URL('../src/openCodePaths.ts', import.meta.url),
-  'utf8'
-);
-const openCodeServerClientSource = readFileSync(
-  new URL('../src/openCodeServerClient.ts', import.meta.url),
   'utf8'
 );
 const extensionSmokeHarnessSource = readFileSync(
@@ -170,14 +162,14 @@ test('context summary protocol is correlated and host invalidations replace unso
   assert.match(webviewProtocolSource, /command: 'contextInvalidated'; cliId\?: string/);
   assert.equal(
     sendSummaryCalls.length,
-    3,
-    'sendContextSummary should only be declared, serve refreshContext, and continue its retry chain'
+    2,
+    'sendContextSummary should only be declared and serve refreshContext'
   );
   assert.match(
     sidebarSource,
     /command: 'contextSummary',\s*requestId,\s*cliId,\s*modelId,\s*summary,/
   );
-  assert.match(sidebarSource, /scheduleOpenCodeStatusRefresh\([\s\S]*requestId/);
+  assert.doesNotMatch(sidebarSource, /scheduleOpenCodeStatusRefresh/);
   assert.match(sidebarSource, /command: 'contextInvalidated'/);
   assert.match(previewSource, /requestId:\s*message\.requestId/);
   assert.match(previewSource, /cliId:\s*message\.cliId/);
@@ -194,15 +186,7 @@ test('context summary protocol is correlated and host invalidations replace unso
 
 test('extension host depends on agent runtime and typed webview protocol ports', () => {
   assert.match(extensionSource, /import \{ CliAgentRuntime \} from '\.\/agentRuntime';/);
-  assert.match(
-    extensionSource,
-    /import \{ CliOpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/
-  );
   assert.match(extensionSource, /const agentRuntime = new CliAgentRuntime\(cliManager\);/);
-  assert.match(
-    extensionSource,
-    /const openCodeCapability = new CliOpenCodeAgentCapability\(cliManager\);/
-  );
   assert.match(extensionSource, /new SidebarProvider\(context\.extensionUri, agentRuntime, \{/);
   assert.match(
     sidebarSource,
@@ -214,18 +198,13 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   );
   assert.match(sidebarSource, /import \{ ImageAttachmentStore \} from '\.\/attachmentStore';/);
   assert.match(sidebarSource, /import \{ OpenCodeLocalState \} from '\.\/openCodeLocalState';/);
-  assert.match(
-    sidebarSource,
-    /import type \{ OpenCodeAgentCapability \} from '\.\/openCodeAgentCapability';/
-  );
   assert.doesNotMatch(sidebarSource, /import \{ CliManager, Session \} from '\.\/cliManager';/);
   assert.match(sidebarSource, /private readonly agentRuntime: AgentRuntime/);
   assert.match(sidebarSource, /private readonly sessionController: AgentSessionController/);
   assert.match(sidebarSource, /private readonly attachmentStore: ImageAttachmentStore/);
   assert.match(sidebarSource, /private readonly openCodeLocalState: OpenCodeLocalState/);
-  assert.match(sidebarSource, /private readonly openCodeCapability\?: OpenCodeAgentCapability/);
-  assert.match(sidebarSource, /openCodeCapability\?: OpenCodeAgentCapability/);
-  assert.match(extensionSource, /openCodeCapability,/);
+  assert.doesNotMatch(sidebarSource, /OpenCodeAgentCapability|openCodeCapability/);
+  assert.doesNotMatch(extensionSource, /OpenCodeAgentCapability|openCodeCapability/);
   assert.match(sidebarSource, /onDidReceiveMessage\(async \(message: WebviewToHostMessage\) =>/);
   assert.match(sidebarSource, /private postToWebview\(message: HostToWebviewMessage\)/);
   assert.match(sidebarSource, /this\.postToWebview\(\{/);
@@ -253,11 +232,8 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(agentSessionControllerSource, /export class AgentSessionController/);
   assert.match(attachmentStoreSource, /export class ImageAttachmentStore/);
   assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
-  assert.match(openCodeAgentCapabilitySource, /export interface OpenCodeAgentCapability/);
-  assert.match(
-    openCodeAgentCapabilitySource,
-    /export class CliOpenCodeAgentCapability implements OpenCodeAgentCapability/
-  );
+  assert.equal(existsSync(new URL('../src/openCodeAgentCapability.ts', import.meta.url)), false);
+  assert.equal(existsSync(new URL('../src/openCodeServerClient.ts', import.meta.url)), false);
   const runtimeInterface =
     agentRuntimeSource.match(/export interface AgentRuntime \{[\s\S]*?\n\}/)?.[0] ?? '';
   assert.ok(runtimeInterface, 'expected AgentRuntime interface source');
@@ -267,7 +243,6 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(webviewProtocolSource, /export type HostToWebviewMessage/);
   assert.match(architectureDoc, /ports-and-adapters architecture/);
   assert.match(architectureDoc, /AgentRuntime port/);
-  assert.match(architectureDoc, /OpenCodeAgentCapability/);
   assert.match(architectureDoc, /src\/agentSessionController\.ts/);
   assert.match(architectureDoc, /src\/attachmentStore\.ts/);
   assert.match(architectureDoc, /src\/openCodeLocalState\.ts/);
@@ -348,8 +323,7 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
   assert.match(extensionSmokeSuiteSource, /executeCommand\('agents-gui\.internal\.runSmoke'\)/);
   assert.match(extensionSmokeHarnessSource, /new SidebarProvider\(extensionUri, runtime/);
   assert.match(extensionSmokeHarnessSource, /command: 'send'/);
-  assert.match(extensionSmokeHarnessSource, /command: 'sendSessionInput'/);
-  assert.match(extensionSmokeHarnessSource, /command: 'openCodeNativeCommand'/);
+  assert.doesNotMatch(extensionSmokeHarnessSource, /sendSessionInput|openCodeNativeCommand/);
   assert.match(extensionSmokeHarnessSource, /command: 'stop'/);
   assert.match(extensionSmokeHarnessSource, /openCodeTextDelta\('smoke reply'\)/);
   assert.match(extensionSmokeHarnessSource, /requiredCommands(?:: string\[\])? = \[/);

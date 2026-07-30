@@ -5,7 +5,6 @@ import { CliAgentRuntime } from './agentRuntime';
 import { createCliAgentCapabilityRegistry } from './cliAgentCapabilities';
 import { CLI_PROFILES } from './cliProfiles';
 import { CliTextGenerationAdapter } from './cliTextGenerationAdapter';
-import { CliOpenCodeAgentCapability } from './openCodeAgentCapability';
 import { CommitMessageCommand } from './commitMessageCommand';
 import { runExtensionSmokeProbe } from './extensionSmokeHarness';
 import { resolveRuntimeLocale, runtimeT } from './localization';
@@ -25,7 +24,6 @@ export async function activate(context: vscode.ExtensionContext) {
   const cliManager = new CliManager();
   const agentRuntime = new CliAgentRuntime(cliManager);
   const agentCapabilityRegistry = createCliAgentCapabilityRegistry(CLI_PROFILES);
-  const openCodeCapability = new CliOpenCodeAgentCapability(cliManager);
   const textGenerationAdapter = new CliTextGenerationAdapter(cliManager);
   const generateCommitMessage = new GenerateCommitMessageUseCase(textGenerationAdapter);
   const commitMessageCommand = new CommitMessageCommand(
@@ -183,7 +181,6 @@ export async function activate(context: vscode.ExtensionContext) {
     sidebarProvider = new SidebarProvider(context.extensionUri, agentRuntime, {
       agentCapabilityRegistry,
       extensionMode: context.extensionMode,
-      openCodeCapability,
       state: context.globalState,
       storageUri: context.globalStorageUri,
     });
