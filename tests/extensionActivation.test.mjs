@@ -274,38 +274,6 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
 });
 
-/* Removed server-policy assertion; one-shot commit generation is covered in textGeneration tests.
-  assert.match(
-    extensionSource,
-    /import \{ CliTextGenerationAdapter \} from '\.\/cliTextGenerationAdapter';/
-  );
-  assert.match(
-    extensionSource,
-    /import \{ GenerateCommitMessageUseCase \} from '\.\/textGeneration';/
-  );
-  assert.match(
-    extensionSource,
-    /const textGenerationAdapter = new CliTextGenerationAdapter\(cliManager\);/
-  );
-  assert.match(
-    extensionSource,
-    /const generateCommitMessage = new GenerateCommitMessageUseCase\(textGenerationAdapter\);/
-  );
-  assert.match(
-    extensionSource,
-    /new CommitMessageCommand\(\s*textGenerationAdapter,\s*generateCommitMessage\s*\)/
-  );
-  assert.match(textGenerationSource, /export interface TextGenerationPort/);
-  assert.match(textGenerationSource, /export class GenerateCommitMessageUseCase/);
-  assert.match(
-    cliTextGenerationAdapterSource,
-    /implements TextGenerationPort, TextGenerationProviderRegistry/
-  );
-  assert.match(cliTextGenerationAdapterSource, /buildOpenCodeFastGenerationEnv/);
-  assert.match(cliSource, /const cwd = options\.cwd\?\.trim\(\) \|\| this\.getWorkspaceRoot\(\)/);
-  assert.match(architectureDoc, /task-runtime-control-plane\.md/);
-  assert.match(taskRuntimeArchitectureDoc, /fast text generation/);
-}); */
 
 test('interactive agent requests pass through the capability control plane', () => {
   assert.match(
@@ -357,18 +325,6 @@ test('attachment persistence stays behind a dedicated store', () => {
   assert.doesNotMatch(sidebarSource, /MAX_IMAGE_ATTACHMENT_BYTES/);
 });
 
-/* Discovery no longer reads OpenCode local model state for launch decisions.
-  assert.match(openCodeLocalStateSource, /export class OpenCodeLocalState/);
-  assert.match(openCodeLocalStateSource, /resolveOpenCodePaths/);
-  assert.match(openCodeLocalStateSource, /resolveOpenCodePaths\(\s*this\.options\s*\)/);
-  assert.match(openCodePathsSource, /XDG_STATE_HOME/);
-  assert.match(openCodePathsSource, /XDG_CACHE_HOME/);
-  assert.match(openCodePathsSource, /LOCALAPPDATA/);
-  assert.match(cliDiscoverySource, /private readonly openCodeLocalState: OpenCodeLocalState/);
-  assert.match(sidebarSource, /this\.openCodeLocalState\.updateModelVariant/);
-  assert.doesNotMatch(cliDiscoverySource, /\.local', 'state', 'opencode'/);
-  assert.doesNotMatch(sidebarSource, /\.local', 'state', 'opencode'/);
-}); */
 
 test('extension smoke script covers command entrypoints and harnessed runtime flows', () => {
   assert.equal(
@@ -404,23 +360,6 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
   assert.match(releaseVerifySource, /'diff', '--cached', '--check'/);
 });
 
-/* Managed OpenCode server IO is intentionally absent from CliManager.
-  assert.match(cliSource, /new OpenCodeServerClient/);
-  assert.match(
-    cliSource,
-    /this\.openCodeClient\.runPrompt\(prompt, token, directory, modelId, onPartial\)/
-  );
-  assert.match(cliSource, /this\.openCodeClient\.getStatus\(\)/);
-  assert.match(cliSource, /this\.openCodeClient\.executeNativeCommand\(command, sessionId\)/);
-  assert.match(cliSource, /this\.openCodeClient\.deleteSession\(sessionId\)/);
-  assert.doesNotMatch(cliSource, /import \* as http from 'http';/);
-  assert.doesNotMatch(cliSource, /import \* as https from 'https';/);
-  assert.match(openCodeServerClientSource, /import \* as http from 'http';/);
-  assert.match(openCodeServerClientSource, /import \* as https from 'https';/);
-  assert.match(openCodeServerClientSource, /export class OpenCodeServerClient/);
-  assert.match(openCodeServerClientSource, /openEventStream/);
-  assert.match(architectureDoc, /OpenCode HTTP, SSE, status, model discovery/);
-}); */
 
 test('CLI discovery keeps command resolution and observational probes behind its adapter', () => {
   assert.match(cliSource, /import \{ CliDiscovery \} from '\.\/cliDiscovery';/);

@@ -406,27 +406,6 @@ test('commit message command depends on the text-generation use case instead of 
   assert.match(source, /resolveFallbackProviderIds:/);
 });
 
-/* Removed: managed OpenCode server commit generation is not part of native one-shot transport.
-  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
-  const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-
-  assert.match(source, /onPartial\?: \(text: string\) => void/);
-  assert.match(cliSource, /this\.openCodeClient\.runPrompt\(prompt, token, directory, modelId, onPartial\)/);
-  assert.match(source, /const eventStream = this\.openPromptEventStream\(serverUrl, sessionId, onPartial\);/);
-  assert.match(source, /waitForServerText\(\s*serverUrl,\s*sessionId,\s*directory,\s*token,\s*onPartial,\s*eventStream\s*\)/s);
-  assert.match(source, /OPEN_CODE_PROMPT_FALLBACK_POLL_INTERVAL_MS = 1000/);
-  assert.match(source, /OPEN_CODE_PROMPT_TIMEOUT_MS = 90_000/);
-  assert.match(source, /waitForEventCompletion\(eventStream, token\)/);
-  assert.match(source, /fetchSessionText\(serverUrl, sessionId, directory\)/);
-  assert.match(source, /const \[statusPayload, messages\] = await Promise\.all\(\[/);
-  assert.match(source, /const textState = this\.extractAssistantTextState\(messages\);/);
-  assert.match(source, /tools:\s*\{ '\*': false \}/);
-  assert.match(source, /onPartial\?\.\(textState\.text\);/);
-  assert.match(source, /const completed = this\.isAssistantMessageCompleted\(info\);/);
-  assert.match(source, /this\.pickString\(partRecord\.type\) === 'text'/);
-  assert.match(source, /if \(textState\.completed\) \{/);
-  assert.doesNotMatch(source, /\.map\(\(part\) => this\.pickString\(this\.objectRecord\(part\)\.text\) \?\? ''\)/);
-}); */
 
 test('sidebar does not persist active model selection as its own model config', () => {
   const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');

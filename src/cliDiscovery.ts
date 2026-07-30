@@ -22,6 +22,7 @@ export interface CliProfileStatusOptions {
   force?: boolean;
 }
 const PROFILE_STATUS_CACHE_MS = 300_000;
+const COMMAND_VERSION_OUTPUT_LIMIT = 32_768;
 
 export class CliDiscovery {
   private commandPathCache = new Map<string, string>();
@@ -217,7 +218,8 @@ export class CliDiscovery {
           command,
           profile.versionArgs ?? ['--version'],
           { env: withCliLookupPath(process.env, [commandDir]), stderr: 'pipe' },
-          1800
+          1800,
+          COMMAND_VERSION_OUTPUT_LIMIT
         );
         return normalizeCommandVersionOutput(result.output);
       } catch {
@@ -308,10 +310,10 @@ function selectConfiguredModel(
   );
 }
 
-function normalizeCommandVersionOutput(output: string): string | undefined {
+export function normalizeCommandVersionOutput(output: string): string | undefined {
   // eslint-disable-next-line no-control-regex
   const ansiPattern = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
   const clean = output.replace(ansiPattern, '');
-  const token = /\bv?\d+(?:\.\d+){0,3}(?:[-+][0-9A-Za-z.-]+)?\b/.exec(clean)?.[0];
+  const token = /\bv?\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]{1,64})?\b/.exec(clean)?.[0];
   return token?.replace(/^v/i, '');
 }

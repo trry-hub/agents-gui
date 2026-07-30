@@ -467,38 +467,6 @@ test('all CLI profiles expose only native prompt transport arguments', () => {
   }
 });
 
-/* Removed: background server/profile env assertions are incompatible with one-shot transport.
-  const profile = getCliProfile('opencode');
-
-  assert.equal(profile.command, 'opencode');
-  assert.deepEqual(profile.promptArgs, ['run', '--format', 'json', '--thinking']);
-  assert.deepEqual(profile.backgroundServer?.args, [
-    'serve',
-    '--hostname',
-    '127.0.0.1',
-    '--port',
-    '{port}',
-  ]);
-  assert.deepEqual(profile.backgroundServer?.attachArgs, [
-    '--attach',
-    'http://127.0.0.1:{port}',
-    '--dir',
-    '{cwd}',
-  ]);
-  assert.equal(profile.backgroundServer?.url, 'http://127.0.0.1:{port}');
-  assert.deepEqual(profile.backgroundServer?.portRange, { start: 46100, size: 200 });
-  assert.equal(profile.env?.OPENCODE_DB, '{tmp}/agents-gui-opencode-{cwdHash}.db');
-  assert.equal(profile.env?.OMO_DISABLE_POSTHOG, '1');
-  assert.equal(profile.env?.OMO_SEND_ANONYMOUS_TELEMETRY, '0');
-  assert.equal(profile.inputMode, 'argument');
-  assert.equal(profile.defaultModel, 'configured');
-  assert.equal(profile.defaultAgentMode, 'build');
-  assert.equal(profile.modelOptions.find((option) => option.id === 'default'), undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'default'), undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'configured'), undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'build')?.args, undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'plan')?.args, undefined);
-}); */
 
 test('opencode models output is parsed into observational configured models', () => {
   const options = parseOpenCodeModelsOutput(
@@ -728,179 +696,6 @@ test('opencode debug config text exposes default agent without parsing full prom
   assert.deepEqual(discovery.modelBoundAgentIds, ['\u200bSisyphus - Ultraworker']);
 });
 
-/* Removed: managed background servers, SSE ownership, proxy synthesis, and attach/session args.
-  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
-  const discoverySource = readFileSync(new URL('../src/cliDiscovery.ts', import.meta.url), 'utf8');
-  const processRunnerSource = readFileSync(new URL('../src/cliProcessRunner.ts', import.meta.url), 'utf8');
-  const openCodeClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const openCodeLocalStateSource = readFileSync(new URL('../src/openCodeLocalState.ts', import.meta.url), 'utf8');
-  const openCodePathsSource = readFileSync(new URL('../src/openCodePaths.ts', import.meta.url), 'utf8');
-  const systemProxyEnvSource = readFileSync(new URL('../src/systemProxyEnv.ts', import.meta.url), 'utf8');
-  const sessionControllerSource = readFileSync(new URL('../src/agentSessionController.ts', import.meta.url), 'utf8');
-
-  assert.match(source, /private readonly cliDiscovery = new CliDiscovery/);
-  assert.match(discoverySource, /getOpenCodeAgentModes/);
-  assert.match(discoverySource, /\['debug', 'config'\]/);
-  assert.doesNotMatch(discoverySource, /opencode-agent-list/);
-  assert.doesNotMatch(discoverySource, /\['agent', 'list'\]/);
-  assert.match(discoverySource, /filterOpenCodeVisibleAgentModes/);
-  assert.match(discoverySource, /discovery\.modelBoundAgentIds/);
-  assert.match(discoverySource, /orderOpenCodeAgentModes/);
-  assert.match(discoverySource, /\['build', 0\]/);
-  assert.match(discoverySource, /\['plan', 1\]/);
-  assert.match(discoverySource, /includeBaseWhenDiscovered: true/);
-  assert.match(discoverySource, /baseVisibleModes\s*=\s*discoveredModes\.length > 0 && !options\.includeBaseWhenDiscovered\s*\?\s*\[\]\s*:\s*baseModes/s);
-  assert.match(discoverySource, /const upsert = \(mode: CliAgentMode\)/);
-  assert.match(discoverySource, /merged\[index\] = decorated/);
-  assert.match(discoverySource, /defaultAgentMode:\s*pickOpenCodeDefaultAgentMode\(/);
-  assert.match(discoverySource, /selectableModes\.find\(\(mode\) => mode\.id === 'build'\)/);
-  assert.match(discoverySource, /decorateOpenCodeConfiguredAgentMode/);
-  assert.doesNotMatch(discoverySource, /preferredOpenCodeDefaultAgent/);
-  assert.match(discoverySource, /getOpenCodeModelOptions/);
-  assert.match(discoverySource, /\.fetchModelOptions\(cwd\)/);
-  assert.match(openCodeClientSource, /apiUrl\(serverUrl, '\/config\/providers', cwd\)/);
-  assert.match(openCodeClientSource, /parseOpenCodeProviderModels\(payload\)/);
-  assert.match(discoverySource, /\['models'\]/);
-  assert.match(discoverySource, /opencode-models/);
-  assert.match(discoverySource, /getOpenCodeModelState/);
-  assert.match(discoverySource, /getOpenCodeModelMetadata/);
-  assert.match(discoverySource, /private readonly openCodeLocalState: OpenCodeLocalState/);
-  assert.match(discoverySource, /this\.openCodeLocalState\.readModelState\(\)/);
-  assert.match(discoverySource, /this\.openCodeLocalState\.readModelMetadata\(\)/);
-  assert.doesNotMatch(discoverySource, /\.local', 'state', 'opencode', 'model\.json'/);
-  assert.doesNotMatch(discoverySource, /\.cache', 'opencode', 'models\.json'/);
-  assert.match(openCodeLocalStateSource, /resolveOpenCodePaths\(\s*this\.options\s*\)/);
-  assert.match(openCodePathsSource, /modelStatePath: pathApi\.join\(stateHome, 'opencode', 'model\.json'\)/);
-  assert.match(openCodePathsSource, /modelMetadataPath: pathApi\.join\(cacheHome, 'opencode', 'models\.json'\)/);
-  assert.match(openCodePathsSource, /XDG_STATE_HOME/);
-  assert.match(openCodePathsSource, /XDG_CACHE_HOME/);
-  assert.match(openCodePathsSource, /LOCALAPPDATA/);
-  assert.match(systemProxyEnvSource, /const systemRoot = env\.SystemRoot/);
-  assert.match(
-    systemProxyEnvSource,
-    /path\.win32\.join\(systemRoot, 'System32', 'reg\.exe'\)/
-  );
-  assert.doesNotMatch(systemProxyEnvSource, /execFileSync\(\s*'reg\.exe'/);
-  assert.match(discoverySource, /discovery\.defaultModelId \?\? modelState\.currentModelId/);
-  assert.match(discoverySource, /modelState\.variants/);
-  assert.match(discoverySource, /modelMetadata/);
-  assert.match(discoverySource, /configuredModelId/);
-  assert.match(discoverySource, /defaultModel: 'configured'/);
-  assert.match(discoverySource, /decorateOpenCodeModelOption/);
-  assert.match(discoverySource, /variantOptions/);
-  assert.match(discoverySource, /formatConfiguredOpenCodeModelSummary/);
-  assert.match(discoverySource, /option\.id !== 'default'/);
-  assert.match(source, /private backgroundServers = new Map/);
-  assert.match(source, /private readonly processRunner = new CliProcessRunner/);
-  assert.match(source, /attachBackgroundServer\?: boolean/);
-  assert.match(source, /promptArgs\?: string\[\]/);
-  assert.match(
-    source,
-    /const backgroundAttachArgs =\s*options\.attachBackgroundServer === false\s*\?\s*\[\]\s*:\s*await this\.getBackgroundAttachArgs/s
-  );
-  assert.match(source, /const promptArgs = options\.promptArgs \?\? profile\.promptArgs/);
-  assert.match(
-    source,
-    /if \(!ownedProcess && \(await this\.waitForTcp\(server\.host, server\.port, 120\)\)\) \{\s*\/\/ Do not attach to stale OpenCode servers[\s\S]*continue;\s*\}/
-  );
-  assert.doesNotMatch(
-    source,
-    /if \(!ownedProcess && await this\.waitForTcp\(server\.host, server\.port, 120\)\) \{\s*if \(await this\.isBackgroundServerAvailable/
-  );
-  assert.match(
-    source,
-    /const eventStreamUrl =\s*options\.attachBackgroundServer === false\s*\?\s*undefined\s*:\s*this\.getOpenCodeEventStreamUrl/s
-  );
-  assert.match(
-    source,
-    /\[\.\.\.promptArgs,\s*\.\.\.backgroundAttachArgs,\s*\.\.\.continueArgs,\s*\.\.\.agentArgs,\s*initialInput\]/s
-  );
-  assert.match(source, /resolveBackgroundServerCandidates/);
-  assert.match(source, /expandBackgroundServerArg/);
-  assert.match(source, /this\.cliDiscovery\.expandProfileEnv/);
-  assert.match(discoverySource, /expandProfileEnv/);
-  assert.match(discoverySource, /os\.tmpdir\(\)/);
-  assert.match(source, /getOpenCodeEventStreamUrl/);
-  assert.match(source, /this\.openCodeClient\.openEventStream/);
-  assert.match(openCodeClientSource, /openEventStream/);
-  assert.match(openCodeClientSource, /openSseConnection/);
-  assert.match(source, /export type AgentRunEvent =/);
-  assert.match(source, /onEvent: vscode\.EventEmitter<AgentRunEvent>/);
-  assert.match(source, /const onEvent = new vscode\.EventEmitter<AgentRunEvent>\(\)/);
-  assert.match(source, /onEvent\.fire\(\{ type: 'output', text, stream, transport, openCodeSessionId \}\)/);
-  assert.match(source, /onEvent\.fire\(\{ type: 'error', message \}\)/);
-  assert.match(source, /onEvent\.fire\(\{ type: 'end', exitCode, openCodeSessionId \}\)/);
-  assert.match(source, /emitOutput\(text, 'stdout', 'sse', openCodeSessionId\)/);
-  assert.match(openCodeClientSource, /new URL\('\/event', serverUrl\)/);
-  assert.match(openCodeClientSource, /new URL\('\/mcp', serverUrl\)/);
-  assert.match(openCodeClientSource, /normalizeMcpStatus/);
-  assert.match(openCodeClientSource, /const renderStateBySession = new Map/);
-  assert.match(openCodeClientSource, /const pendingBySession = new Map<string, string\[\]>\(\)/);
-  assert.match(openCodeClientSource, /renderStateForSession\(blockSessionId\)/);
-  assert.match(source, /eventStream\?\.setSessionId\(detectedOpenCodeSessionId\)/);
-  assert.match(source, /eventStream\?\.hasOutput\(\) && !eventStream\.failed\(\)/);
-  assert.match(openCodeClientSource, /message\.part\.updated/);
-  assert.match(openCodeClientSource, /message\.part\.delta/);
-  assert.match(openCodeClientSource, /line\.startsWith\('event:'\)/);
-  assert.match(openCodeClientSource, /partTypes\.set\(partId, partType\)/);
-  assert.match(openCodeClientSource, /renderUpdatedTextDelta/);
-  assert.match(openCodeClientSource, /firstObject\(properties\.part,\s*event\.part\)/);
-  assert.match(openCodeClientSource, /pickString\(properties\.partID,\s*event\.partID/);
-  assert.match(openCodeClientSource, /pickString\(properties\.delta,\s*event\.delta/);
-  assert.match(openCodeClientSource, /partType === 'tool'/);
-  assert.match(openCodeClientSource, /field !== 'text'/);
-  assert.match(source, /eventStream\?\.hasOutput\(\)/);
-  assert.match(openCodeClientSource, /type === 'error'/);
-  assert.match(openCodeClientSource, /sessionId\(\): string \| undefined/);
-  assert.match(openCodeClientSource, /extractSessionIdFromJsonText/);
-  assert.match(source, /const detectedOpenCodeSessionId = this\.openCodeClient\.extractSessionIdFromJsonText/);
-  assert.match(source, /session\.openCodeSessionId = detectedOpenCodeSessionId/);
-  assert.match(source, /executeOpenCodeNativeCommand/);
-  assert.match(openCodeClientSource, /sessionUrl\(serverUrl,\s*sessionId,\s*'\/share'\)/);
-  assert.match(openCodeClientSource, /method: 'DELETE'/);
-  assert.match(openCodeClientSource, /sessionUrl\(serverUrl,\s*sessionId,\s*'\/summarize'\)/);
-  assert.match(openCodeClientSource, /sessionUrl\(serverUrl,\s*sessionId,\s*'\/revert'\)/);
-  assert.match(openCodeClientSource, /sessionUrl\(serverUrl,\s*sessionId,\s*'\/unrevert'\)/);
-  assert.match(source, /backgroundServerPorts/);
-  assert.match(source, /isBackgroundServerAvailable/);
-  assert.match(source, /this\.openCodeClient\.isServerAvailable\(server\.url, cwd, timeoutMs\)/);
-  assert.match(source, /ownedProcess && \(await this\.isBackgroundServerAvailable/);
-  assert.match(source, /!ownedProcess && \(await this\.waitForTcp/);
-  assert.match(source, /continue;/);
-  assert.match(source, /stableHash\(`\$\{profileId\}:\$\{cwd\}`\)/);
-  assert.match(discoverySource, /export function stableHash\(value: string\): number/);
-  assert.match(source, /private async waitForTcp/);
-  assert.match(source, /private stopBackgroundServers/);
-  assert.match(source, /this\.processRunner\.spawnPromptProcess/);
-  assert.match(source, /this\.processRunner\.spawnBackgroundProcess/);
-  assert.match(source, /this\.processRunner\.terminate\(session\.process\)/);
-  assert.match(source, /this\.processRunner\.terminate\(state\.process\)/);
-  assert.match(source, /this\.processRunner\.terminate\(proc\)/);
-  assert.match(source, /proc\.on\('close', \(code\) => \{[\s\S]*?this\.processRunner\.killTree\(proc, 'SIGTERM'\)/);
-  assert.match(source, /const clearState = \(\) => \{[\s\S]*?this\.processRunner\.killTree\(backgroundProc, 'SIGTERM'\)/);
-  assert.match(processRunnerSource, /from 'cross-spawn'/);
-  assert.match(processRunnerSource, /spawnProbeProcess/);
-  assert.match(discoverySource, /this\.processRunner\.spawnProbeProcess/);
-  assert.doesNotMatch(discoverySource, /from 'child_process'/);
-  assert.doesNotMatch(processRunnerSource, /shell:\s*true/);
-  assert.match(processRunnerSource, /PROCESS_TERMINATE_GRACE_MS/);
-  assert.match(processRunnerSource, /process\.kill\(-proc\.pid,\s*signal\)/);
-  assert.match(processRunnerSource, /this\.spawnImpl\('taskkill', args/);
-  assert.match(sidebarSource, /const newSession = await this\.agentRuntime\.startPrompt/);
-  assert.match(sidebarSource, /this\.sessionController\.register\(session\)/);
-  assert.match(sessionControllerSource, /session\.onEvent\.event\(\(event\) =>/);
-  assert.match(sessionControllerSource, /openCodeSessionId:\s*openCodeSessionId \?\? session\.openCodeSessionId \?\? session\.eventStream\?\.sessionId\(\),/);
-  assert.doesNotMatch(sidebarSource, /session\.onOutput\.event/);
-  assert.doesNotMatch(sidebarSource, /session\.onStderr\.event/);
-  assert.doesNotMatch(sidebarSource, /session\.onError\.event/);
-  assert.doesNotMatch(sidebarSource, /session\.onEnd\.event/);
-  assert.match(sidebarSource, /case 'openCodeNativeCommand':/);
-  assert.match(sidebarSource, /\.executeNativeCommand/);
-  assert.match(sidebarSource, /command: 'openCodeNativeCommandResult'/);
-  assert.match(sidebarSource, /this\.sessionController\.stopAll\(\);/);
-  assert.match(sessionControllerSource, /this\.options\.agentRuntime\.stopAll\(\);/);
-}); */
 
 test('headless stdin prompts close stdin unless a profile opts into a persistent session', () => {
   const managerSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
@@ -923,125 +718,6 @@ test('headless stdin prompts close stdin unless a profile opts into a persistent
   );
 });
 
-/* Removed: profile model/runtime/permission override assertions.
-  const profile = getCliProfile('codex');
-
-  assert.equal(profile.command, 'codex');
-  assert.deepEqual(profile.promptArgs, ['-a', 'never', 'exec', '--color', 'never', '--ephemeral']);
-  assert.equal(profile.inputMode, 'argument');
-  assert.equal(profile.defaultAgentMode, 'build');
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'build').args, undefined);
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'plan').args, undefined);
-  assert.deepEqual(profile.modelOptions.find((mode) => mode.id === 'gpt-5.5').args, ['--model', 'gpt-5.5']);
-  assert.equal(profile.defaultPermissionMode, 'workspaceWrite');
-  assert.deepEqual(profile.permissionModes.find((mode) => mode.id === 'readOnly').args, [
-    '--sandbox',
-    'read-only',
-  ]);
-  assert.deepEqual(profile.permissionModes.find((mode) => mode.id === 'workspaceWrite').args, [
-    '--sandbox',
-    'workspace-write',
-  ]);
-  assert.deepEqual(profile.permissionModes.find((mode) => mode.id === 'fullAuto').args, ['--full-auto']);
-  assert.equal(profile.permissionModes.find((mode) => mode.id === 'danger').dangerous, true);
-});
-
-test('claude profile exposes native permission modes', () => {
-  const profile = getCliProfile('claude');
-
-  assert.equal(profile.inputMode, 'argument');
-  assert.equal(profile.contextWindowTokens, 200000);
-  assert.equal(profile.autoCompactsContext, true);
-  assert.deepEqual(profile.promptArgs, [
-    '-p',
-    '--output-format',
-    'stream-json',
-    '--verbose',
-    '--include-partial-messages',
-  ]);
-  assert.deepEqual(profile.permissionModes.find((mode) => mode.id === 'plan').args, [
-    '--permission-mode',
-    'plan',
-  ]);
-  assert.equal(profile.defaultModel, 'configured');
-  assert.equal(profile.customModelArgPrefix.join(' '), '--model');
-  assert.deepEqual(profile.modelOptions.find((mode) => mode.id === 'sonnet').args, ['--model', 'sonnet']);
-  assert.deepEqual(profile.modelOptions.find((mode) => mode.id === 'opus').args, ['--model', 'opus']);
-  assert.equal(profile.modelOptions.find((mode) => mode.id === 'custom').custom, true);
-  assert.deepEqual(profile.runtimeModes.find((mode) => mode.id === 'effortHigh').args, ['--effort', 'high']);
-  assert.deepEqual(profile.runtimeModes.find((mode) => mode.id === 'effortMax').args, ['--effort', 'max']);
-  assert.ok(profile.permissionModes.some((mode) => mode.id === 'acceptEdits'));
-  assert.equal(profile.agentModes.find((mode) => mode.id === 'plan').args, undefined);
-});
-
-test('gemini profile passes prompt as the -p argument for headless mode', () => {
-  const profile = getCliProfile('gemini');
-
-  assert.equal(profile.command, 'gemini');
-  assert.deepEqual(profile.promptArgs, [
-    '--skip-trust',
-    '--approval-mode',
-    'plan',
-    '--output-format',
-    'text',
-    '-p',
-  ]);
-  assert.equal(profile.inputMode, 'argument');
-  assert.equal(profile.env?.GEMINI_CLI_NO_RELAUNCH, '1');
-});
-
-test('goose profile uses the current non-interactive run text mode', () => {
-  const profile = getCliProfile('goose');
-
-  assert.equal(profile.command, 'goose');
-  assert.deepEqual(profile.promptArgs, [
-    'run',
-    '--no-session',
-    '--quiet',
-    '--output-format',
-    'text',
-    '--text',
-  ]);
-  assert.equal(profile.inputMode, 'argument');
-});
-
-test('CLI profiles expose provider model, runtime, and permission option args', () => {
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const codex = getCliProfile('codex');
-
-  assert.equal(codex.defaultModel, 'configured');
-  assert.equal(codex.modelOptions.find((option) => option.id === 'default'), undefined);
-  assert.equal(getCliModelOption(codex).id, 'configured');
-  assert.equal(getCliModelOption(codex).args, undefined);
-  assert.equal(codex.customModelArgPrefix.join(' '), '--model');
-  assert.deepEqual(getCliModelOption(codex, 'gpt-5.4').args, ['--model', 'gpt-5.4']);
-  assert.deepEqual(getCliModelOption(codex, 'custom').args, undefined);
-  assert.equal(codex.defaultRuntime, 'localProcessing');
-  assert.equal(getCliRuntimeMode(codex, 'localProcessing').summaryLabel, 'Local mode');
-  assert.equal(getCliRuntimeMode(codex, 'sendCloud').id, 'localProcessing');
-  assert.equal(codex.runtimeModes.find((mode) => mode.id === 'codexWeb').external, true);
-  assert.equal(codex.runtimeModes.find((mode) => mode.id === 'sendCloud').disabled, true);
-  assert.equal(codex.runtimeModes.find((mode) => mode.id === 'quota').actionOnly, true);
-  assert.deepEqual(getCliPermissionMode(codex, 'readOnly').args, ['--sandbox', 'read-only']);
-  assert.deepEqual(
-    buildCliOptionArgs(codex, {
-      model: 'gpt-5.4',
-      runtime: 'localProcessing',
-      permissionMode: 'workspaceWrite',
-    }),
-    ['--model', 'gpt-5.4', '--sandbox', 'workspace-write']
-  );
-  assert.deepEqual(
-    buildCliOptionArgs(codex, {
-      model: 'custom',
-      customModel: 'qwen2.5-coder:14b',
-      runtime: 'sendCloud',
-      permissionMode: 'readOnly',
-    }),
-    ['--model', 'qwen2.5-coder:14b', '--sandbox', 'read-only']
-  );
-  assert.match(sidebarSource, /const agentArgs = \[\.\.\.\(agentMode\.args \?\? \[\]\), \.\.\.optionArgs\];/);
-}); */
 
 test('CLI profiles expose task routing scores for agent recommendations', () => {
   assert.ok(getCliProfile('codex').taskRouting.implementation >= 6);
@@ -1092,10 +768,6 @@ test('CLI path resolver keeps the first absolute command path from shell output'
   assert.equal(shellQuote("bad'name"), "'bad'\\''name'");
 });
 
-/* Removed: system proxy synthesis is prohibited for native transport.
-  const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
-  assert.match(source, /\.\.\.getSystemProxyEnv\(process\.env\)/);
-}); */
 
 test('CLI manager delegates command revalidation to discovery before spawning', () => {
   const source = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
@@ -4659,26 +4331,6 @@ test('webview exposes a provider-aware slash command palette', () => {
   assert.match(i18nScript, /'opencode\.dialog\.mcp\.space': '空格'/);
 });
 
-/* Removed: one-shot transport does not own OpenCode server sessions.
-  const typesSource = readFileSync(new URL('../src/assistantTypes.ts', import.meta.url), 'utf8');
-  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
-  const openCodeClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-
-  assert.match(typesSource, /\| 'fork'/);
-  assert.match(typesSource, /newOpenCodeSessionId\?: string;/);
-  assert.match(cliSource, /this\.openCodeClient\.executeNativeCommand\(command, sessionId\)/);
-  assert.match(openCodeClientSource, /if \(command === 'fork'\)/);
-  assert.match(openCodeClientSource, /this\.sessionUrl\(serverUrl, sessionId, '\/fork'\)/);
-  assert.match(openCodeClientSource, /newOpenCodeSessionId: forkedSessionId/);
-  assert.match(sidebarSource, /newOpenCodeSessionId: result\.newOpenCodeSessionId/);
-  assert.match(script, /function handleOpenCodeForkResult\(message\)/);
-  assert.match(script, /forkedThread\.openCodeSessionId = message\.newOpenCodeSessionId;/);
-  assert.match(script, /setActiveThread\('opencode', forkedThread\);/);
-  assert.match(i18nScript, /'slash\.opencode\.forked'/);
-}); */
 
 test('webview slash command palette shows each command label once', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -5695,29 +5347,6 @@ test('webview disables freeform send until the prompt has text', () => {
   );
 });
 
-/* Removed: selected model is observational and does not control launch transport.
-  const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const i18nScript = readFileSync(new URL('../media/i18n.js', import.meta.url), 'utf8');
-  const promptSource = readFileSync(new URL('../src/promptBuilder.ts', import.meta.url), 'utf8');
-
-  assert.match(sidebarSource, /const effectiveModel = effectiveCliModelSelection\(/);
-  assert.match(sidebarSource, /modelId: effectiveModel\.id/);
-  assert.match(sidebarSource, /modelLabel: effectiveModel\.label/);
-  assert.match(sidebarSource, /runtime:\s*\{[\s\S]*modelId: effectiveModel\.id,[\s\S]*modelLabel: effectiveModel\.label,[\s\S]*modelVariant: effectiveModel\.variant,/);
-  assert.match(promptSource, /Runtime selection from Agents GUI:/);
-  assert.match(promptSource, /Selected model:/);
-  assert.match(promptSource, /Reasoning depth:/);
-  assert.match(promptSource, /answer from this Agents GUI runtime selection instead of guessing/);
-  assert.match(script, /function activeModelVariant\(cliId = activeId\)/);
-  assert.match(script, /modelVariant: activeModelVariant\(providerId\)/);
-  assert.match(script, /function modelSummaryText\(option, displayOption\)/);
-  assert.match(script, /function summarizeRuntimeSelection\(message\)/);
-  assert.match(script, /i18n\.t\('message\.modelMeta', \{ model \}\)/);
-  assert.match(script, /mergeMessageMeta\(\s*summarizeRuntimeSelection\(message\),\s*summarizeRequestContext\(message\.contextSummary\)\s*\)/s);
-  assert.match(i18nScript, /'message\.modelMeta': 'Model: \{model\}'/);
-  assert.match(i18nScript, /'message\.modelMeta': '模型：\{model\}'/);
-}); */
 
 test('agent mode select is persisted per provider', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -5881,20 +5510,6 @@ test('webview deletes the active conversation through a single session cleanup p
   );
 });
 
-/* Removed: extension no longer owns backing OpenCode server sessions.
-  const sidebarSource = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
-  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
-  const openCodeClientSource = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-
-  assert.match(sidebarSource, /case 'deleteOpenCodeSession':/);
-  assert.match(sidebarSource, /this\.openCodeCapability\.deleteSession\(message\.openCodeSessionId\)/);
-  assert.match(cliSource, /async deleteOpenCodeSession\(sessionId: string \| undefined\): Promise<boolean>/);
-  assert.match(cliSource, /return this\.openCodeClient\.deleteSession\(sessionId\)/);
-  assert.match(
-    openCodeClientSource,
-    /await this\.requestJson\(this\.sessionUrl\(serverUrl, sessionId\), \{\s*method: 'DELETE',\s*timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS,\s*\}\);/s
-  );
-}); */
 
 test('webview does not add noisy success system message after every run', () => {
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
@@ -6492,32 +6107,6 @@ test('normalizeCliOutput surfaces OpenCode top-level provider errors', () => {
   );
 });
 
-/* Removed: CliManager is process-only and does not run OpenCode server prompts.
-  const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
-  const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
-
-  assert.match(cliSource, /runOpenCodePromptViaServer/);
-  assert.match(cliSource, /this\.openCodeClient\.runPrompt\(prompt, token, directory, modelId, onPartial\)/);
-  assert.match(source, /runPrompt/);
-  assert.match(source, /modelId\?: string/);
-  assert.match(source, /parseOpenCodeModelId\(modelId\)/);
-  assert.match(source, /OPEN_CODE_SERVER_READY_TIMEOUT_MS/);
-  assert.match(source, /waitForServerReady\(serverUrl, directory\)/);
-  assert.match(source, /apiUrl\(serverUrl, '\/session', directory\)/);
-  assert.match(source, /timeoutMs: OPEN_CODE_REQUEST_TIMEOUT_MS/);
-  assert.match(source, /\/prompt_async`/);
-  assert.match(source, /\.\.\.\(model \? \{ model \} : \{\}\)/);
-  assert.match(source, /apiUrl\(serverUrl, '\/session\/status', directory\)/);
-  assert.match(source, /url\.searchParams\.set\('directory', directory\)/);
-  assert.match(source, /OpenCode request to \$\{url\.pathname\} timed out/);
-  assert.match(source, /httpErrorMessage\(response\.statusCode, responseBody\)/);
-  assert.match(source, /httpErrorBodyMessage/);
-  assert.match(source, /httpErrorObjectMessage/);
-  assert.match(source, /normalizeProviderError\(rawMessage\)/);
-  assert.match(source, /quota exhausted/i);
-  assert.match(source, /abortSession/);
-  assert.match(source, /extractAssistantTextState/);
-}); */
 
 test('OpenCode server commit generation listens for current-session provider errors', () => {
   const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');

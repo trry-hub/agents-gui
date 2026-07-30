@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
+import * as path from 'node:path';
 import { test } from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -30,6 +31,20 @@ function fakeChild() {
   child.stderr = new EventEmitter();
   child.stdin = { write() {}, end() {} };
   return child;
+}
+
+function expectedLaunchPath(commandDir, inheritedPath, platform = process.platform) {
+  const delimiter = platform === 'win32' ? path.win32.delimiter : path.posix.delimiter;
+  const seen = new Set();
+  return [commandDir, ...String(inheritedPath || '').split(delimiter)]
+    .map((entry) => entry.trim())
+    .filter((entry) => {
+      const key = platform === 'win32' ? entry.toLowerCase() : entry;
+      if (!entry || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(delimiter);
 }
 
 test('CliManager launches OpenCode with only inherited env, cwd, transport argv, and prompt', async () => {
@@ -64,9 +79,7 @@ test('CliManager launches OpenCode with only inherited env, cwd, transport argv,
   assert.equal(launches[0].command, '/usr/local/bin/opencode');
   assert.deepEqual(launches[0].args, ['run', '--format', 'json', 'hello']);
   assert.equal(launches[0].cwd, '/workspace/repo');
-  const expectedPath = [
-    ...new Set(['/usr/local/bin', ...(process.env.PATH || '').split(':')].filter(Boolean)),
-  ].join(':');
+  const expectedPath = expectedLaunchPath('/usr/local/bin', process.env.PATH);
   assert.equal(launches[0].env.PATH, expectedPath);
   for (const [name, value] of Object.entries(process.env)) {
     if (name !== 'PATH') assert.equal(launches[0].env[name], value, name);
@@ -87,7 +100,7 @@ test('CliManager launches OpenCode with only inherited env, cwd, transport argv,
   }
 });
 
-test('CliManager forwards process streams and cleans up after error or close', async () => {
+test('CliManager forwards process streams and cleans up on normal close', async () => {
   const child = fakeChild();
   child.exitCode = null;
   child.signalCode = null;
@@ -121,5 +134,66 @@ test('CliManager forwards process streams and cleans up after error or close', a
     { type: 'output', text: 'err', stream: 'stderr', transport: 'process' },
     { type: 'end', exitCode: 0 },
   ]);
+  assert.deepEqual(manager.getActiveSessionIds(), []);
+});
+
+test('CliManager reports child launch errors, evicts the resolved command, and cleans up', async () => {
+  const child = fakeChild();
+  const evictions = [];
+  const manager = new CliManager({
+    processRunner: {
+      spawnPromptProcess: () => child,
+      spawnProbeProcess() {
+        throw new Error('unexpected probe');
+      },
+      terminate() {},
+      killTree() {},
+    },
+    cliDiscovery: {
+      resolveCommandPath: async () => '/bin/opencode',
+      getProfilesWithStatus: async () => [],
+      evictCommandPath: (command) => evictions.push(command),
+    },
+    workspaceRoot: () => '/workspace',
+  });
+  const session = await manager.startPrompt('opencode', 'hello');
+  const events = [];
+  session.onEvent.event((event) => events.push(event));
+
+  const error = Object.assign(new Error('not found'), { code: 'ENOENT' });
+  child.emit('error', error);
+
+  assert.deepEqual(evictions, ['opencode']);
+  assert.deepEqual(events, [
+    { type: 'error', message: 'Failed to start OpenCode: not found' },
+    { type: 'end', exitCode: -1 },
+  ]);
+  assert.deepEqual(manager.getActiveSessionIds(), []);
+});
+
+test('CliManager stop cancels through the runner and removes the active session', async () => {
+  const child = fakeChild();
+  const terminated = [];
+  const manager = new CliManager({
+    processRunner: {
+      spawnPromptProcess: () => child,
+      spawnProbeProcess() {
+        throw new Error('unexpected probe');
+      },
+      terminate: (proc) => terminated.push(proc),
+      killTree() {},
+    },
+    cliDiscovery: {
+      resolveCommandPath: async () => '/bin/opencode',
+      getProfilesWithStatus: async () => [],
+      evictCommandPath() {},
+    },
+    workspaceRoot: () => '/workspace',
+  });
+  const session = await manager.startPrompt('opencode', 'hello');
+
+  manager.stop(session.id);
+
+  assert.deepEqual(terminated, [child]);
   assert.deepEqual(manager.getActiveSessionIds(), []);
 });

@@ -8,8 +8,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { CliDiscovery } = require('../.test-dist/cliDiscovery.js');
+const {
+  CliDiscovery,
+  normalizeCommandVersionOutput,
+} = require('../.test-dist/cliDiscovery.js');
 const { CliProcessRunner } = require('../.test-dist/cliProcessRunner.js');
+const { getCliProfile } = require('../.test-dist/cliProfiles.js');
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -144,6 +148,25 @@ async function settlementWithin(promise, timeoutMs) {
   ]);
 }
 
+function completedProbeRunner(responses) {
+  return {
+    spawnProbeProcess(_command, args) {
+      const child = probeChild();
+      queueMicrotask(() => {
+        const response = responses[args.join(' ')] ?? {};
+        if (response.error) child.emit('error', response.error);
+        else {
+          if (response.stdout) child.stdout.emit('data', Buffer.from(response.stdout));
+          if (response.stderr) child.stderr.emit('data', Buffer.from(response.stderr));
+          child.emit('close', response.code ?? 0);
+        }
+      });
+      return child;
+    },
+    terminate() {},
+  };
+}
+
 test('waitForFirstJsonLine rejects when the process closes before emitting JSON', async () => {
   const child = jsonChild();
   const waiting = waitForFirstJsonLine(child);
@@ -174,6 +197,71 @@ test('waitForProcess rejects and terminates the process tree after a bounded tim
 
   assert.equal(await settlementWithin(waiting, 50), 'rejected');
   assert.equal(terminated, child);
+});
+
+test('CliDiscovery revalidates an unusable cached command and evicts explicit cache entries', async () => {
+  const discovery = createDiscovery(completedProbeRunner({}));
+  const usable = new Set(['/bin/first', '/bin/second']);
+  const lookups = [];
+  discovery.isUsableCommandPath = async (candidate) => usable.has(candidate);
+  discovery.lookupCommandInPath = async () => {
+    lookups.push('path');
+    return lookups.length === 1 ? '/bin/first' : '/bin/second';
+  };
+  discovery.lookupCommandInLoginShell = async () => undefined;
+
+  assert.equal(await discovery.resolveCommandPath('opencode'), '/bin/first');
+  usable.delete('/bin/first');
+  assert.equal(await discovery.resolveCommandPath('opencode'), '/bin/second');
+  discovery.evictCommandPath('opencode');
+  assert.equal(await discovery.resolveCommandPath('opencode'), '/bin/second');
+  assert.equal(lookups.length, 3);
+});
+
+test('CliDiscovery keeps OpenCode discovery observational when agent and model probes fail', async () => {
+  const discovery = createDiscovery(
+    completedProbeRunner({
+      '--version': { stdout: 'OpenCode v1.2.3\n' },
+      'debug config': { error: new Error('debug config unavailable') },
+      models: { error: new Error('models unavailable') },
+    })
+  );
+  discovery.resolveCommandPath = async () => '/bin/opencode';
+
+  const profiles = await discovery.getProfilesWithStatus([getCliProfile('opencode')], { force: true });
+
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].installed, true);
+  assert.equal(profiles[0].version, '1.2.3');
+  assert.equal(profiles[0].configuredModel, undefined);
+  assert.deepEqual(profiles[0].promptArgs, ['run', '--format', 'json']);
+});
+
+test('CliDiscovery exposes the configured OpenCode model as observation without launch overrides', async () => {
+  const discovery = createDiscovery(
+    completedProbeRunner({
+      '--version': { stdout: 'OpenCode 1.2.3\n' },
+      'debug config': {
+        stdout: JSON.stringify({ default_model: 'acme/fast', default_agent: 'build', agent: {} }),
+      },
+      models: { stdout: 'acme/fast\nacme/accurate\n' },
+    })
+  );
+  discovery.resolveCommandPath = async () => '/bin/opencode';
+
+  const [profile] = await discovery.getProfilesWithStatus([getCliProfile('opencode')], {
+    force: true,
+  });
+
+  assert.deepEqual(profile.configuredModel, { id: 'acme/fast', label: 'acme/fast' });
+  assert.deepEqual(profile.promptArgs, ['run', '--format', 'json']);
+  assert.equal(profile.env, undefined);
+});
+
+test('version normalization strips ANSI, requires a dotted version, and bounds prerelease text', () => {
+  assert.equal(normalizeCommandVersionOutput('\u001b[32mOpenCode v1.2.3-beta.1\u001b[0m'), '1.2.3-beta.1');
+  assert.equal(normalizeCommandVersionOutput('release 42'), undefined);
+  assert.equal(normalizeCommandVersionOutput(`v1.2.3-${'a'.repeat(65)}`), '1.2.3');
 });
 
 async function waitForWindowsPidToExit(pid, timeoutMs = 5000) {
@@ -320,6 +408,23 @@ test('CliDiscovery tree-terminates a version probe after its timeout', async () 
   await Promise.resolve();
   const probe = harness.probes[0].child;
   try {
+    assert.equal(await result, undefined);
+    assert.deepEqual(harness.taskkillArgs, [['/pid', '100', '/T']]);
+  } finally {
+    closeFakeChild(probe);
+  }
+});
+
+test('CliDiscovery bounds version probe output and tree-terminates the oversized process', async () => {
+  const harness = createWindowsProbeHarness();
+  const discovery = createDiscovery(harness.runner);
+  discovery.resolveCommandPath = async () => 'codex';
+  const result = discovery.getCommandVersion({ command: 'codex' });
+
+  await Promise.resolve();
+  const probe = harness.probes[0].child;
+  try {
+    probe.stdout.emit('data', Buffer.alloc(32_769, 'x'));
     assert.equal(await result, undefined);
     assert.deepEqual(harness.taskkillArgs, [['/pid', '100', '/T']]);
   } finally {
