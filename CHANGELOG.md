@@ -8,7 +8,9 @@
   MCP、插件和会话策略均由 CLI 自身配置决定。
 - 删除 Agents GUI 的自定义 API Provider、模型、运行模式和权限覆盖入口。
 - SCM 提交信息只调用所选 CLI，不再自动切换到其他 CLI。
-- 首次升级会备份 OpenCode 配置，并仅清理旧版本写入且带标记的 Provider。
+- 仅当 OpenCode 配置存在精确布尔标记 `__agents_gui_synced === true` 的旧 Provider
+  时才会在变更前创建备份，并只清理这些 Provider 及匹配的顶层模型；无带标记的
+  Provider 时不写入配置，也不创建备份，所有用户定义或未标记的配置都会保留。
 
 ### Fixed
 

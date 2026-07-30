@@ -16,10 +16,16 @@ VS Code command / Webview
         -> selected local CLI one-shot prompt transport
 ```
 
-The extension resolves the executable, adds only the resolved command directory
-to the inherited `PATH` for launch, sets the request `cwd`, passes the CLI’s
-native one-shot prompt transport arguments, and streams, parses, or stops the
-process. It does not select a different executable after launch failure.
+The extension resolves the system-installed executable, adds only the resolved
+command directory to the inherited `PATH` for launch, sets the request `cwd`,
+passes the CLI’s native one-shot prompt transport arguments, and streams,
+parses, or stops the process. It does not select a different executable after
+launch failure.
+
+Every user request and follow-up starts a fresh local CLI process; there is no
+process or session reuse. The previous conversation is rendered as text in the
+next prompt alongside editor actions, IDE context, and attachments. Those are
+prompt contents, not CLI configuration or execution overrides.
 
 ## Runtime boundary
 
@@ -49,10 +55,11 @@ process. It does not select a different executable after launch failure.
   or fast-lane configuration overlay is injected.
 - The extension does not disable or replace CLI-owned MCP, plugins, project
   configuration, authentication, or session behavior.
-- A one-time OpenCode migration backs up the configuration before changing it
-  and deletes only legacy Provider entries whose exact
-  `__agents_gui_synced === true` marker is present. It never broadly deletes
-  user configuration.
+- The OpenCode migration mutates configuration only when a legacy Provider has
+  the exact boolean `__agents_gui_synced === true` marker. It backs up the
+  configuration before the change, removes only those tagged Providers and a
+  matching top-level model, and preserves all user-defined or unmarked
+  configuration. With no tagged Provider, there is no write and no backup.
 
 ## Verification guardrails
 

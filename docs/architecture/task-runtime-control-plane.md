@@ -17,6 +17,11 @@ For an interactive request or SCM commit-message request, Agents GUI:
 4. passes the prompt via that CLI’s native one-shot prompt transport arguments;
 5. streams and parses output, and can stop the process.
 
+Every user request and follow-up starts a fresh local CLI process; there is no
+process or session reuse. The previous conversation is rendered as text in the
+next prompt, together with editor actions, IDE context, and attachments. These
+are prompt contents, not CLI configuration or execution overrides.
+
 The selected CLI is the sole authority for authentication, API/Provider,
 model, permissions, runtime mode, MCP, plugins, project configuration, and
 session policy. The extension does not inject a custom API Provider or override
@@ -44,11 +49,13 @@ replace project configuration with an in-memory OpenCode configuration.
 
 ## OpenCode migration boundary
 
-The one-time OpenCode migration backs up the existing configuration before
-making a change. It deletes only legacy Provider entries marked exactly
-`__agents_gui_synced === true`; unmarked and user-managed entries are retained.
-The migration is not a general configuration cleanup and does not alter the
-CLI’s ongoing authentication, Provider, model, MCP, plugin, or session policy.
+The OpenCode migration changes configuration only when it finds a legacy
+Provider marked with the exact boolean `__agents_gui_synced === true`. It backs
+up the configuration before changing it, removes only those tagged Providers
+and a matching top-level model, and preserves all user-defined or unmarked
+configuration. With no tagged Provider, there is no write and no backup. The
+migration is not a general configuration cleanup and does not alter the CLI’s
+ongoing authentication, Provider, model, MCP, plugin, or session policy.
 
 ## Dependency rules
 

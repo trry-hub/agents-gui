@@ -9,13 +9,91 @@ test('release metadata declares native CLI passthrough version 0.0.20', () => {
   const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  const runtimeArchitecture = readFileSync(
+    new URL('../docs/architecture/agent-runtime.md', import.meta.url),
+    'utf8'
+  );
+  const controlPlaneArchitecture = readFileSync(
+    new URL('../docs/architecture/task-runtime-control-plane.md', import.meta.url),
+    'utf8'
+  );
 
   assert.equal(manifest.version, '0.0.20');
   assert.equal(lock.version, '0.0.20');
   assert.equal(lock.packages[''].version, '0.0.20');
-  assert.match(readme, /本机 CLI.*自身.*认证.*模型/s);
-  assert.match(changelog, /## \[0\.0\.20\]/);
-  assert.match(changelog, /原样调用本机 CLI/);
+  assert.match(changelog, /^## \[0\.0\.20\] - 2026-07-30$/m);
+  assert.match(changelog, /__agents_gui_synced === true/);
+  assert.match(changelog, /无带标记的\s*Provider 时不写入配置，也不创建备份/);
+
+  const normalizeDocumentation = (content) => content.replace(/\s+/g, ' ');
+  const contracts = [
+    {
+      name: 'README',
+      content: normalizeDocumentation(readme),
+      freshProcess: /每个用户请求和后续追问.*新的本机 CLI 进程.*上一轮对话.*文本.*下一次提示词/s,
+      nativeLaunchClaims: [
+        /系统安装的可执行文件/,
+        /继承的 `PATH`/,
+        /设置工作目录/,
+        /原生单次提示词参数/,
+      ],
+      noOverrides: /不会.*自动切换.*受管的 OpenCode 后台服务.*任务策略.*覆盖层/s,
+      observational: /显示.*仅用于观察.*不会向 CLI 注入.*模型.*Provider.*权限/s,
+      migrationClaims: [
+        /__agents_gui_synced === true.*备份.*匹配的顶层模型/s,
+        /没有带标记的 Provider 时不写入配置，也不创建备份/s,
+        /用户定义或未标记的配置都会保留/s,
+      ],
+    },
+    {
+      name: 'agent runtime architecture',
+      content: normalizeDocumentation(runtimeArchitecture),
+      freshProcess: /every user request and follow-up starts a fresh local CLI process[\s\S]*previous conversation[\s\S]*text[\s\S]*next prompt/i,
+      nativeLaunchClaims: [
+        /system-installed executable/i,
+        /inherited `PATH`/i,
+        /request `cwd`/i,
+        /native one-shot prompt/i,
+      ],
+      noOverrides: /No automatic SCM or task fallback[\s\S]*No managed OpenCode server[\s\S]*no task-policy[\s\S]*fast-lane/i,
+      observational: /Displayed model and context metadata is observational[\s\S]*not a model,[\s\S]*Provider,[\s\S]*runtime,[\s\S]*or permission override/i,
+      migrationClaims: [
+        /exact boolean `__agents_gui_synced === true`[\s\S]*backs up[\s\S]*matching top-level model/i,
+        /no tagged Provider[\s\S]*no write[\s\S]*no backup/i,
+        /user-defined or unmarked/i,
+      ],
+    },
+    {
+      name: 'task runtime architecture',
+      content: normalizeDocumentation(controlPlaneArchitecture),
+      freshProcess: /every user request and follow-up starts a fresh local CLI process[\s\S]*previous conversation[\s\S]*text[\s\S]*next prompt/i,
+      nativeLaunchClaims: [
+        /system installation/i,
+        /inherited `PATH`/i,
+        /working directory/i,
+        /native one-shot prompt/i,
+      ],
+      noOverrides: /no automatic provider fallback[\s\S]*no managed OpenCode server[\s\S]*task-policy\/fast-lane configuration overlay/i,
+      observational: /Configured model and context displays[\s\S]*observational[\s\S]*not an execution override/i,
+      migrationClaims: [
+        /exact boolean `__agents_gui_synced === true`[\s\S]*backs up[\s\S]*matching top-level model/i,
+        /no tagged Provider[\s\S]*no write[\s\S]*no backup/i,
+        /user-defined or unmarked/i,
+      ],
+    },
+  ];
+
+  for (const contract of contracts) {
+    assert.match(contract.content, contract.freshProcess, `${contract.name} must document fresh processes`);
+    for (const claim of contract.nativeLaunchClaims) {
+      assert.match(contract.content, claim, `${contract.name} must document native launch`);
+    }
+    assert.match(contract.content, contract.noOverrides, `${contract.name} must reject overrides`);
+    assert.match(contract.content, contract.observational, `${contract.name} must keep displays observational`);
+    for (const claim of contract.migrationClaims) {
+      assert.match(contract.content, claim, `${contract.name} must document narrow migration`);
+    }
+  }
 });
 
 test('agents-gui uses the three-node mark as the global logo', () => {
