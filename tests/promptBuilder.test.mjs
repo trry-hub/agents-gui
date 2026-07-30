@@ -2372,6 +2372,7 @@ test('native passthrough removes the custom API provider surface', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const html = readFileSync(new URL('../media/main.html', import.meta.url), 'utf8');
   const script = readFileSync(new URL('../media/main.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../media/main.css', import.meta.url), 'utf8');
   const sidebar = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
   const protocol = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
   const settings = readFileSync(new URL('../src/settingsManager.ts', import.meta.url), 'utf8');
@@ -2380,11 +2381,15 @@ test('native passthrough removes the custom API provider surface', () => {
   assert.equal(properties['agents-gui.apiProviders.customProviders'], undefined);
   assert.equal(properties['agents-gui.apiProviders.defaultProviderId'], undefined);
   assert.equal(properties['agents-gui.apiProviders.agentProviderByCliId'], undefined);
-  assert.doesNotMatch(html, /settingsNavApiProviders|settingsSectionApiProviders|apiProviderForm/);
+  assert.doesNotMatch(
+    html,
+    /settingsNavApiProviders|settingsSectionApiProviders|apiProviderForm|apiProviderSettingsPage|apiProviderSettingsClose/
+  );
   assert.doesNotMatch(script, /apiProviderSettings|fetchApiProviderModels|saveApiProviderSettings/);
   assert.doesNotMatch(sidebar, /ApiProvider|apiProvider|OpenCodeConfigSync|\.sync\(/);
   assert.doesNotMatch(protocol, /apiProvider|ApiProvider/);
   assert.doesNotMatch(settings, /apiProvider|ApiProvider/);
+  assert.doesNotMatch(css, /\.api-model-row|\.api-model-status|\.api-agent-binding/);
 });
 
 test('webview settings reset and reorder controls have durable local feedback', () => {

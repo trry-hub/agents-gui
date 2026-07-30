@@ -1674,8 +1674,7 @@ body.is-api-settings-open .composer {
 
 .api-field input,
 .api-field select,
-.api-extra-env-row input,
-.api-agent-binding select {
+.api-extra-env-row input {
   min-width: 0;
   width: 100%;
   height: 28px;
@@ -1689,31 +1688,8 @@ body.is-api-settings-open .composer {
 
 .api-field input:focus,
 .api-field select:focus,
-.api-extra-env-row input:focus,
-.api-agent-binding select:focus {
+.api-extra-env-row input:focus {
   border-color: var(--assistant-accent);
-}
-
-.api-model-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  gap: 8px;
-  align-items: center;
-}
-
-.api-model-status {
-  min-height: 14px;
-  color: var(--assistant-muted);
-  font-size: 11px;
-}
-
-.api-model-status[data-state="success"] {
-  color: var(--vscode-testing-iconPassed, #3fb950);
-}
-
-.api-model-status[data-state="error"] {
-  color: var(--vscode-errorForeground, #f85149);
 }
 
 .api-settings-section {
@@ -1736,31 +1712,16 @@ body.is-api-settings-open .composer {
   background: transparent;
 }
 
-.api-extra-env-list,
-.api-agent-bindings {
+.api-extra-env-list {
   display: grid;
   gap: 6px;
 }
 
-.api-extra-env-row,
-.api-agent-binding {
+.api-extra-env-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 24px;
   align-items: center;
   gap: 6px;
-}
-
-.api-agent-binding {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-}
-
-.api-agent-binding-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--vscode-foreground);
-  font-size: 12px;
 }
 
 .api-env-remove {
@@ -1855,10 +1816,6 @@ body.is-api-settings-open .composer {
   .api-settings-body {
     grid-template-columns: minmax(0, 1fr);
     overflow: visible;
-  }
-
-  .api-agent-binding-label {
-    white-space: normal;
   }
 
   .api-settings-footer {
@@ -6560,9 +6517,7 @@ textarea:disabled {
     overflow: visible;
   }
 
-  .api-model-row,
-  .api-extra-env-row,
-  .api-agent-binding {
+  .api-extra-env-row {
     grid-template-columns: 1fr;
   }
 
