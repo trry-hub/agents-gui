@@ -46,7 +46,6 @@ export type WebviewToHostMessage =
   | { command: 'runCliAuthAction'; cliId?: string; action?: CliAuthAction }
   | { command: 'copyInstallCommand'; installCommand?: string }
   | { command: 'installCli'; cliId?: string }
-  | { command: 'setOpenCodeModelVariant'; modelId?: string; variant?: string }
   | { command: 'copyMessageText'; text?: string }
   | { command: 'saveSelectionState'; state?: unknown }
   | { command: 'codexRendererReady' }

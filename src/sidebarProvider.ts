@@ -38,7 +38,6 @@ import {
   runtimeDefaultActionText,
   runtimeT,
 } from './localization';
-import { OpenCodeLocalState } from './openCodeLocalState';
 import { getProviderExtensionBridge } from './providerExtensions';
 import { SettingsManager } from './settingsManager';
 import type {
@@ -60,7 +59,6 @@ interface SidebarProviderOptions {
   attachmentStore?: ImageAttachmentStore;
   contextCollector?: AssistantContextCollector;
   extensionMode?: vscode.ExtensionMode;
-  openCodeLocalState?: OpenCodeLocalState;
   agentCapabilityRegistry?: AgentCapabilityRegistry;
   state?: vscode.Memento;
   storageUri?: vscode.Uri;
@@ -87,7 +85,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly locale = resolveRuntimeLocale(vscode.env.language);
   private readonly contextCollector: AssistantContextCollector;
   private readonly extensionMode: vscode.ExtensionMode;
-  private readonly openCodeLocalState: OpenCodeLocalState;
   private readonly attachmentStore: ImageAttachmentStore;
   private readonly agentCapabilityRegistry: AgentCapabilityRegistry;
   private readonly cliSetup: CliSetupController;
@@ -113,7 +110,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.mcpManager = new McpManager();
     this.contextCollector = options.contextCollector ?? new AssistantContextCollector();
     this.extensionMode = options.extensionMode ?? vscode.ExtensionMode.Production;
-    this.openCodeLocalState = options.openCodeLocalState ?? new OpenCodeLocalState();
     this.attachmentStore =
       options.attachmentStore ??
       new ImageAttachmentStore({
@@ -221,9 +217,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         case 'installCli':
           await this.cliSetup.installCli(message.cliId);
-          break;
-        case 'setOpenCodeModelVariant':
-          await this.setOpenCodeModelVariant(message.modelId, message.variant);
           break;
         case 'copyMessageText':
           await this.copyMessageText(message.text);
@@ -720,10 +713,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const mode = normalizeMode(message.mode);
     const action = normalizeAction(message.action);
-    const agentMode = getCliAgentMode(profile);
+    const agentMode = getCliAgentMode(profile, message.agentMode);
     const effectiveModel = profile.configuredModel ?? { id: 'configured', label: 'Configured' };
     const capabilityPolicy = resolveAgentCapabilityPolicy({
-      intent: resolveAgentTaskIntent(action),
+      intent: resolveAgentTaskIntent(action, agentMode.id),
       permissionPosture: 'workspace-write',
     });
 
@@ -903,22 +896,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       entry.terminal.sendText(profile.command, true);
       entry.started = true;
     }
-  }
-
-  private async setOpenCodeModelVariant(modelId: unknown, variant: unknown): Promise<void> {
-    const cleanModelId = typeof modelId === 'string' ? modelId.trim() : '';
-    const cleanVariant = typeof variant === 'string' ? variant.trim() : '';
-    if (
-      !cleanModelId ||
-      !cleanModelId.includes('/') ||
-      /[\r\n]/.test(cleanModelId) ||
-      !cleanVariant ||
-      !/^[A-Za-z0-9_.-]+$/.test(cleanVariant)
-    ) {
-      return;
-    }
-
-    await this.openCodeLocalState.updateModelVariant(cleanModelId, cleanVariant);
   }
 
   private async copyMessageText(messageText: unknown): Promise<void> {

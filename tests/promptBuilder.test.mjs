@@ -332,6 +332,15 @@ test('interactive requests carry task text but no execution selections', () => {
   assert.match(sidebar, /agentRuntime\.startPrompt\(\s*cliId,\s*profile\.inputMode === 'argument' \? prompt : undefined\s*\)/s);
 });
 
+test('selected agent modes affect only prompt and task-intent semantics', () => {
+  const sidebar = readFileSync(new URL('../src/sidebarProvider.ts', import.meta.url), 'utf8');
+
+  assert.match(sidebar, /const agentMode = getCliAgentMode\(profile, message\.agentMode\);/);
+  assert.match(sidebar, /intent: resolveAgentTaskIntent\(action, agentMode\.id\),/);
+  assert.match(sidebar, /agentMode: \{\s*id: agentMode\.id,\s*label: agentMode\.label,/s);
+  assert.match(sidebar, /agentRuntime\.startPrompt\(\s*cliId,\s*profile\.inputMode === 'argument' \? prompt : undefined\s*\)/s);
+});
+
 test('buildAssistantPrompt gives OpenCode workspace context even without an active editor', () => {
   const prompt = buildAssistantPrompt({
     provider: { id: 'opencode', name: 'OpenCode' },
@@ -1331,15 +1340,9 @@ test('webview omits the composer advanced toggle but keeps provider setup action
     /vscode\.window\.createTerminal\(\{ name: `Agents GUI Setup: \$\{profile\.name\}` \}\)/
   );
   assert.match(cliSetupSource, /terminal\.sendText\(command, true\)/);
-  assert.match(sidebarSource, /case 'setOpenCodeModelVariant':/);
-  assert.match(
-    sidebarSource,
-    /private async setOpenCodeModelVariant\(modelId: unknown, variant: unknown\): Promise<void>/
-  );
-  assert.match(
-    sidebarSource,
-    /this\.openCodeLocalState\.updateModelVariant\(cleanModelId, cleanVariant\)/
-  );
+  const protocolSource = readFileSync(new URL('../src/webviewProtocol.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(protocolSource, /setOpenCodeModelVariant/);
+  assert.doesNotMatch(sidebarSource, /setOpenCodeModelVariant|OpenCodeLocalState/);
   assert.doesNotMatch(sidebarSource, /\.local', 'state', 'opencode', 'model\.json'/);
   assert.doesNotMatch(sidebarSource, /state\.variant = \{/);
   assert.match(

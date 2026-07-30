@@ -197,12 +197,11 @@ test('extension host depends on agent runtime and typed webview protocol ports',
     /import \{ AgentSessionController \} from '\.\/agentSessionController';/
   );
   assert.match(sidebarSource, /import \{ ImageAttachmentStore \} from '\.\/attachmentStore';/);
-  assert.match(sidebarSource, /import \{ OpenCodeLocalState \} from '\.\/openCodeLocalState';/);
   assert.doesNotMatch(sidebarSource, /import \{ CliManager, Session \} from '\.\/cliManager';/);
   assert.match(sidebarSource, /private readonly agentRuntime: AgentRuntime/);
   assert.match(sidebarSource, /private readonly sessionController: AgentSessionController/);
   assert.match(sidebarSource, /private readonly attachmentStore: ImageAttachmentStore/);
-  assert.match(sidebarSource, /private readonly openCodeLocalState: OpenCodeLocalState/);
+  assert.doesNotMatch(sidebarSource, /OpenCodeLocalState|setOpenCodeModelVariant/);
   assert.doesNotMatch(sidebarSource, /OpenCodeAgentCapability|openCodeCapability/);
   assert.doesNotMatch(extensionSource, /OpenCodeAgentCapability|openCodeCapability/);
   assert.match(sidebarSource, /onDidReceiveMessage\(async \(message: WebviewToHostMessage\) =>/);
