@@ -79,6 +79,8 @@ The two skips are the pre-existing Windows npm-shim platform tests. Lint emits t
 
 Follow-up: `fix: harden SCM diagnostic boundary`
 
+Second follow-up: `fix: buffer SCM output until line-safe`
+
 ## Concerns
 
 None for task scope. The pre-existing lint module-type warning remains outside this change.
@@ -105,6 +107,32 @@ Added adversarial tests first. The RED run showed the shared classifier was abse
 Focused SCM tests: 30 passed, 0 failed
 Focused architecture tests: 2 passed, 0 failed
 npm test: 339 passed, 0 failed, 2 pre-existing platform skips
+npm run lint: exit 0
+npm run typecheck: exit 0
+npm run format:check: exit 0
+npm run build: exit 0
+git diff --check: clean
+```
+
+## Review follow-up: observer-safe chunk boundaries
+
+### RED
+
+New adapter tests demonstrated three stream-boundary leaks: a safe no-newline subject was emitted before end, a later `\n-api er` chunk produced an observer event containing the incomplete diagnostic prefix, and a multiline trailing line was emitted before its newline. The focused RED run failed on all three assertions.
+
+### GREEN
+
+- Added a separate `lastEmittedSafePrefix` cursor in `CliTextGenerationAdapter`; it is independent of the OpenCode JSON-event parser buffer.
+- While streaming, the adapter classifies the full accumulated output but emits only a new, non-whitespace accumulated prefix through its last complete newline.
+- On end, parser output and stdout/stderr diagnostics are classified first; safe final output is emitted exactly once, including a no-newline subject.
+- The chunked diagnostic test now asserts the exact observer sequence, zero `api er` leakage, selected-session stop, rejection, and one CLI launch. Additional tests cover safe no-newline end flush and multiline prefix progression.
+
+### Verification
+
+```text
+Focused SCM tests: 31 passed, 0 failed
+Focused architecture tests: 2 passed, 0 failed
+npm test: 340 passed, 0 failed, 2 pre-existing platform skips
 npm run lint: exit 0
 npm run typecheck: exit 0
 npm run format:check: exit 0

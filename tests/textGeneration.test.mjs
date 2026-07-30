@@ -216,10 +216,14 @@ test('CLI text generation adapter passes exact cwd without generated policy or e
   const manager = createFakeCliManager();
   const adapter = new CliTextGenerationAdapter(manager);
   const phases = [];
+  const outputEvents = [];
 
   const generation = adapter.generate(fastGenerationRequest(), activeSignal, (event) => {
     if (event.type === 'phase') {
       phases.push(event.phase);
+    }
+    if (event.type === 'output') {
+      outputEvents.push(event.text);
     }
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -235,9 +239,11 @@ test('CLI text generation adapter passes exact cwd without generated policy or e
       '',
     ].join('\n'),
   });
+  assert.deepEqual(outputEvents, []);
   manager.events.fire({ type: 'end', exitCode: 0 });
 
   assert.equal(await generation, 'fix(commit): isolate runtime');
+  assert.deepEqual(outputEvents, ['fix(commit): isolate runtime']);
   assert.equal(manager.calls.length, 1);
   const [, prompt, options] = manager.calls[0];
   assert.equal(prompt, 'Generate a commit message');
@@ -265,19 +271,21 @@ test('CLI text generation adapter stops on a chunked diagnostic line without str
     type: 'output',
     stream: 'stdout',
     transport: 'process',
-    text: `${delta('fix(adapter): preserve native CLI output')}\n`,
+    text: `${delta('fix(adapter): preserve native CLI output\n')}\n`,
   });
+  assert.deepEqual(partials, ['fix(adapter): preserve native CLI output\n']);
   manager.events.fire({
     type: 'output',
     stream: 'stdout',
     transport: 'process',
     text: `${delta('\n-api er')}\n`,
   });
+  assert.deepEqual(partials, ['fix(adapter): preserve native CLI output\n']);
   manager.events.fire({
     type: 'output',
     stream: 'stdout',
     transport: 'process',
-    text: `${delta('ror: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.')}\n`,
+    text: `${delta('ror: rate limited')}\n`,
   });
 
   await assert.rejects(
@@ -285,11 +293,53 @@ test('CLI text generation adapter stops on a chunked diagnostic line without str
     (error) =>
       error instanceof TextGenerationError &&
       error.code === 'provider-error' &&
-      error.message === 'api error: Request failed: Bad request (400): Unsupported model MiMo-V2.5-Pro.'
+      error.message === 'api error: rate limited'
   );
   assert.deepEqual(manager.stopped, ['opencode-1']);
   assert.equal(manager.calls.length, 1);
-  assert.ok(partials.every((partial) => !/api error|request failed|unsupported model/i.test(partial)));
+  assert.deepEqual(partials, ['fix(adapter): preserve native CLI output\n']);
+});
+
+test('CLI text generation adapter streams only complete safe multiline prefixes', async () => {
+  const manager = createFakeCliManager();
+  const adapter = new CliTextGenerationAdapter(manager);
+  const partials = [];
+  const generation = adapter.generate(fastGenerationRequest(), activeSignal, (event) => {
+    if (event.type === 'output') {
+      partials.push(event.text);
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const delta = (text) =>
+    JSON.stringify({
+      type: 'message.part.delta',
+      properties: { part: { type: 'text' }, delta: text },
+    });
+  manager.events.fire({
+    type: 'output',
+    stream: 'stdout',
+    transport: 'process',
+    text: `${delta('fix(adapter): preserve safe output\nbody line\nnext')}\n`,
+  });
+  assert.deepEqual(partials, ['fix(adapter): preserve safe output\nbody line\n']);
+  manager.events.fire({
+    type: 'output',
+    stream: 'stdout',
+    transport: 'process',
+    text: `${delta(' line\n')}\n`,
+  });
+  assert.deepEqual(partials, [
+    'fix(adapter): preserve safe output\nbody line\n',
+    'fix(adapter): preserve safe output\nbody line\nnext line\n',
+  ]);
+  manager.events.fire({ type: 'end', exitCode: 0 });
+
+  assert.equal(
+    await generation,
+    'fix(adapter): preserve safe output\nbody line\nnext line\n'
+  );
+  assert.equal(manager.calls.length, 1);
 });
 
 test('CLI text generation adapter stops before a nonzero exit can expose a buffered diagnostic', async () => {

@@ -183,6 +183,7 @@ export class CliTextGenerationAdapter
       let output = '';
       let stderr = '';
       let buffer = '';
+      let lastEmittedSafePrefix = '';
       let settled = false;
       let streaming = false;
       let idleTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -261,7 +262,11 @@ export class CliTextGenerationAdapter
               );
               return;
             }
-            observer?.({ type: 'output', text: normalizedOutput });
+            lastEmittedSafePrefix = emitSafeOutputPrefix(
+              observer,
+              normalizedOutput,
+              lastEmittedSafePrefix
+            );
             return;
           }
 
@@ -312,6 +317,9 @@ export class CliTextGenerationAdapter
                 )
               );
               return;
+            }
+            if (normalizedOutput && normalizedOutput !== lastEmittedSafePrefix) {
+              observer?.({ type: 'output', text: normalizedOutput });
             }
             settle(() => resolve(normalizedOutput));
             return;
@@ -381,6 +389,32 @@ function normalizeGenerationError(error: unknown, providerId: string): TextGener
 
 function positiveTimeout(value: number): number {
   return Math.max(1, Number.isFinite(value) ? Math.floor(value) : 1);
+}
+
+function emitSafeOutputPrefix(
+  observer: ((event: TextGenerationEvent) => void) | undefined,
+  output: string,
+  lastEmittedSafePrefix: string
+): string {
+  const lastNewline = output.lastIndexOf('\n');
+  if (lastNewline < 0) {
+    return lastEmittedSafePrefix;
+  }
+
+  const safePrefix = output.slice(0, lastNewline + 1);
+  if (safePrefix === lastEmittedSafePrefix) {
+    return lastEmittedSafePrefix;
+  }
+
+  const addition = safePrefix.startsWith(lastEmittedSafePrefix)
+    ? safePrefix.slice(lastEmittedSafePrefix.length)
+    : safePrefix;
+  if (!addition.trim()) {
+    return lastEmittedSafePrefix;
+  }
+
+  observer?.({ type: 'output', text: safePrefix });
+  return safePrefix;
 }
 
 function isLikelyCliError(text: string): boolean {
