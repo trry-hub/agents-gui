@@ -1,4 +1,4 @@
-import type { CliAgentMode, CliModelOption } from './cliProfiles';
+import type { CliAgentMode, CliConfiguredModel } from './cliProfiles';
 
 const ANSI_PATTERN =
   // eslint-disable-next-line no-control-regex
@@ -188,9 +188,9 @@ export function parseOpenCodeDebugConfigOutput(output: string): OpenCodeAgentDis
   };
 }
 
-export function parseOpenCodeModelsOutput(output: string): CliModelOption[] {
+export function parseOpenCodeModelsOutput(output: string): CliConfiguredModel[] {
   const seen = new Set<string>();
-  const options: CliModelOption[] = [];
+  const options: CliConfiguredModel[] = [];
 
   for (const rawLine of output.split(/\r?\n/)) {
     const cleaned = rawLine.replace(ANSI_PATTERN, '').trim();
@@ -206,7 +206,7 @@ export function parseOpenCodeModelsOutput(output: string): CliModelOption[] {
   return options;
 }
 
-export function parseOpenCodeProviderModels(payload: unknown): CliModelOption[] {
+export function parseOpenCodeProviderModels(payload: unknown): CliConfiguredModel[] {
   if (Array.isArray(payload)) {
     return parseOpenCodeModelArray(payload);
   }
@@ -217,7 +217,7 @@ export function parseOpenCodeProviderModels(payload: unknown): CliModelOption[] 
     : Array.isArray(record.all)
       ? record.all
       : [];
-  const options: CliModelOption[] = [];
+  const options: CliConfiguredModel[] = [];
   const seen = new Set<string>();
 
   for (const providerValue of providers) {
@@ -308,7 +308,6 @@ function createOpenCodeAgentMode(
     label,
     description: agentDescription ? `${sourceDescription} ${agentDescription}` : sourceDescription,
     instruction: `OpenCode ${label} agent: use the provider-native agent behavior configured by OpenCode.`,
-    args: ['--agent', id],
   };
 }
 
@@ -320,8 +319,8 @@ function isInternalOpenCodeAgent(id: string): boolean {
   return normalized === 'title' || normalized === 'summary' || normalized === 'compaction';
 }
 
-function parseOpenCodeModelArray(models: unknown[]): CliModelOption[] {
-  const options: CliModelOption[] = [];
+function parseOpenCodeModelArray(models: unknown[]): CliConfiguredModel[] {
+  const options: CliConfiguredModel[] = [];
   const seen = new Set<string>();
   for (const value of models) {
     const model = objectRecord(value);
@@ -352,22 +351,12 @@ function parseOpenCodeModelArray(models: unknown[]): CliModelOption[] {
 function createOpenCodeModelOption(
   id: string,
   label?: string,
-  providerName?: string,
-  variantOptions: string[] = []
-): CliModelOption {
-  const [provider, ...modelParts] = id.split('/');
-  const modelName = modelParts.join('/') || id;
-  const variantDescription =
-    variantOptions.length > 0
-      ? ` Supports OpenCode reasoning depth: ${variantOptions.join(', ')}.`
-      : '';
+  _providerName?: string,
+  _variantOptions: string[] = []
+): CliConfiguredModel {
   return {
     id,
     label: label ?? id,
-    summaryLabel: modelName,
-    description: `OpenCode model from ${providerName || provider || 'configured provider'}; passed as --model ${id}.${variantDescription}`,
-    args: ['--model', id],
-    ...(variantOptions.length > 0 ? { variantOptions } : {}),
   };
 }
 

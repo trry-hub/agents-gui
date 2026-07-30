@@ -41,15 +41,6 @@ export class CliProcessRunner {
     return this.spawnProcess(command, args, cwd, env, [stdin, 'pipe', 'pipe'], true);
   }
 
-  spawnBackgroundProcess(
-    command: string,
-    args: string[],
-    cwd: string,
-    env: NodeJS.ProcessEnv
-  ): ChildProcess {
-    return this.spawnProcess(command, args, cwd, env, ['ignore', 'ignore', 'ignore'], true);
-  }
-
   spawnProbeProcess(
     command: string,
     args: string[],

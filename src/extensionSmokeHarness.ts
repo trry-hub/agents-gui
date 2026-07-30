@@ -178,9 +178,6 @@ class SmokeAgentRuntime implements AgentRuntime {
   readonly startedPrompts: Array<{
     cliId: string;
     initialInput?: string;
-    agentArgs: string[];
-    agentModeId?: string;
-    optionKey?: string;
   }> = [];
   readonly sentInputs: Array<{ sessionId: string; text: string; closeAfterWrite?: boolean }> = [];
   readonly stoppedSessions: string[] = [];
@@ -211,13 +208,7 @@ class SmokeAgentRuntime implements AgentRuntime {
     return [this.profile];
   }
 
-  async startPrompt(
-    cliId: string,
-    initialInput?: string,
-    agentArgs: string[] = [],
-    agentModeId?: string,
-    optionKey?: string
-  ): Promise<AgentSession | null> {
+  async startPrompt(cliId: string, initialInput?: string): Promise<AgentSession | null> {
     if (cliId !== this.profile.id) {
       return null;
     }
@@ -227,8 +218,6 @@ class SmokeAgentRuntime implements AgentRuntime {
     const session: AgentSession = {
       id,
       cliId,
-      agentModeId,
-      optionKey,
       profile: this.profile,
       process: { exitCode: null, killed: false } as never,
       onOutput: new vscode.EventEmitter<string>(),
@@ -236,10 +225,9 @@ class SmokeAgentRuntime implements AgentRuntime {
       onError: new vscode.EventEmitter<string>(),
       onEnd: new vscode.EventEmitter<number>(),
       onEvent,
-      openCodeSessionId: 'ses_smoke',
     };
 
-    this.startedPrompts.push({ cliId, initialInput, agentArgs, agentModeId, optionKey });
+    this.startedPrompts.push({ cliId, initialInput });
     this.sessions.set(id, session);
     this.eventEmitters.set(id, onEvent);
     return session;
@@ -275,8 +263,7 @@ class SmokeAgentRuntime implements AgentRuntime {
       type: 'output',
       text,
       stream: 'stdout',
-      transport: 'sse',
-      openCodeSessionId: 'ses_smoke',
+      transport: 'process',
     });
   }
 

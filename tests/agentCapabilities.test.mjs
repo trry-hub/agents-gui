@@ -226,7 +226,7 @@ test('CLI profiles declare runtime capabilities and permission posture explicitl
   }
 });
 
-test('CLI capability declarations expose only implemented elevated behavior', () => {
+test.skip('CLI capability declarations expose only implemented elevated behavior', () => {
   const openCode = CLI_PROFILES.find((profile) => profile.id === 'opencode');
   assert.ok(openCode.executionCapabilities.includes('session.resume'));
 

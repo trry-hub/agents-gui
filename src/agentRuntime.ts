@@ -1,13 +1,7 @@
-import { CliManager, type Session } from './cliManager';
+import { CliManager, type Session, type StartPromptOptions } from './cliManager';
 import type { CliProfile } from './cliProfiles';
 
 export type AgentSession = Session;
-
-export interface AgentStartPromptOptions {
-  attachBackgroundServer?: boolean;
-  promptArgs?: string[];
-  continueSessionId?: string;
-}
 
 export interface AgentProfileStatusOptions {
   force?: boolean;
@@ -19,11 +13,7 @@ export interface AgentRuntime {
   startPrompt(
     cliId: string,
     initialInput?: string,
-    agentArgs?: string[],
-    agentModeId?: string,
-    optionKey?: string,
-    envOverrides?: Record<string, string>,
-    options?: AgentStartPromptOptions
+    options?: StartPromptOptions
   ): Promise<AgentSession | null>;
   sendInput(sessionId: string, text: string, closeAfterWrite?: boolean): boolean;
   stop(sessionId: string): void;
@@ -44,21 +34,9 @@ export class CliAgentRuntime implements AgentRuntime {
   startPrompt(
     cliId: string,
     initialInput?: string,
-    agentArgs: string[] = [],
-    agentModeId?: string,
-    optionKey?: string,
-    envOverrides: Record<string, string> = {},
-    options: AgentStartPromptOptions = {}
+    options: StartPromptOptions = {}
   ): Promise<AgentSession | null> {
-    return this.cliManager.startPrompt(
-      cliId,
-      initialInput,
-      agentArgs,
-      agentModeId,
-      optionKey,
-      envOverrides,
-      options
-    );
+    return this.cliManager.startPrompt(cliId, initialInput, options);
   }
 
   sendInput(sessionId: string, text: string, closeAfterWrite = false): boolean {

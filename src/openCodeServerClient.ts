@@ -9,7 +9,7 @@ import type {
   AssistantOpenCodeProject,
   AssistantOpenCodeStatus,
 } from './assistantTypes';
-import type { CliModelOption } from './cliProfiles';
+import type { CliConfiguredModel } from './cliProfiles';
 import { parseOpenCodeModelId, parseOpenCodeProviderModels } from './opencodeAgents';
 import { normalizeCliOutput } from './outputFormatter';
 
@@ -248,7 +248,7 @@ export class OpenCodeServerClient {
     return true;
   }
 
-  async fetchModelOptions(cwd: string): Promise<CliModelOption[]> {
+  async fetchModelOptions(cwd: string): Promise<CliConfiguredModel[]> {
     const serverUrl = await this.options.resolveServerUrl();
     if (!serverUrl) {
       return [];

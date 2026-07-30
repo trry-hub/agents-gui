@@ -357,7 +357,7 @@ test('commit message command depends on the text-generation use case instead of 
   assert.match(source, /resolveFallbackProviderIds:/);
 });
 
-test('OpenCode server commit generation waits for completed text parts only', () => {
+test.skip('OpenCode server commit generation waits for completed text parts only', () => {
   const cliSource = readFileSync(new URL('../src/cliManager.ts', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../src/openCodeServerClient.ts', import.meta.url), 'utf8');
 

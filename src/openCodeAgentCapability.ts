@@ -8,45 +8,49 @@ import { CliManager } from './cliManager';
 
 export interface OpenCodeAgentCapability {
   runPrompt(
-    prompt: string,
-    token: vscode.CancellationToken,
-    directory?: string,
-    modelId?: string,
-    onPartial?: (text: string) => void
+    _prompt: string,
+    _token: vscode.CancellationToken,
+    _directory?: string,
+    _modelId?: string,
+    _onPartial?: (text: string) => void
   ): Promise<string>;
   getStatus(): Promise<AssistantOpenCodeStatus | undefined>;
   executeNativeCommand(
     command: AssistantOpenCodeNativeCommand,
-    sessionId: string | undefined
+    _sessionId: string | undefined
   ): Promise<AssistantOpenCodeNativeCommandResult>;
   deleteSession(sessionId: string | undefined): Promise<boolean>;
 }
 
 export class CliOpenCodeAgentCapability implements OpenCodeAgentCapability {
-  constructor(private readonly cliManager: CliManager) {}
+  constructor(_cliManager: CliManager) {}
 
   runPrompt(
-    prompt: string,
-    token: vscode.CancellationToken,
-    directory?: string,
-    modelId?: string,
-    onPartial?: (text: string) => void
+    _prompt: string,
+    _token: vscode.CancellationToken,
+    _directory?: string,
+    _modelId?: string,
+    _onPartial?: (text: string) => void
   ): Promise<string> {
-    return this.cliManager.runOpenCodePromptViaServer(prompt, token, directory, modelId, onPartial);
+    return Promise.reject(new Error('OpenCode server transport is not available.'));
   }
 
   getStatus(): Promise<AssistantOpenCodeStatus | undefined> {
-    return this.cliManager.getOpenCodeStatus();
+    return Promise.resolve(undefined);
   }
 
   executeNativeCommand(
     command: AssistantOpenCodeNativeCommand,
-    sessionId: string | undefined
+    _sessionId: string | undefined
   ): Promise<AssistantOpenCodeNativeCommandResult> {
-    return this.cliManager.executeOpenCodeNativeCommand(command, sessionId);
+    return Promise.resolve({
+      command,
+      ok: false,
+      message: 'OpenCode server transport is not available.',
+    });
   }
 
-  deleteSession(sessionId: string | undefined): Promise<boolean> {
-    return this.cliManager.deleteOpenCodeSession(sessionId);
+  deleteSession(_sessionId: string | undefined): Promise<boolean> {
+    return Promise.resolve(false);
   }
 }

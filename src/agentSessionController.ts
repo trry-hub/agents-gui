@@ -25,8 +25,6 @@ export class AgentSessionController {
   private readonly promptEchoBuffers = new Map<string, string>();
   private readonly noOutputNoticeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly eventDisposables = new Map<string, vscode.Disposable>();
-  private readonly lastOpenCodeSessionIdByCli = new Map<string, string>();
-  private readonly lastOpenCodeOptionKeyByCli = new Map<string, string>();
   private readonly noOutputNoticeMs: number;
 
   constructor(private readonly options: AgentSessionControllerOptions) {
@@ -50,35 +48,6 @@ export class AgentSessionController {
     this.wire(session);
   }
 
-  /**
-   * Get the last OpenCode session ID for continuation, but only if the
-   * current optionKey matches the one used when that session was created.
-   *
-   * This prevents stale model/provider config from leaking across config
-   * changes: if the user switched model or API provider, the old session's
-   * server-side config (e.g. GLM4.6) would override the new selection, so we
-   * refuse to continue and let the caller start a fresh session instead.
-   */
-  getContinueSessionId(cliId: string, optionKey?: string): string | undefined {
-    if (!optionKey) {
-      return this.lastOpenCodeSessionIdByCli.get(cliId);
-    }
-    if (this.lastOpenCodeOptionKeyByCli.get(cliId) !== optionKey) {
-      return undefined;
-    }
-    return this.lastOpenCodeSessionIdByCli.get(cliId);
-  }
-
-  /**
-   * Clear the continuation session ID for a CLI provider.
-   * Called when the user explicitly starts a new conversation
-   * or when the continuation session becomes invalid.
-   */
-  clearContinuation(cliId: string): void {
-    this.lastOpenCodeSessionIdByCli.delete(cliId);
-    this.lastOpenCodeOptionKeyByCli.delete(cliId);
-  }
-
   replace(cliId: string): void {
     const session = this.activeSessions.get(cliId);
     if (!session) {
@@ -90,19 +59,13 @@ export class AgentSessionController {
     this.options.postToWebview({ command: 'stopped', cliId, sessionId: session.id });
   }
 
-  canReuse(
-    session: AgentSession | undefined,
-    agentModeId: string,
-    optionKey: string
-  ): session is AgentSession {
+  canReuse(session: AgentSession | undefined): session is AgentSession {
     return Boolean(
       session &&
       session.process.exitCode === null &&
       !session.process.killed &&
       session.profile.inputMode === 'stdin' &&
-      session.profile.keepStdinOpen === true &&
-      session.agentModeId === agentModeId &&
-      session.optionKey === optionKey
+      session.profile.keepStdinOpen === true
     );
   }
 
@@ -182,7 +145,7 @@ export class AgentSessionController {
       this.clearNoOutputNoticeTimer(session.id);
 
       if (event.type === 'output' && event.stream === 'stdout') {
-        this.forwardStdout(session, event.text, event.openCodeSessionId, event.stream);
+        this.forwardStdout(session, event.text, event.stream);
         return;
       }
 
@@ -202,19 +165,14 @@ export class AgentSessionController {
       }
 
       if (event.type === 'end') {
-        this.forwardEnd(session, event.exitCode, event.openCodeSessionId);
+        this.forwardEnd(session, event.exitCode);
       }
     });
 
     this.eventDisposables.set(session.id, eventDisposable);
   }
 
-  private forwardStdout(
-    session: AgentSession,
-    text: string,
-    openCodeSessionId: string | undefined,
-    stream: 'stdout'
-  ): void {
+  private forwardStdout(session: AgentSession, text: string, stream: 'stdout'): void {
     const normalized = normalizeCliOutputChunk(
       text,
       session.cliId,
@@ -248,8 +206,6 @@ export class AgentSessionController {
       activities: normalized.activities,
       status: normalized.status,
       sessionId: session.id,
-      openCodeSessionId:
-        openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
       stream,
     });
   }
@@ -269,20 +225,7 @@ export class AgentSessionController {
     });
   }
 
-  private forwardEnd(
-    session: AgentSession,
-    exitCode: number,
-    openCodeSessionId: string | undefined
-  ): void {
-    const resolvedSessionId =
-      openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId();
-    if (resolvedSessionId && resolvedSessionId.startsWith('ses')) {
-      this.lastOpenCodeSessionIdByCli.set(session.cliId, resolvedSessionId);
-      if (session.optionKey) {
-        this.lastOpenCodeOptionKeyByCli.set(session.cliId, session.optionKey);
-      }
-    }
-
+  private forwardEnd(session: AgentSession, exitCode: number): void {
     const buffered = this.outputBuffers.get(session.id);
     const flushed = flushCliOutputBuffer(buffered ?? '', session.cliId);
     this.outputBuffers.delete(session.id);
@@ -298,8 +241,6 @@ export class AgentSessionController {
         cliId: session.cliId,
         text: filtered.text,
         sessionId: session.id,
-        openCodeSessionId:
-          openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
         stream: 'stdout',
       });
     }
@@ -309,8 +250,6 @@ export class AgentSessionController {
       cliId: session.cliId,
       exitCode,
       sessionId: session.id,
-      openCodeSessionId:
-        openCodeSessionId ?? session.openCodeSessionId ?? session.eventStream?.sessionId(),
     });
     this.cleanup(session);
   }

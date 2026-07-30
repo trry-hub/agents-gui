@@ -22,15 +22,10 @@ import {
 import type { AgentProfileStatusOptions, AgentRuntime } from './agentRuntime';
 import { createCliAgentCapabilityRegistry } from './cliAgentCapabilities';
 import {
-  buildCliOptionArgs,
   CLI_PROFILES,
   getCliAgentMode,
-  getCliModelOption,
-  getCliPermissionMode,
   getCliProfile,
-  getCliRuntimeMode,
   resolveContextWindowTokens,
-  type CliModelOption,
   type CliProfile,
 } from './cliProfiles';
 import { CliSetupController, toCliSetupProfile } from './cliSetup';
@@ -295,8 +290,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       action,
       mode: 'agent',
       agentMode: action === 'explainSelection' ? preferredReadOnlyMode(profile) : undefined,
-      permissionMode:
-        action === 'explainSelection' ? preferredReadOnlyPermission(profile) : undefined,
+      permissionMode: undefined,
       text: runtimeDefaultActionText(this.locale, action),
       threadId: `${cliId}-editor-${randomUUID()}`,
       contextOptions: {
@@ -881,37 +875,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const mode = normalizeMode(message.mode);
     const action = normalizeAction(message.action);
     const agentMode = getCliAgentMode(profile, message.agentMode ?? message.workflowMode);
-    const modelOption = getCliModelOption(profile, message.model);
-    const runtimeMode = getCliRuntimeMode(profile, message.runtime);
-    const permissionMode = getCliPermissionMode(profile, message.permissionMode);
-    const effectiveModel = effectiveCliModelSelection(
-      modelOption,
-      message.customModel,
-      message.modelVariant
-    );
-    const optionArgs = buildCliOptionArgs(profile, {
-      model: modelOption.id,
-      customModel: message.customModel,
-      runtime: runtimeMode.id,
-      permissionMode: permissionMode.id,
-    });
-    const optionKey = [
-      agentMode.id,
-      modelOption.id,
-      modelOption.custom ? (message.customModel ?? '').trim() : '',
-      runtimeMode.id,
-      permissionMode.id,
-    ].join('|');
+    const effectiveModel = profile.configuredModel ?? { id: 'configured', label: 'Configured' };
+    const runtimeMode = { id: 'configured', label: 'Configured', summaryLabel: 'Configured' };
+    const permissionMode = {
+      id: 'default',
+      label: 'Default',
+      summaryLabel: 'Default',
+      posture: 'workspace-write' as const,
+    };
     let session = this.sessionController.active(cliId);
-    const canReuseSession = this.sessionController.canReuse(session, agentMode.id, optionKey);
-    const continueSessionId =
-      !canReuseSession && cliId === 'opencode'
-        ? this.sessionController.getContinueSessionId(cliId, optionKey)
-        : undefined;
+    const canReuseSession = false;
     const capabilityPolicy = resolveAgentCapabilityPolicy({
       intent: resolveAgentTaskIntent(action, agentMode.id),
       permissionPosture: permissionMode.posture,
-      resumeSession: Boolean(continueSessionId),
+      resumeSession: false,
     });
 
     try {
@@ -988,16 +965,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.sessionController.replace(cliId);
       }
 
-      const agentArgs = [...(agentMode.args ?? []), ...optionArgs];
-
       const newSession = await this.agentRuntime.startPrompt(
         cliId,
-        profile.inputMode === 'argument' ? prompt : undefined,
-        agentArgs,
-        agentMode.id,
-        optionKey,
-        undefined,
-        continueSessionId ? { continueSessionId } : {}
+        profile.inputMode === 'argument' ? prompt : undefined
       );
 
       if (!newSession) {
@@ -1396,36 +1366,6 @@ function preferredReadOnlyMode(profile?: CliProfile): string | undefined {
     profile.agentModes.find((item) => item.id === 'plan') ??
     profile.agentModes.find((item) => item.id === 'suggest');
   return mode?.id;
-}
-
-function preferredReadOnlyPermission(profile?: CliProfile): string | undefined {
-  if (!profile) {
-    return undefined;
-  }
-
-  const mode =
-    profile.permissionModes?.find((item) => item.id === 'readOnly') ??
-    profile.permissionModes?.find((item) => item.id === 'plan');
-  return mode?.id;
-}
-
-function effectiveCliModelSelection(
-  model: CliModelOption,
-  customModel: string | undefined,
-  modelVariant?: string
-): { id: string; label: string; variant?: string } {
-  const customId = model.custom ? String(customModel || '').trim() : '';
-  const id = customId || model.configuredModelId || model.id;
-  const variant = sanitizeModelVariant(modelVariant) ?? sanitizeModelVariant(model.variant);
-  const baseLabel = model.custom && customId ? customId : model.summaryLabel || model.label || id;
-  const label =
-    variant && !baseLabel.includes(`· ${variant}`) ? `${baseLabel} · ${variant}` : baseLabel;
-  return { id, label, ...(variant ? { variant } : {}) };
-}
-
-function sanitizeModelVariant(value: string | undefined): string | undefined {
-  const variant = String(value || '').trim();
-  return /^[A-Za-z0-9_.-]+$/.test(variant) ? variant : undefined;
 }
 
 function normalizeStringRecord(value: unknown): Record<string, string> {

@@ -1,14 +1,5 @@
 import type { AgentRunEvent, StartPromptOptions } from './cliManager';
-import {
-  getCliAgentMode,
-  getCliPermissionMode,
-  getCliProfile,
-  getCliRuntimeMode,
-  type CliAgentMode,
-  type CliPermissionMode,
-  type CliProfile,
-} from './cliProfiles';
-import { buildOpenCodeFastGenerationEnv } from './openCodeTaskPolicy';
+import { getCliProfile, type CliProfile } from './cliProfiles';
 import {
   flushCliOutputBuffer,
   normalizeCliOutput,
@@ -24,8 +15,6 @@ import {
   type TextGenerationRequest,
 } from './textGeneration';
 
-const OPENCODE_TEXT_GENERATION_PROMPT_ARGS = ['run', '--format', 'json'];
-
 interface GenerationSession {
   id: string;
   cliId: string;
@@ -39,23 +28,12 @@ export interface CliTextGenerationManager {
   startPrompt(
     cliId: string,
     initialInput?: string,
-    agentArgs?: string[],
-    agentModeId?: string,
-    optionKey?: string,
-    envOverrides?: Record<string, string>,
     options?: StartPromptOptions
   ): Promise<GenerationSession | null>;
   stop(sessionId: string): void;
 }
 
-export interface ProviderRuntimeSelection {
-  env: Record<string, string>;
-  selectionKey: string;
-}
-
 export interface CliTextGenerationAdapterOptions {
-  resolveProviderRuntime?: (providerId: string) => ProviderRuntimeSelection;
-  readOpenCodeConfig?: () => unknown;
   now?: () => number;
 }
 
@@ -114,44 +92,9 @@ export class CliTextGenerationAdapter
     request: TextGenerationRequest,
     signal: TextGenerationCancellationSignal
   ): Promise<GenerationSession> {
-    const agentMode = preferredCommitAgentMode(profile);
-    const permissionMode = preferredCommitPermissionMode(profile);
-    const runtimeMode = getCliRuntimeMode(profile);
-    const runtime = this.options.resolveProviderRuntime?.(profile.id) ?? {
-      env: {},
-      selectionKey: 'api-provider:none',
-    };
-    const env =
-      profile.id === 'opencode' && requiresFastLaneIsolation(request)
-        ? buildOpenCodeFastGenerationEnv(runtime.env, this.options.readOpenCodeConfig?.())
-        : runtime.env;
-    const agentArgs = [
-      ...(runtimeMode.args ?? []),
-      ...(permissionMode.args ?? []),
-      ...(agentMode.args ?? []),
-    ];
-    const startOptions: StartPromptOptions = {
+    const launchPromise = this.cliManager.startPrompt(profile.id, request.prompt, {
       cwd: request.cwd,
-      attachBackgroundServer: false,
-      ...(profile.id === 'opencode' ? { promptArgs: OPENCODE_TEXT_GENERATION_PROMPT_ARGS } : {}),
-    };
-    const optionKey = [
-      'commitMessage',
-      agentMode.id,
-      'configured',
-      runtimeMode.id,
-      permissionMode.id,
-      runtime.selectionKey,
-    ].join('|');
-    const launchPromise = this.cliManager.startPrompt(
-      profile.id,
-      request.prompt,
-      agentArgs,
-      agentMode.id,
-      optionKey,
-      env,
-      startOptions
-    );
+    });
     const session = await this.waitForLaunch(
       launchPromise,
       request.providerId,
@@ -406,32 +349,6 @@ export class CliTextGenerationAdapter
       elapsedMs: Math.max(0, this.now() - startedAt),
     });
   }
-}
-
-function requiresFastLaneIsolation(request: TextGenerationRequest): boolean {
-  return (
-    request.capabilities.tools === 'disabled' &&
-    request.capabilities.mcp === 'disabled' &&
-    request.capabilities.projectConfig === 'disabled' &&
-    request.capabilities.plugins === 'disabled' &&
-    request.capabilities.persistence === 'ephemeral'
-  );
-}
-
-function preferredCommitAgentMode(profile: CliProfile): CliAgentMode {
-  return (
-    profile.agentModes.find((mode) => mode.id === 'plan' && !mode.disabled) ??
-    profile.agentModes.find((mode) => mode.id === 'review' && !mode.disabled) ??
-    getCliAgentMode(profile)
-  );
-}
-
-function preferredCommitPermissionMode(profile: CliProfile): CliPermissionMode {
-  return (
-    profile.permissionModes?.find((mode) => mode.id === 'readOnly' && !mode.disabled) ??
-    profile.permissionModes?.find((mode) => mode.id === 'plan' && !mode.disabled) ??
-    getCliPermissionMode(profile)
-  );
 }
 
 function normalizeGenerationError(error: unknown, providerId: string): TextGenerationError {
