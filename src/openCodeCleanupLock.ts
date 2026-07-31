@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import { hostname as systemHostname } from 'os';
 import * as path from 'path';
@@ -30,8 +30,13 @@ const MAX_HOSTNAME_LENGTH = 255;
 const MAX_TOKEN_LENGTH = 256;
 const DEFAULT_RETRY_ATTEMPTS = 80;
 const DEFAULT_RETRY_DELAY_MS = 25;
+const LEGACY_SIDECAR_SUFFIX = '.v2';
+const DIGEST_PATTERN = '[A-Za-z0-9_-]{43}';
+const DIRECTORY_OWNER_PATTERN = new RegExp(
+  `^owner-v${OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION}-([1-9]\\d*)-(0|[1-9]\\d*)-(${DIGEST_PATTERN})-(${DIGEST_PATTERN})$`
+);
 
-interface StructuredLockOwner {
+interface StructuredFileOwner {
   readonly kind: 'structured';
   readonly pid: number;
   readonly hostname: string;
@@ -39,34 +44,49 @@ interface StructuredLockOwner {
   readonly createdAt: number;
 }
 
-interface LegacyLockOwner {
+interface LegacyFileOwner {
   readonly kind: 'legacy';
   readonly pid: number;
 }
 
-interface MalformedLockOwner {
+interface MalformedOwner {
   readonly kind: 'malformed';
 }
 
-type LockOwner = StructuredLockOwner | LegacyLockOwner | MalformedLockOwner;
+type FileOwner = StructuredFileOwner | LegacyFileOwner | MalformedOwner;
 
-interface LockSnapshot {
+interface FileLockSnapshot {
   readonly bytes: Buffer;
   readonly stat: fs.BigIntStats;
-  readonly owner: LockOwner;
+  readonly owner: FileOwner;
   readonly oversized: boolean;
 }
 
-interface QuarantineLocation {
-  readonly directory: string;
-  readonly entryPath: string;
-  readonly directoryStat: fs.BigIntStats;
+interface StructuredDirectoryOwner {
+  readonly kind: 'structured';
+  readonly markerName: string;
+  readonly pid: number;
+  readonly createdAt: number;
+  readonly hostnameDigest: string;
+  readonly tokenDigest: string;
+}
+
+type DirectoryOwner = StructuredDirectoryOwner | MalformedOwner;
+
+interface DirectoryLockSnapshot {
+  readonly rootStat: fs.BigIntStats;
+  readonly entries: readonly string[];
+  readonly markerStat?: fs.BigIntStats;
+  readonly markerEntries?: readonly string[];
+  readonly owner: DirectoryOwner;
 }
 
 interface NormalizedLockOptions {
   readonly pid: number;
   readonly hostname: string;
+  readonly hostnameDigest: string;
   readonly token: string;
+  readonly tokenDigest: string;
   readonly createdAt: number;
   readonly now: () => number;
   readonly processLiveness: (pid: number) => ProcessLiveness;
@@ -75,7 +95,65 @@ interface NormalizedLockOptions {
   readonly malformedGraceMs: number;
 }
 
-type RetireResult = 'retired' | 'changed';
+type DirectoryRemovalResult = 'removed' | 'changed';
+
+/**
+ * This lock is designed for cooperative Agents GUI processes. The canonical
+ * path is a directory, and every shared-state mutation uses mkdir or
+ * non-recursive rmdir. An arbitrary same-user process can edit the protected
+ * config itself and is outside this protocol's threat model.
+ */
+export async function acquireOpenCodeCleanupLock(
+  lockPath: string,
+  options: OpenCodeCleanupLockOptions = {}
+): Promise<OpenCodeCleanupLock> {
+  const normalized = normalizeOptions(options);
+
+  for (let attempt = 1; attempt <= normalized.retryAttempts; attempt += 1) {
+    const directoryLock = await tryAcquireDirectoryLock(lockPath, lockPath, normalized);
+    if (directoryLock) {
+      return directoryLock;
+    }
+
+    const pathStat = await lstatOrUndefined(lockPath);
+    if (!pathStat) {
+      if (attempt < normalized.retryAttempts) {
+        await delay(normalized.retryDelayMs);
+        continue;
+      }
+      throw busyLockError(lockPath, normalized.retryAttempts);
+    }
+
+    if (pathStat.isFile()) {
+      const legacySnapshot = await readRecoverableLegacySnapshot(lockPath, normalized);
+      if (legacySnapshot) {
+        const sidecarLock = await tryAcquireDirectoryLock(
+          `${lockPath}${LEGACY_SIDECAR_SUFFIX}`,
+          lockPath,
+          normalized
+        );
+        if (sidecarLock) {
+          const current = await readFileLockSnapshot(lockPath);
+          if (
+            current &&
+            sameStrictFileSnapshot(current, legacySnapshot) &&
+            isImmediatelyRecoverableFileOwner(current, normalized)
+          ) {
+            return sidecarLock;
+          }
+          await sidecarLock.release();
+        }
+      }
+    }
+
+    if (attempt === normalized.retryAttempts) {
+      throw busyLockError(lockPath, normalized.retryAttempts);
+    }
+    await delay(normalized.retryDelayMs);
+  }
+
+  throw busyLockError(lockPath, normalized.retryAttempts);
+}
 
 export function probeProcessLiveness(pid: number): ProcessLiveness {
   try {
@@ -91,44 +169,6 @@ export function probeProcessLiveness(pid: number): ProcessLiveness {
     }
     return 'unknown';
   }
-}
-
-export async function acquireOpenCodeCleanupLock(
-  lockPath: string,
-  options: OpenCodeCleanupLockOptions = {}
-): Promise<OpenCodeCleanupLock> {
-  const normalized = normalizeOptions(options);
-  const ownerBytes = serializeOwner(normalized);
-
-  for (let attempt = 1; attempt <= normalized.retryAttempts; attempt += 1) {
-    try {
-      const verified = await tryCreateOwner(lockPath, normalized.token, ownerBytes);
-      return createOwnedLock(lockPath, normalized.token, verified, normalized.now);
-    } catch (error) {
-      if (!hasErrorCode(error, 'EEXIST')) {
-        throw error;
-      }
-    }
-
-    const retired = await recoverExistingOwner(lockPath, normalized);
-    if (retired) {
-      try {
-        const verified = await tryCreateOwner(lockPath, normalized.token, ownerBytes);
-        return createOwnedLock(lockPath, normalized.token, verified, normalized.now);
-      } catch (error) {
-        if (!hasErrorCode(error, 'EEXIST')) {
-          throw error;
-        }
-      }
-    }
-
-    if (attempt === normalized.retryAttempts) {
-      throw busyLockError(lockPath, normalized.retryAttempts);
-    }
-    await delay(normalized.retryDelayMs);
-  }
-
-  throw busyLockError(lockPath, normalized.retryAttempts);
 }
 
 function normalizeOptions(options: OpenCodeCleanupLockOptions): NormalizedLockOptions {
@@ -155,11 +195,12 @@ function normalizeOptions(options: OpenCodeCleanupLockOptions): NormalizedLockOp
 
   const now = options.now ?? Date.now;
   const createdAt = readSafeTime(now);
-
   return {
     pid,
     hostname,
+    hostnameDigest: digestOwnerField(hostname),
     token,
+    tokenDigest: digestOwnerField(token),
     createdAt,
     now,
     processLiveness: options.processLiveness ?? probeProcessLiveness,
@@ -172,180 +213,404 @@ function normalizeOptions(options: OpenCodeCleanupLockOptions): NormalizedLockOp
   };
 }
 
-function readSafeTime(now: () => number): number {
-  const value = now();
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error('OpenCode cleanup lock creation time must be a non-negative safe integer.');
-  }
-  return value;
+function directoryOwnerName(options: NormalizedLockOptions): string {
+  return [
+    `owner-v${OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION}`,
+    options.pid,
+    options.createdAt,
+    options.hostnameDigest,
+    options.tokenDigest,
+  ].join('-');
 }
 
-function serializeOwner(options: NormalizedLockOptions): Buffer {
-  const bytes = Buffer.from(
-    `${JSON.stringify({
-      version: OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION,
-      pid: options.pid,
-      hostname: options.hostname,
-      token: options.token,
-      createdAt: options.createdAt,
-    })}\n`,
-    'utf8'
-  );
-  if (bytes.length > MAX_LOCK_RECORD_BYTES) {
-    throw new Error(`OpenCode cleanup lock owner record exceeds ${MAX_LOCK_RECORD_BYTES} bytes.`);
+function parseDirectoryOwner(markerName: string): DirectoryOwner {
+  const match = DIRECTORY_OWNER_PATTERN.exec(markerName);
+  if (!match) {
+    return { kind: 'malformed' };
   }
-  return bytes;
+  const pid = Number(match[1]);
+  const createdAt = Number(match[2]);
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(createdAt) || createdAt < 0) {
+    return { kind: 'malformed' };
+  }
+  return {
+    kind: 'structured',
+    markerName,
+    pid,
+    createdAt,
+    hostnameDigest: match[3],
+    tokenDigest: match[4],
+  };
 }
 
-async function tryCreateOwner(
-  lockPath: string,
-  token: string,
-  ownerBytes: Buffer
-): Promise<LockSnapshot> {
-  const handle = await fs.promises.open(lockPath, 'wx', 0o600);
-  let provisionalStat: fs.BigIntStats;
-  try {
-    provisionalStat = await handle.stat({ bigint: true });
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    throw error;
-  }
-  try {
-    await handle.writeFile(ownerBytes);
-    await handle.chmod(0o600);
-    await handle.sync();
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    await discardProvisionalOwner(lockPath, provisionalStat);
-    throw error;
-  }
-  await handle.close();
-
-  const verified = await readLockSnapshot(lockPath);
-  if (
-    !verified ||
-    verified.oversized ||
-    verified.owner.kind !== 'structured' ||
-    verified.owner.token !== token ||
-    !verified.bytes.equals(ownerBytes) ||
-    !sameFileIdentity(verified.stat, provisionalStat)
-  ) {
-    throw new Error(
-      `OpenCode config cleanup lock ownership changed before verification: ${lockPath}`
-    );
-  }
-  return verified;
-}
-
-async function discardProvisionalOwner(
-  lockPath: string,
-  provisionalStat: fs.BigIntStats
-): Promise<void> {
-  const snapshot = await readLockSnapshot(lockPath).catch(() => undefined);
-  if (!snapshot || !sameFileIdentity(snapshot.stat, provisionalStat)) {
-    return;
-  }
-  await retireExpectedPath(lockPath, snapshot, Date.now).catch(() => undefined);
-}
-
-async function recoverExistingOwner(
-  lockPath: string,
+async function tryAcquireDirectoryLock(
+  rootPath: string,
+  logicalPath: string,
   options: NormalizedLockOptions
-): Promise<boolean> {
-  const first = await readLockSnapshot(lockPath);
-  if (!first || first.oversized) {
-    return false;
+): Promise<OpenCodeCleanupLock | undefined> {
+  const created = await tryCreateDirectoryOwner(rootPath, logicalPath, options);
+  if (created) {
+    return created;
   }
 
-  if (first.owner.kind === 'structured') {
-    if (first.owner.hostname !== options.hostname) {
-      return false;
-    }
-    if (safeProbe(options.processLiveness, first.owner.pid) !== 'dead') {
-      return false;
-    }
-    return (await retireExpectedPath(lockPath, first, options.now)) === 'retired';
+  const existing = await readDirectoryLockSnapshot(rootPath);
+  if (!existing) {
+    return undefined;
   }
-
-  if (first.owner.kind === 'legacy') {
-    if (safeProbe(options.processLiveness, first.owner.pid) !== 'dead') {
-      return false;
-    }
-    return (await retireExpectedPath(lockPath, first, options.now)) === 'retired';
+  if (!(await recoverDirectoryOwner(rootPath, existing, options))) {
+    return undefined;
   }
-
-  const currentTime = readSafeTime(options.now);
-  if (BigInt(currentTime) - first.stat.mtimeMs < BigInt(options.malformedGraceMs)) {
-    return false;
-  }
-
-  await delay(options.retryDelayMs);
-  const second = await readLockSnapshot(lockPath);
-  if (!second || second.oversized || !sameStrictSnapshot(first, second)) {
-    return false;
-  }
-  return (await retireExpectedPath(lockPath, second, options.now)) === 'retired';
+  return tryCreateDirectoryOwner(rootPath, logicalPath, options);
 }
 
-function parseOwner(bytes: Buffer, oversized: boolean): LockOwner {
-  if (oversized || bytes.length === 0) {
-    return { kind: 'malformed' };
-  }
-
-  const text = bytes.toString('utf8');
-  if (/^[1-9]\d*\n$/.test(text)) {
-    const pid = Number(text.slice(0, -1));
-    if (Number.isSafeInteger(pid)) {
-      return { kind: 'legacy', pid };
-    }
-  }
-
-  if (bytes.at(-1) !== 0x0a) {
-    return { kind: 'malformed' };
-  }
+async function tryCreateDirectoryOwner(
+  rootPath: string,
+  logicalPath: string,
+  options: NormalizedLockOptions
+): Promise<OpenCodeCleanupLock | undefined> {
   try {
-    const parsed: unknown = JSON.parse(text);
-    if (
-      !isRecord(parsed) ||
-      parsed.version !== OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION ||
-      !Number.isSafeInteger(parsed.pid) ||
-      (parsed.pid as number) <= 0 ||
-      typeof parsed.hostname !== 'string' ||
-      parsed.hostname.length === 0 ||
-      parsed.hostname.length > MAX_HOSTNAME_LENGTH ||
-      typeof parsed.token !== 'string' ||
-      parsed.token.length === 0 ||
-      parsed.token.length > MAX_TOKEN_LENGTH ||
-      !Number.isSafeInteger(parsed.createdAt) ||
-      (parsed.createdAt as number) < 0
-    ) {
-      return { kind: 'malformed' };
-    }
-
-    return {
-      kind: 'structured',
-      pid: parsed.pid as number,
-      hostname: parsed.hostname,
-      token: parsed.token,
-      createdAt: parsed.createdAt as number,
-    };
-  } catch {
-    return { kind: 'malformed' };
-  }
-}
-
-async function readLockSnapshot(lockPath: string): Promise<LockSnapshot | undefined> {
-  let handle: fs.promises.FileHandle;
-  try {
-    handle = await fs.promises.open(lockPath, 'r');
+    await fs.promises.mkdir(rootPath, { mode: 0o700 });
   } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) {
+    if (hasErrorCode(error, 'EEXIST')) {
       return undefined;
     }
     throw error;
   }
 
-  let snapshot: LockSnapshot | undefined;
+  const markerName = directoryOwnerName(options);
+  const markerPath = path.join(rootPath, markerName);
+  let markerCreated = false;
+  let rootIdentity: fs.BigIntStats | undefined;
+  try {
+    await chmodPrivateDirectory(rootPath);
+    rootIdentity = await fs.promises.lstat(rootPath, { bigint: true });
+    if (!rootIdentity.isDirectory()) {
+      throw ownershipChangedError(logicalPath);
+    }
+
+    await fs.promises.mkdir(markerPath, { mode: 0o700 });
+    markerCreated = true;
+    await chmodPrivateDirectory(markerPath);
+
+    const verified = await readDirectoryLockSnapshot(rootPath);
+    if (
+      !verified ||
+      !sameFileIdentity(verified.rootStat, rootIdentity) ||
+      verified.entries.length !== 1 ||
+      verified.entries[0] !== markerName ||
+      !verified.markerStat ||
+      verified.owner.kind !== 'structured' ||
+      verified.owner.markerName !== markerName ||
+      verified.owner.pid !== options.pid ||
+      verified.owner.createdAt !== options.createdAt ||
+      verified.owner.hostnameDigest !== options.hostnameDigest ||
+      verified.owner.tokenDigest !== options.tokenDigest
+    ) {
+      throw ownershipChangedError(logicalPath);
+    }
+    return createOwnedDirectoryLock(
+      logicalPath,
+      options.token,
+      rootPath,
+      verified.rootStat,
+      markerName
+    );
+  } catch (error) {
+    await rollbackProvisionalDirectory(rootPath, markerName, rootIdentity, markerCreated);
+    throw error;
+  }
+}
+
+async function rollbackProvisionalDirectory(
+  rootPath: string,
+  markerName: string,
+  rootIdentity: fs.BigIntStats | undefined,
+  markerCreated: boolean
+): Promise<void> {
+  if (!rootIdentity) {
+    await fs.promises.rmdir(rootPath).catch(() => undefined);
+    return;
+  }
+  const current = await readDirectoryLockSnapshot(rootPath).catch(() => undefined);
+  if (!current || !sameFileIdentity(current.rootStat, rootIdentity)) {
+    return;
+  }
+  if (markerCreated && current.entries.length === 1 && current.entries[0] === markerName) {
+    await removeExpectedDirectory(rootPath, current).catch(() => undefined);
+    return;
+  }
+  if (!markerCreated && current.entries.length === 0) {
+    await fs.promises.rmdir(rootPath).catch(() => undefined);
+  }
+}
+
+async function recoverDirectoryOwner(
+  rootPath: string,
+  first: DirectoryLockSnapshot,
+  options: NormalizedLockOptions
+): Promise<boolean> {
+  if (first.owner.kind === 'structured') {
+    if (first.owner.hostnameDigest !== options.hostnameDigest) {
+      return false;
+    }
+    if (safeProbe(options.processLiveness, first.owner.pid) !== 'dead') {
+      return false;
+    }
+    return (await removeExpectedDirectory(rootPath, first)) === 'removed';
+  }
+
+  if (first.entries.length !== 0) {
+    return false;
+  }
+  const currentTime = readSafeTime(options.now);
+  if (BigInt(currentTime) - first.rootStat.mtimeMs < BigInt(options.malformedGraceMs)) {
+    return false;
+  }
+
+  await delay(options.retryDelayMs);
+  const second = await readDirectoryLockSnapshot(rootPath);
+  if (!second || !sameDirectorySnapshot(first, second)) {
+    return false;
+  }
+  return (await removeExpectedDirectory(rootPath, second)) === 'removed';
+}
+
+async function removeExpectedDirectory(
+  rootPath: string,
+  expected: DirectoryLockSnapshot
+): Promise<DirectoryRemovalResult> {
+  const preflight = await readDirectoryLockSnapshot(rootPath);
+  if (!preflight || !sameDirectorySnapshot(preflight, expected)) {
+    return 'changed';
+  }
+
+  if (preflight.entries.length === 0) {
+    try {
+      await fs.promises.rmdir(rootPath);
+      return 'removed';
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) {
+        return 'changed';
+      }
+      throw error;
+    }
+  }
+
+  if (
+    preflight.owner.kind !== 'structured' ||
+    preflight.entries.length !== 1 ||
+    preflight.entries[0] !== preflight.owner.markerName
+  ) {
+    return 'changed';
+  }
+
+  const markerName = preflight.owner.markerName;
+  try {
+    await fs.promises.rmdir(path.join(rootPath, markerName));
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) {
+      return 'changed';
+    }
+    throw error;
+  }
+
+  try {
+    await fs.promises.rmdir(rootPath);
+    return 'removed';
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) {
+      return 'removed';
+    }
+    await restoreRemovedMarker(rootPath, preflight.rootStat, markerName);
+    throw error;
+  }
+}
+
+async function restoreRemovedMarker(
+  rootPath: string,
+  expectedRoot: fs.BigIntStats,
+  markerName: string
+): Promise<void> {
+  const current = await readDirectoryLockSnapshot(rootPath).catch(() => undefined);
+  if (
+    !current ||
+    !sameFileIdentity(current.rootStat, expectedRoot) ||
+    current.entries.length !== 0
+  ) {
+    return;
+  }
+  const markerPath = path.join(rootPath, markerName);
+  try {
+    await fs.promises.mkdir(markerPath, { mode: 0o700 });
+    await chmodPrivateDirectory(markerPath);
+  } catch {
+    // The original removal error remains actionable; never overwrite a new entry.
+  }
+}
+
+async function readDirectoryLockSnapshot(
+  rootPath: string
+): Promise<DirectoryLockSnapshot | undefined> {
+  const rootBefore = await lstatOrUndefined(rootPath);
+  if (!rootBefore || !rootBefore.isDirectory()) {
+    return undefined;
+  }
+
+  let entries: string[];
+  try {
+    entries = (await fs.promises.readdir(rootPath)).sort();
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTDIR')) {
+      return undefined;
+    }
+    throw error;
+  }
+
+  const rootAfterEntries = await lstatOrUndefined(rootPath);
+  if (!rootAfterEntries || !sameSnapshotStat(rootBefore, rootAfterEntries)) {
+    return undefined;
+  }
+
+  if (entries.length !== 1) {
+    return {
+      rootStat: rootAfterEntries,
+      entries,
+      owner: { kind: 'malformed' },
+    };
+  }
+
+  const markerName = entries[0];
+  const markerPath = path.join(rootPath, markerName);
+  const markerBefore = await lstatOrUndefined(markerPath);
+  if (!markerBefore || !markerBefore.isDirectory()) {
+    return undefined;
+  }
+  let markerEntries: string[];
+  try {
+    markerEntries = (await fs.promises.readdir(markerPath)).sort();
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTDIR')) {
+      return undefined;
+    }
+    throw error;
+  }
+  const markerStat = await lstatOrUndefined(markerPath);
+  const rootAfterMarker = await lstatOrUndefined(rootPath);
+  if (
+    !markerStat ||
+    !markerStat.isDirectory() ||
+    !sameSnapshotStat(markerBefore, markerStat) ||
+    !rootAfterMarker ||
+    !sameSnapshotStat(rootAfterEntries, rootAfterMarker)
+  ) {
+    return undefined;
+  }
+
+  return {
+    rootStat: rootAfterMarker,
+    entries,
+    markerStat,
+    markerEntries,
+    owner: markerEntries.length === 0 ? parseDirectoryOwner(markerName) : { kind: 'malformed' },
+  };
+}
+
+function createOwnedDirectoryLock(
+  logicalPath: string,
+  token: string,
+  rootPath: string,
+  verifiedRoot: fs.BigIntStats,
+  markerName: string
+): OpenCodeCleanupLock {
+  let released = false;
+  return {
+    path: logicalPath,
+    token,
+    async release() {
+      if (released) {
+        return;
+      }
+      const current = await readDirectoryLockSnapshot(rootPath);
+      if (!current) {
+        released = true;
+        return;
+      }
+      if (
+        !sameFileIdentity(current.rootStat, verifiedRoot) ||
+        current.entries.length !== 1 ||
+        current.entries[0] !== markerName ||
+        current.owner.kind !== 'structured' ||
+        current.owner.markerName !== markerName
+      ) {
+        released = true;
+        return;
+      }
+      const result = await removeExpectedDirectory(rootPath, current);
+      released = result === 'removed' || result === 'changed';
+    },
+  };
+}
+
+async function readRecoverableLegacySnapshot(
+  lockPath: string,
+  options: NormalizedLockOptions
+): Promise<FileLockSnapshot | undefined> {
+  const first = await readFileLockSnapshot(lockPath);
+  if (!first || first.oversized) {
+    return undefined;
+  }
+  if (isImmediatelyRecoverableFileOwner(first, options)) {
+    return first;
+  }
+  if (first.owner.kind !== 'malformed') {
+    return undefined;
+  }
+
+  const currentTime = readSafeTime(options.now);
+  if (BigInt(currentTime) - first.stat.mtimeMs < BigInt(options.malformedGraceMs)) {
+    return undefined;
+  }
+  await delay(options.retryDelayMs);
+  const second = await readFileLockSnapshot(lockPath);
+  if (!second || second.oversized || !sameStrictFileSnapshot(first, second)) {
+    return undefined;
+  }
+  return second;
+}
+
+function isImmediatelyRecoverableFileOwner(
+  snapshot: FileLockSnapshot,
+  options: NormalizedLockOptions
+): boolean {
+  if (snapshot.oversized) {
+    return false;
+  }
+  if (snapshot.owner.kind === 'structured') {
+    return (
+      snapshot.owner.hostname === options.hostname &&
+      safeProbe(options.processLiveness, snapshot.owner.pid) === 'dead'
+    );
+  }
+  if (snapshot.owner.kind === 'legacy') {
+    return safeProbe(options.processLiveness, snapshot.owner.pid) === 'dead';
+  }
+  return (
+    BigInt(readSafeTime(options.now)) - snapshot.stat.mtimeMs >= BigInt(options.malformedGraceMs)
+  );
+}
+
+async function readFileLockSnapshot(lockPath: string): Promise<FileLockSnapshot | undefined> {
+  let handle: fs.promises.FileHandle;
+  try {
+    handle = await fs.promises.open(lockPath, 'r');
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'EISDIR')) {
+      return undefined;
+    }
+    throw error;
+  }
+
+  let snapshot: FileLockSnapshot | undefined;
   try {
     const statBefore = await handle.stat({ bigint: true });
     if (!statBefore.isFile()) {
@@ -372,7 +637,7 @@ async function readLockSnapshot(lockPath: string): Promise<LockSnapshot | undefi
     snapshot = {
       bytes,
       stat: statAfter,
-      owner: parseOwner(bytes, oversized),
+      owner: parseFileOwner(bytes, oversized),
       oversized,
     };
   } finally {
@@ -382,231 +647,82 @@ async function readLockSnapshot(lockPath: string): Promise<LockSnapshot | undefi
   if (!snapshot) {
     return undefined;
   }
-  let pathStat: fs.BigIntStats;
-  try {
-    pathStat = await fs.promises.lstat(lockPath, { bigint: true });
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) {
-      return undefined;
-    }
-    throw error;
-  }
-  if (!pathStat.isFile() || !sameFileIdentity(pathStat, snapshot.stat)) {
+  const pathStat = await lstatOrUndefined(lockPath);
+  if (!pathStat || !pathStat.isFile() || !sameFileIdentity(pathStat, snapshot.stat)) {
     return undefined;
   }
   return snapshot;
 }
 
-async function retireExpectedPath(
-  lockPath: string,
-  expected: LockSnapshot,
-  now: () => number
-): Promise<RetireResult> {
-  const preflight = await readLockSnapshot(lockPath);
-  if (!preflight || !sameStrictSnapshot(preflight, expected)) {
-    return 'changed';
+function parseFileOwner(bytes: Buffer, oversized: boolean): FileOwner {
+  if (oversized || bytes.length === 0) {
+    return { kind: 'malformed' };
   }
 
-  const quarantine = await createPrivateQuarantine(lockPath, now);
-  try {
-    await fs.promises.rename(lockPath, quarantine.entryPath);
-  } catch (error) {
-    await removeEmptyPrivateQuarantine(quarantine);
-    if (hasErrorCode(error, 'ENOENT')) {
-      return 'changed';
+  const text = bytes.toString('utf8');
+  if (/^[1-9]\d*\n$/.test(text)) {
+    const pid = Number(text.slice(0, -1));
+    if (Number.isSafeInteger(pid)) {
+      return { kind: 'legacy', pid };
     }
-    throw error;
+  }
+  if (bytes.at(-1) !== 0x0a) {
+    return { kind: 'malformed' };
   }
 
-  const moved = await readLockSnapshot(quarantine.entryPath);
-  if (moved && sameMovedSnapshot(moved, expected)) {
-    await removePrivateQuarantine(quarantine, moved, lockPath);
-    return 'retired';
-  }
-
-  await restoreQuarantineWithoutOverwrite(quarantine, lockPath, moved);
-  return 'changed';
-}
-
-async function createPrivateQuarantine(
-  lockPath: string,
-  now: () => number
-): Promise<QuarantineLocation> {
-  const directory = path.dirname(lockPath);
-  const basename = path.basename(lockPath);
-  const timestamp = readSafeTime(now);
-  const quarantineDirectory = await fs.promises.mkdtemp(
-    path.join(directory, `${basename}.quarantine-${process.pid}-${timestamp}-`)
-  );
   try {
-    await fs.promises.chmod(quarantineDirectory, 0o700);
-    const directoryStat = await fs.promises.stat(quarantineDirectory, { bigint: true });
-    if (!directoryStat.isDirectory()) {
-      throw new Error(`OpenCode cleanup lock quarantine is not a directory: ${lockPath}`);
+    const parsed: unknown = JSON.parse(text);
+    if (
+      !isRecord(parsed) ||
+      parsed.version !== OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION ||
+      !Number.isSafeInteger(parsed.pid) ||
+      (parsed.pid as number) <= 0 ||
+      typeof parsed.hostname !== 'string' ||
+      parsed.hostname.length === 0 ||
+      parsed.hostname.length > MAX_HOSTNAME_LENGTH ||
+      typeof parsed.token !== 'string' ||
+      parsed.token.length === 0 ||
+      parsed.token.length > MAX_TOKEN_LENGTH ||
+      !Number.isSafeInteger(parsed.createdAt) ||
+      (parsed.createdAt as number) < 0
+    ) {
+      return { kind: 'malformed' };
     }
     return {
-      directory: quarantineDirectory,
-      entryPath: path.join(quarantineDirectory, 'owner.lock'),
-      directoryStat,
+      kind: 'structured',
+      pid: parsed.pid as number,
+      hostname: parsed.hostname,
+      token: parsed.token,
+      createdAt: parsed.createdAt as number,
     };
-  } catch (error) {
-    await fs.promises.rmdir(quarantineDirectory).catch(() => undefined);
-    throw error;
+  } catch {
+    return { kind: 'malformed' };
   }
 }
 
-async function restoreQuarantineWithoutOverwrite(
-  quarantine: QuarantineLocation,
-  lockPath: string,
-  moved: LockSnapshot | undefined
-): Promise<void> {
-  if (!moved || moved.oversized) {
-    throw retainedEvidenceError(lockPath, quarantine.entryPath);
-  }
-
-  try {
-    await fs.promises.link(quarantine.entryPath, lockPath);
-  } catch (error) {
-    throw retainedEvidenceError(lockPath, quarantine.entryPath, error);
-  }
-
-  const [quarantineNow, restoredNow] = await Promise.all([
-    readLockSnapshot(quarantine.entryPath),
-    readLockSnapshot(lockPath),
-  ]);
-  if (
-    !quarantineNow ||
-    !restoredNow ||
-    !sameMovedSnapshot(quarantineNow, moved) ||
-    !sameMovedSnapshot(restoredNow, moved) ||
-    !sameFileIdentity(quarantineNow.stat, restoredNow.stat)
-  ) {
-    throw retainedEvidenceError(lockPath, quarantine.entryPath);
-  }
-
-  await removePrivateQuarantine(quarantine, moved, lockPath);
-}
-
-async function removeEmptyPrivateQuarantine(quarantine: QuarantineLocation): Promise<void> {
-  const current = await fs.promises.stat(quarantine.directory, { bigint: true }).catch((error) => {
-    if (hasErrorCode(error, 'ENOENT')) {
-      return undefined;
-    }
-    throw error;
-  });
-  if (!current) {
-    return;
-  }
-  if (!current.isDirectory() || !sameFileIdentity(current, quarantine.directoryStat)) {
-    throw new Error(`OpenCode cleanup lock quarantine identity changed: ${quarantine.directory}`);
-  }
-
-  const entries = await fs.promises.readdir(quarantine.directory);
-  if (entries.length !== 0) {
-    throw new Error(
-      `OpenCode cleanup lock quarantine is unexpectedly non-empty: ${quarantine.directory}`
-    );
-  }
-  await fs.promises.rmdir(quarantine.directory);
-}
-
-async function removePrivateQuarantine(
-  quarantine: QuarantineLocation,
-  expectedEntry: LockSnapshot,
-  lockPath: string
-): Promise<void> {
-  const [directoryStat, entry, entries] = await Promise.all([
-    fs.promises.stat(quarantine.directory, { bigint: true }),
-    readLockSnapshot(quarantine.entryPath),
-    fs.promises.readdir(quarantine.directory),
-  ]).catch((error) => {
-    throw retainedEvidenceError(lockPath, quarantine.entryPath, error);
-  });
-  if (
-    !directoryStat.isDirectory() ||
-    !sameFileIdentity(directoryStat, quarantine.directoryStat) ||
-    entries.length !== 1 ||
-    entries[0] !== path.basename(quarantine.entryPath) ||
-    !entry ||
-    !sameMovedSnapshot(entry, expectedEntry)
-  ) {
-    throw retainedEvidenceError(lockPath, quarantine.entryPath);
-  }
-
-  try {
-    await fs.promises.rm(quarantine.directory, { recursive: true, force: false });
-  } catch (error) {
-    throw retainedEvidenceError(lockPath, quarantine.entryPath, error);
-  }
-}
-
-function retainedEvidenceError(lockPath: string, quarantinePath: string, cause?: unknown): Error {
-  const detail = cause instanceof Error ? ` ${cause.message}` : '';
-  return new Error(
-    `Unable to restore quarantined OpenCode cleanup lock without overwriting ${lockPath}. ` +
-      `Evidence retained at ${quarantinePath}.${detail}`
+function sameDirectorySnapshot(left: DirectoryLockSnapshot, right: DirectoryLockSnapshot): boolean {
+  return (
+    sameSnapshotStat(left.rootStat, right.rootStat) &&
+    left.entries.length === right.entries.length &&
+    left.entries.every((entry, index) => entry === right.entries[index]) &&
+    ((!left.markerEntries && !right.markerEntries) ||
+      Boolean(
+        left.markerEntries &&
+        right.markerEntries &&
+        left.markerEntries.length === right.markerEntries.length &&
+        left.markerEntries.every((entry, index) => entry === right.markerEntries?.[index])
+      )) &&
+    ((!left.markerStat && !right.markerStat) ||
+      Boolean(
+        left.markerStat && right.markerStat && sameSnapshotStat(left.markerStat, right.markerStat)
+      ))
   );
 }
 
-function createOwnedLock(
-  lockPath: string,
-  token: string,
-  verified: LockSnapshot,
-  now: () => number
-): OpenCodeCleanupLock {
-  let released = false;
-  return {
-    path: lockPath,
-    token,
-    async release() {
-      if (released) {
-        return;
-      }
-
-      const current = await readLockSnapshot(lockPath);
-      if (
-        !current ||
-        current.oversized ||
-        current.owner.kind !== 'structured' ||
-        current.owner.token !== token ||
-        !sameStrictSnapshot(current, verified)
-      ) {
-        released = true;
-        return;
-      }
-      const retired = await retireExpectedPath(lockPath, current, now);
-      released = retired === 'retired' || retired === 'changed';
-    },
-  };
-}
-
-function safeProbe(
-  processLiveness: (pid: number) => ProcessLiveness,
-  pid: number
-): ProcessLiveness {
-  try {
-    const result = processLiveness(pid);
-    return result === 'alive' || result === 'dead' || result === 'unknown' ? result : 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
-
-function sameStrictSnapshot(left: LockSnapshot, right: LockSnapshot): boolean {
+function sameStrictFileSnapshot(left: FileLockSnapshot, right: FileLockSnapshot): boolean {
   return (
     left.bytes.equals(right.bytes) &&
     sameSnapshotStat(left.stat, right.stat) &&
-    left.oversized === right.oversized
-  );
-}
-
-function sameMovedSnapshot(left: LockSnapshot, right: LockSnapshot): boolean {
-  return (
-    left.bytes.equals(right.bytes) &&
-    sameFileIdentity(left.stat, right.stat) &&
-    left.stat.size === right.stat.size &&
-    left.stat.mode === right.stat.mode &&
-    left.stat.mtimeMs === right.stat.mtimeMs &&
     left.oversized === right.oversized
   );
 }
@@ -626,9 +742,66 @@ function sameSnapshotStat(left: fs.BigIntStats, right: fs.BigIntStats): boolean 
   );
 }
 
+async function lstatOrUndefined(target: string): Promise<fs.BigIntStats | undefined> {
+  try {
+    return await fs.promises.lstat(target, { bigint: true });
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT') || hasErrorCode(error, 'ENOTDIR')) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function chmodPrivateDirectory(target: string): Promise<void> {
+  try {
+    await fs.promises.chmod(target, 0o700);
+  } catch (error) {
+    if (
+      process.platform === 'win32' &&
+      (hasErrorCode(error, 'EINVAL') ||
+        hasErrorCode(error, 'ENOSYS') ||
+        hasErrorCode(error, 'EPERM'))
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function digestOwnerField(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('base64url');
+}
+
+function readSafeTime(now: () => number): number {
+  const value = now();
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error('OpenCode cleanup lock creation time must be a non-negative safe integer.');
+  }
+  return value;
+}
+
+function safeProbe(
+  processLiveness: (pid: number) => ProcessLiveness,
+  pid: number
+): ProcessLiveness {
+  try {
+    const result = processLiveness(pid);
+    return result === 'alive' || result === 'dead' || result === 'unknown' ? result : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 function busyLockError(lockPath: string, attempts: number): Error {
   return new Error(
     `OpenCode config cleanup lock is still busy after ${attempts} attempts: ${lockPath}`
+  );
+}
+
+function ownershipChangedError(lockPath: string): Error {
+  return new Error(
+    `OpenCode config cleanup lock ownership changed before verification: ${lockPath}`
   );
 }
 

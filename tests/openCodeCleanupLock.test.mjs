@@ -20,7 +20,7 @@ function lockFixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-cleanup-lock-'));
   const lockPath = path.join(directory, 'opencode.json.agents-gui-native-cli.lock');
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  return { directory, lockPath };
+  return { directory, lockPath, sidecarPath: `${lockPath}.v2` };
 }
 
 function withProcessKill(replacement, callback) {
@@ -33,7 +33,7 @@ function withProcessKill(replacement, callback) {
   }
 }
 
-function structuredOwnerBytes({
+function structuredFileOwner({
   pid = 4321,
   hostname = 'test-host',
   token = 'existing-owner',
@@ -62,8 +62,13 @@ function acquisitionOptions(overrides = {}) {
   };
 }
 
-function quarantineArtifacts(directory) {
-  return fs.readdirSync(directory).filter((name) => name.includes('quarantine'));
+function directoryOwnerNames(lockPath) {
+  return fs.readdirSync(lockPath);
+}
+
+function statIdentity(target) {
+  const stat = fs.lstatSync(target, { bigint: true });
+  return { dev: stat.dev, ino: stat.ino };
 }
 
 test('process liveness maps success, EPERM, ESRCH, and unknown failures safely', () => {
@@ -97,33 +102,35 @@ test('process liveness maps success, EPERM, ESRCH, and unknown failures safely',
   );
 });
 
-test('acquisition writes and verifies a bounded owner record with private permissions', async (t) => {
+test('acquisition publishes one bounded path-safe owner directory and blocks legacy wx', async (t) => {
   const { lockPath } = lockFixture(t);
   const lock = await acquireOpenCodeCleanupLock(lockPath, {
     pid: 4321,
-    hostname: 'test-host',
-    tokenFactory: () => 'owner-token',
+    hostname: 'host/with/separators',
+    tokenFactory: () => '../owner/token',
     now: () => 123_456,
     retryAttempts: 1,
     retryDelayMs: 0,
   });
 
   try {
-    const bytes = fs.readFileSync(lockPath);
-    assert.equal(bytes.length <= 4_096, true);
-    assert.equal(bytes.at(-1), 0x0a);
-    assert.deepEqual(JSON.parse(bytes.toString('utf8')), {
-      version: OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION,
-      pid: 4321,
-      hostname: 'test-host',
-      token: 'owner-token',
-      createdAt: 123_456,
-    });
+    assert.equal(fs.lstatSync(lockPath).isDirectory(), true);
+    const names = directoryOwnerNames(lockPath);
+    assert.equal(names.length, 1);
+    assert.match(
+      names[0],
+      /^owner-v1-[1-9]\d*-(?:0|[1-9]\d*)-[A-Za-z0-9_-]{43}-[A-Za-z0-9_-]{43}$/
+    );
+    assert.equal(Buffer.byteLength(names[0]) < 255, true);
+    assert.equal(names[0].includes('host/with/separators'), false);
+    assert.equal(names[0].includes('../owner/token'), false);
+    assert.equal(fs.lstatSync(path.join(lockPath, names[0])).isDirectory(), true);
     assert.equal(lock.path, lockPath);
-    assert.equal(lock.token, 'owner-token');
+    assert.equal(lock.token, '../owner/token');
     if (process.platform !== 'win32') {
-      assert.equal(fs.statSync(lockPath).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(lockPath).mode & 0o777, 0o700);
     }
+    await assert.rejects(fs.promises.open(lockPath, 'wx', 0o600), /EEXIST/);
     assert.equal(OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS, 300_000);
   } finally {
     await lock.release();
@@ -158,98 +165,89 @@ test('acquisition rejects invalid bounded owner fields without creating a lock',
   assert.equal(fs.existsSync(lockPath), false);
 });
 
-test('a live owner stays byte- and identity-stable while a contender exhausts retries', async (t) => {
+test('a live directory owner stays identity-stable while a contender exhausts retries', async (t) => {
   const { lockPath } = lockFixture(t);
   const owner = await acquireOpenCodeCleanupLock(lockPath, {
+    ...acquisitionOptions(),
     pid: 1001,
-    hostname: 'same-host',
     tokenFactory: () => 'first-owner',
-    now: () => 1_000,
-    retryAttempts: 1,
-    retryDelayMs: 0,
   });
-  const beforeBytes = fs.readFileSync(lockPath);
-  const beforeStat = fs.statSync(lockPath);
+  const beforeIdentity = statIdentity(lockPath);
+  const beforeNames = directoryOwnerNames(lockPath);
   const observedPids = [];
 
   try {
     await assert.rejects(
       acquireOpenCodeCleanupLock(lockPath, {
+        ...acquisitionOptions(),
         pid: 1002,
-        hostname: 'same-host',
         tokenFactory: () => 'second-owner',
-        now: () => 2_000,
         processLiveness(pid) {
           observedPids.push(pid);
           return 'alive';
         },
         retryAttempts: 2,
-        retryDelayMs: 0,
       }),
       /OpenCode config cleanup lock.*busy.*2 attempts/i
     );
-
     assert.deepEqual(observedPids, [1001, 1001]);
-    assert.deepEqual(fs.readFileSync(lockPath), beforeBytes);
-    const afterStat = fs.statSync(lockPath);
-    assert.equal(afterStat.dev, beforeStat.dev);
-    assert.equal(afterStat.ino, beforeStat.ino);
+    assert.deepEqual(statIdentity(lockPath), beforeIdentity);
+    assert.deepEqual(directoryOwnerNames(lockPath), beforeNames);
   } finally {
     await owner.release();
   }
 });
 
-test('a different-host owner is unknown and is never probed or changed', async (t) => {
-  const { lockPath } = lockFixture(t);
-  const bytes = Buffer.from(
-    `${JSON.stringify({
-      version: OPEN_CODE_CLEANUP_LOCK_RECORD_VERSION,
-      pid: 4321,
-      hostname: 'remote-host',
-      token: 'remote-owner',
-      createdAt: 1_000,
-    })}\n`
-  );
-  fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
-  const beforeStat = fs.statSync(lockPath);
-
-  await assert.rejects(
-    acquireOpenCodeCleanupLock(lockPath, {
-      pid: 1002,
-      hostname: 'local-host',
-      tokenFactory: () => 'local-owner',
-      now: () => 2_000,
-      processLiveness() {
-        throw new Error('different-host owners must not be probed');
+test('different-host and unknown directory owners are never recovered', async (t) => {
+  const { directory } = lockFixture(t);
+  const cases = [
+    [
+      'different-host',
+      'remote-host',
+      () => {
+        throw new Error('must not probe');
       },
-      retryAttempts: 1,
-      retryDelayMs: 0,
-    }),
-    /OpenCode config cleanup lock.*busy.*1 attempt/i
-  );
+    ],
+    ['unknown', 'test-host', () => 'unknown'],
+  ];
 
-  assert.deepEqual(fs.readFileSync(lockPath), bytes);
-  const afterStat = fs.statSync(lockPath);
-  assert.equal(afterStat.dev, beforeStat.dev);
-  assert.equal(afterStat.ino, beforeStat.ino);
+  for (const [name, hostname, processLiveness] of cases) {
+    const lockPath = path.join(directory, `${name}.lock`);
+    const owner = await acquireOpenCodeCleanupLock(lockPath, {
+      ...acquisitionOptions(),
+      pid: 4321,
+      hostname,
+      tokenFactory: () => `${name}-owner`,
+      retryAttempts: 1,
+    });
+    const before = statIdentity(lockPath);
+    try {
+      await assert.rejects(
+        acquireOpenCodeCleanupLock(lockPath, {
+          ...acquisitionOptions(),
+          tokenFactory: () => `${name}-contender`,
+          processLiveness,
+          retryAttempts: 2,
+        }),
+        /busy/i
+      );
+      assert.deepEqual(statIdentity(lockPath), before);
+    } finally {
+      await owner.release();
+    }
+  }
 });
 
-test('a same-host structured dead owner is quarantined and replaced', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  fs.writeFileSync(
-    lockPath,
-    structuredOwnerBytes({ token: '../existing-owner', hostname: 'test-host' }),
-    { mode: 0o600 }
-  );
-  const observedPids = [];
-  const originalRename = fs.promises.rename.bind(fs.promises);
-  let quarantinePath;
-  t.mock.method(fs.promises, 'rename', async (source, destination) => {
-    if (source === lockPath) {
-      quarantinePath = String(destination);
-    }
-    return originalRename(source, destination);
+test('a same-host dead directory owner is recovered without rename or unlink', async (t) => {
+  const { lockPath } = lockFixture(t);
+  const abandoned = await acquireOpenCodeCleanupLock(lockPath, {
+    ...acquisitionOptions(),
+    pid: 4321,
+    tokenFactory: () => 'abandoned-owner',
+    retryAttempts: 1,
   });
+  const oldIdentity = statIdentity(lockPath);
+  const observedPids = [];
 
   const lock = await acquireOpenCodeCleanupLock(
     lockPath,
@@ -260,196 +258,49 @@ test('a same-host structured dead owner is quarantined and replaced', async (t) 
       },
     })
   );
-
   try {
     assert.deepEqual(observedPids, [4321]);
-    assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'new-owner');
-    assert.equal(path.dirname(path.dirname(quarantinePath)), directory);
-    assert.equal(path.basename(path.dirname(quarantinePath)).includes('quarantine'), true);
-    assert.equal(path.basename(quarantinePath).includes('existing-owner'), false);
-    assert.equal(path.basename(quarantinePath).includes('test-host'), false);
-    assert.deepEqual(quarantineArtifacts(directory), []);
+    assert.notDeepEqual(statIdentity(lockPath), oldIdentity);
+    assert.equal(directoryOwnerNames(lockPath).length, 1);
   } finally {
     await lock.release();
+    await abandoned.release();
   }
 });
 
-test('quarantine allocation uses an atomic private directory rather than a racy sibling target', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  fs.writeFileSync(lockPath, structuredOwnerBytes(), { mode: 0o600 });
-  const collisionBytes = Buffer.from('must-not-be-overwritten');
-  const originalLstat = fs.promises.lstat.bind(fs.promises);
-  let siblingCollisionInjected = false;
-
-  t.mock.method(fs.promises, 'lstat', async (target, ...rest) => {
-    const targetPath = String(target);
-    if (
-      !siblingCollisionInjected &&
-      path.dirname(targetPath) === directory &&
-      path.basename(targetPath).includes('quarantine')
-    ) {
-      siblingCollisionInjected = true;
-      fs.writeFileSync(targetPath, collisionBytes, { mode: 0o600 });
-      throw Object.assign(new Error('simulated stale ENOENT result'), { code: 'ENOENT' });
-    }
-    return originalLstat(target, ...rest);
-  });
-
-  const lock = await acquireOpenCodeCleanupLock(
-    lockPath,
-    acquisitionOptions({ processLiveness: () => 'dead' })
-  );
-  try {
-    assert.equal(
-      siblingCollisionInjected,
-      false,
-      'allocation must not perform lstat-then-rename against a shared sibling path'
-    );
-  } finally {
-    await lock.release();
-  }
-});
-
-test('verified quarantine cleanup cannot unlink a path entry replaced after verification', async (t) => {
+test('fresh empty directory locks remain protected before the exact grace boundary', async (t) => {
   const { lockPath } = lockFixture(t);
-  fs.writeFileSync(lockPath, structuredOwnerBytes(), { mode: 0o600 });
-  const replacementBytes = Buffer.from('replacement quarantine evidence');
-  const originalUnlink = fs.promises.unlink.bind(fs.promises);
-  let quarantineUnlinkInjected = false;
-
-  t.mock.method(fs.promises, 'unlink', async (target) => {
-    const targetPath = String(target);
-    if (!quarantineUnlinkInjected && targetPath.includes('quarantine')) {
-      quarantineUnlinkInjected = true;
-      const parked = `${targetPath}.verified-owner`;
-      fs.renameSync(targetPath, parked);
-      fs.writeFileSync(targetPath, replacementBytes, { mode: 0o600 });
-    }
-    return originalUnlink(target);
-  });
-
-  const lock = await acquireOpenCodeCleanupLock(
-    lockPath,
-    acquisitionOptions({ processLiveness: () => 'dead' })
-  );
-  try {
-    assert.equal(
-      quarantineUnlinkInjected,
-      false,
-      'verified quarantine entries must be removed through their private namespace'
-    );
-  } finally {
-    await lock.release();
-  }
-});
-
-test('lock identity uses bigint file metadata for acquisition and release decisions', () => {
-  assert.match(cleanupLockSource, /\.stat\(\{\s*bigint:\s*true\s*\}\)/);
-  assert.match(cleanupLockSource, /\.lstat\([^,\n]+,\s*\{\s*bigint:\s*true\s*\}\)/);
-  assert.match(cleanupLockSource, /\bfs\.BigIntStats\b/);
-});
-
-test('same-host unknown structured and legacy owners are never removed', async (t) => {
-  const { directory } = lockFixture(t);
-  const cases = [
-    ['structured-unknown', structuredOwnerBytes(), () => 'unknown'],
-    [
-      'legacy-probe-error',
-      Buffer.from('4321\n'),
-      () => {
-        throw new Error('probe failed');
-      },
-    ],
-  ];
-
-  for (const [name, bytes, processLiveness] of cases) {
-    const lockPath = path.join(directory, `${name}.lock`);
-    fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
-    const beforeStat = fs.statSync(lockPath);
-
-    await assert.rejects(
-      acquireOpenCodeCleanupLock(
-        lockPath,
-        acquisitionOptions({
-          tokenFactory: () => `${name}-contender`,
-          processLiveness,
-          retryAttempts: 2,
-        })
-      ),
-      /busy/i
-    );
-
-    assert.deepEqual(fs.readFileSync(lockPath), bytes);
-    const afterStat = fs.statSync(lockPath);
-    assert.equal(afterStat.dev, beforeStat.dev);
-    assert.equal(afterStat.ino, beforeStat.ino);
-  }
-});
-
-test('a legacy dead PID lock is recovered without leaving quarantine artifacts', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  fs.writeFileSync(lockPath, '4321\n', { mode: 0o600 });
-
-  const lock = await acquireOpenCodeCleanupLock(
-    lockPath,
-    acquisitionOptions({
-      processLiveness(pid) {
-        assert.equal(pid, 4321);
-        return 'dead';
-      },
-    })
-  );
-
-  try {
-    assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'new-owner');
-    assert.deepEqual(quarantineArtifacts(directory), []);
-  } finally {
-    await lock.release();
-  }
-});
-
-test('fresh empty and malformed locks remain protected before the exact grace boundary', async (t) => {
-  const { directory } = lockFixture(t);
-
-  for (const [name, bytes] of [
-    ['empty', Buffer.alloc(0)],
-    ['malformed', Buffer.from('{not-json}\n')],
-  ]) {
-    const lockPath = path.join(directory, `${name}.lock`);
-    fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
-    const beforeStat = fs.statSync(lockPath);
-
-    await assert.rejects(
-      acquireOpenCodeCleanupLock(
-        lockPath,
-        acquisitionOptions({
-          tokenFactory: () => `${name}-contender`,
-          now: () => Math.floor(beforeStat.mtimeMs) + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS - 1,
-          retryAttempts: 2,
-        })
-      ),
-      /busy/i
-    );
-
-    assert.deepEqual(fs.readFileSync(lockPath), bytes);
-    const afterStat = fs.statSync(lockPath);
-    assert.equal(afterStat.dev, beforeStat.dev);
-    assert.equal(afterStat.ino, beforeStat.ino);
-  }
-});
-
-test('an unchanged malformed lock is recoverable at the exact grace boundary after two snapshots', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  fs.writeFileSync(lockPath, '{not-json}\n', { mode: 0o600 });
+  fs.mkdirSync(lockPath, { mode: 0o700 });
   const oldMtime = 1_000;
   fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
-  let lockReads = 0;
-  const originalOpen = fs.promises.open.bind(fs.promises);
-  t.mock.method(fs.promises, 'open', async (target, flags, ...rest) => {
-    if (target === lockPath && flags === 'r') {
-      lockReads += 1;
+  const before = statIdentity(lockPath);
+
+  await assert.rejects(
+    acquireOpenCodeCleanupLock(
+      lockPath,
+      acquisitionOptions({
+        now: () => oldMtime + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS - 1,
+        retryAttempts: 2,
+      })
+    ),
+    /busy/i
+  );
+  assert.deepEqual(statIdentity(lockPath), before);
+  assert.deepEqual(directoryOwnerNames(lockPath), []);
+});
+
+test('an unchanged empty directory is recoverable at the exact grace boundary after two snapshots', async (t) => {
+  const { lockPath } = lockFixture(t);
+  fs.mkdirSync(lockPath, { mode: 0o700 });
+  const oldMtime = 1_000;
+  fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
+  let reads = 0;
+  const originalLstat = fs.promises.lstat.bind(fs.promises);
+  t.mock.method(fs.promises, 'lstat', async (target, ...rest) => {
+    if (target === lockPath) {
+      reads += 1;
     }
-    return originalOpen(target, flags, ...rest);
+    return originalLstat(target, ...rest);
   });
 
   const lock = await acquireOpenCodeCleanupLock(
@@ -459,23 +310,20 @@ test('an unchanged malformed lock is recoverable at the exact grace boundary aft
       retryDelayMs: 1,
     })
   );
-
   try {
-    assert.equal(lockReads >= 3, true);
-    assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'new-owner');
-    assert.deepEqual(quarantineArtifacts(directory), []);
+    assert.equal(reads >= 4, true);
+    assert.equal(directoryOwnerNames(lockPath).length, 1);
   } finally {
     await lock.release();
   }
 });
 
-test('an oversized old lock fails closed and is never recovered from a bounded prefix', async (t) => {
+test('aged invalid or non-empty malformed directory locks fail closed', async (t) => {
   const { lockPath } = lockFixture(t);
-  const bytes = Buffer.alloc(4_097, 0x61);
-  fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+  fs.mkdirSync(lockPath, { mode: 0o700 });
+  fs.mkdirSync(path.join(lockPath, 'not-a-canonical-owner'), { mode: 0o700 });
   const oldMtime = 1_000;
   fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
-  const beforeStat = fs.statSync(lockPath);
 
   await assert.rejects(
     acquireOpenCodeCleanupLock(
@@ -487,270 +335,328 @@ test('an oversized old lock fails closed and is never recovered from a bounded p
     ),
     /busy/i
   );
-
-  assert.deepEqual(fs.readFileSync(lockPath), bytes);
-  const afterStat = fs.statSync(lockPath);
-  assert.equal(afterStat.dev, beforeStat.dev);
-  assert.equal(afterStat.ino, beforeStat.ino);
+  assert.deepEqual(directoryOwnerNames(lockPath), ['not-a-canonical-owner']);
 });
 
-test('a malformed candidate changing between observations leaves its replacement untouched', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const originalBytes = Buffer.from('{old-malformed}\n');
-  const replacementBytes = structuredOwnerBytes({
-    hostname: 'remote-host',
-    token: 'remote-replacement',
+test('a non-empty canonical owner marker is never removed during dead-owner recovery', async (t) => {
+  const { lockPath } = lockFixture(t);
+  const abandoned = await acquireOpenCodeCleanupLock(lockPath, {
+    ...acquisitionOptions(),
+    pid: 4321,
+    tokenFactory: () => 'abandoned-owner',
+    retryAttempts: 1,
   });
-  fs.writeFileSync(lockPath, originalBytes, { mode: 0o600 });
-  const oldMtime = 1_000;
-  fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
-  const displacedPath = path.join(directory, 'displaced-malformed.lock');
-  let reads = 0;
-  const originalOpen = fs.promises.open.bind(fs.promises);
-  t.mock.method(fs.promises, 'open', async (target, flags, ...rest) => {
-    if (target === lockPath && flags === 'r') {
-      reads += 1;
-      if (reads === 2) {
-        fs.renameSync(lockPath, displacedPath);
-        fs.writeFileSync(lockPath, replacementBytes, { mode: 0o600 });
+  const ownerName = directoryOwnerNames(lockPath)[0];
+  const evidencePath = path.join(lockPath, ownerName, 'evidence');
+  fs.writeFileSync(evidencePath, 'preserve');
+
+  await assert.rejects(
+    acquireOpenCodeCleanupLock(
+      lockPath,
+      acquisitionOptions({ processLiveness: () => 'dead', retryAttempts: 1 })
+    ),
+    /ENOTEMPTY|not empty|busy/i
+  );
+  assert.equal(fs.readFileSync(evidencePath, 'utf8'), 'preserve');
+
+  fs.rmSync(evidencePath);
+  await abandoned.release();
+});
+
+test('release preserves a replacement directory installed before release', async (t) => {
+  const { directory, lockPath } = lockFixture(t);
+  const displacedPath = path.join(directory, 'displaced-owner.lock');
+  const owner = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
+  fs.renameSync(lockPath, displacedPath);
+  const replacement = await acquireOpenCodeCleanupLock(lockPath, {
+    ...acquisitionOptions(),
+    pid: 9002,
+    tokenFactory: () => 'replacement-owner',
+  });
+  const replacementIdentity = statIdentity(lockPath);
+
+  await owner.release();
+  assert.deepEqual(statIdentity(lockPath), replacementIdentity);
+  await replacement.release();
+  assert.equal(fs.existsSync(displacedPath), true);
+});
+
+test('release remains retryable after transient owner-directory removal failure', async (t) => {
+  const { lockPath } = lockFixture(t);
+  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
+  const ownerName = directoryOwnerNames(lockPath)[0];
+  const ownerPath = path.join(lockPath, ownerName);
+  const originalRmdir = fs.promises.rmdir.bind(fs.promises);
+  let calls = 0;
+  t.mock.method(fs.promises, 'rmdir', async (target, ...rest) => {
+    if (target === ownerPath) {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error('transient antivirus lock'), { code: 'EACCES' });
       }
     }
-    return originalOpen(target, flags, ...rest);
+    return originalRmdir(target, ...rest);
   });
+
+  await assert.rejects(lock.release(), /antivirus|EACCES/i);
+  assert.equal(fs.existsSync(ownerPath), true);
+  await lock.release();
+  assert.equal(calls, 2);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('release restores its owner marker when root removal fails and remains retryable', async (t) => {
+  const { lockPath } = lockFixture(t);
+  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
+  const ownerName = directoryOwnerNames(lockPath)[0];
+  const originalRmdir = fs.promises.rmdir.bind(fs.promises);
+  let rootCalls = 0;
+  t.mock.method(fs.promises, 'rmdir', async (target, ...rest) => {
+    if (target === lockPath) {
+      rootCalls += 1;
+      if (rootCalls === 1) {
+        throw Object.assign(new Error('transient root handle'), { code: 'EACCES' });
+      }
+    }
+    return originalRmdir(target, ...rest);
+  });
+
+  await assert.rejects(lock.release(), /root handle|EACCES/i);
+  assert.deepEqual(directoryOwnerNames(lockPath), [ownerName]);
+  await lock.release();
+  assert.equal(rootCalls, 2);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('non-recursive root removal cannot delete a replacement winner with evidence', async (t) => {
+  const { directory, lockPath } = lockFixture(t);
+  const displacedPath = path.join(directory, 'displaced-empty-root');
+  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
+  const winnerMarker = 'winner-evidence';
+  const originalRmdir = fs.promises.rmdir.bind(fs.promises);
+  let injected = false;
+  t.mock.method(fs.promises, 'rmdir', async (target, ...rest) => {
+    if (!injected && target === lockPath) {
+      injected = true;
+      fs.renameSync(lockPath, displacedPath);
+      fs.mkdirSync(lockPath, { mode: 0o700 });
+      fs.mkdirSync(path.join(lockPath, winnerMarker), { mode: 0o700 });
+    }
+    return originalRmdir(target, ...rest);
+  });
+
+  await assert.rejects(lock.release(), /ENOTEMPTY|not empty|ownership|identity/i);
+  assert.equal(injected, true);
+  assert.deepEqual(directoryOwnerNames(lockPath), [winnerMarker]);
+  assert.equal(fs.existsSync(displacedPath), true);
+});
+
+test('directory lock source uses only atomic mkdir and non-recursive rmdir mutations', () => {
+  assert.match(cleanupLockSource, /fs\.promises\.mkdir\(/);
+  assert.match(cleanupLockSource, /fs\.promises\.rmdir\(/);
+  assert.doesNotMatch(cleanupLockSource, /fs\.promises\.(?:rename|unlink|rm)\(/);
+  assert.doesNotMatch(cleanupLockSource, /quarantine/i);
+  assert.match(cleanupLockSource, /\.lstat\([^,\n]+,\s*\{\s*bigint:\s*true\s*\}\)/);
+  assert.match(cleanupLockSource, /\bfs\.BigIntStats\b/);
+});
+
+test('dead structured and PID-only legacy files remain poison pills while a v2 sidecar owns cleanup', async (t) => {
+  const { directory } = lockFixture(t);
+  const cases = [
+    ['structured', structuredFileOwner()],
+    ['pid-only', Buffer.from('4321\n')],
+  ];
+
+  for (const [name, bytes] of cases) {
+    const lockPath = path.join(directory, `${name}.lock`);
+    const sidecarPath = `${lockPath}.v2`;
+    fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+    const before = statIdentity(lockPath);
+
+    const lock = await acquireOpenCodeCleanupLock(
+      lockPath,
+      acquisitionOptions({
+        tokenFactory: () => `${name}-successor`,
+        processLiveness(pid) {
+          assert.equal(pid, 4321);
+          return 'dead';
+        },
+      })
+    );
+    try {
+      assert.equal(lock.path, lockPath);
+      assert.deepEqual(fs.readFileSync(lockPath), bytes);
+      assert.deepEqual(statIdentity(lockPath), before);
+      assert.equal(fs.lstatSync(sidecarPath).isDirectory(), true);
+      assert.equal(directoryOwnerNames(sidecarPath).length, 1);
+    } finally {
+      await lock.release();
+    }
+    assert.deepEqual(fs.readFileSync(lockPath), bytes);
+    assert.deepEqual(statIdentity(lockPath), before);
+    assert.equal(fs.existsSync(sidecarPath), false);
+  }
+});
+
+test('live, unknown, and different-host legacy file owners fail closed without a sidecar', async (t) => {
+  const { directory } = lockFixture(t);
+  const cases = [
+    ['live', structuredFileOwner(), () => 'alive'],
+    ['unknown', structuredFileOwner(), () => 'unknown'],
+    [
+      'different-host',
+      structuredFileOwner({ hostname: 'remote-host' }),
+      () => {
+        throw new Error('remote owner must not be probed');
+      },
+    ],
+  ];
+
+  for (const [name, bytes, processLiveness] of cases) {
+    const lockPath = path.join(directory, `${name}.lock`);
+    fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+    const before = statIdentity(lockPath);
+    await assert.rejects(
+      acquireOpenCodeCleanupLock(
+        lockPath,
+        acquisitionOptions({ processLiveness, retryAttempts: 2 })
+      ),
+      /busy/i
+    );
+    assert.deepEqual(fs.readFileSync(lockPath), bytes);
+    assert.deepEqual(statIdentity(lockPath), before);
+    assert.equal(fs.existsSync(`${lockPath}.v2`), false);
+  }
+});
+
+test('fresh malformed legacy files remain protected before the exact grace boundary', async (t) => {
+  const { lockPath, sidecarPath } = lockFixture(t);
+  const bytes = Buffer.from('{not-json}\n');
+  fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+  const oldMtime = 1_000;
+  fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
+
+  await assert.rejects(
+    acquireOpenCodeCleanupLock(
+      lockPath,
+      acquisitionOptions({
+        now: () => oldMtime + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS - 1,
+        retryAttempts: 2,
+      })
+    ),
+    /busy/i
+  );
+  assert.deepEqual(fs.readFileSync(lockPath), bytes);
+  assert.equal(fs.existsSync(sidecarPath), false);
+});
+
+test('an unchanged malformed legacy file is fenced by a sidecar at the exact grace boundary', async (t) => {
+  const { lockPath, sidecarPath } = lockFixture(t);
+  const bytes = Buffer.from('{not-json}\n');
+  fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+  const oldMtime = 1_000;
+  fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
+  const before = statIdentity(lockPath);
+
+  const lock = await acquireOpenCodeCleanupLock(
+    lockPath,
+    acquisitionOptions({
+      now: () => oldMtime + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS,
+      retryDelayMs: 1,
+    })
+  );
+  try {
+    assert.deepEqual(fs.readFileSync(lockPath), bytes);
+    assert.deepEqual(statIdentity(lockPath), before);
+    assert.equal(fs.lstatSync(sidecarPath).isDirectory(), true);
+  } finally {
+    await lock.release();
+  }
+  assert.equal(fs.existsSync(sidecarPath), false);
+});
+
+test('oversized legacy files fail closed and never create a sidecar', async (t) => {
+  const { lockPath, sidecarPath } = lockFixture(t);
+  const bytes = Buffer.alloc(4_097, 0x61);
+  fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+  const oldMtime = 1_000;
+  fs.utimesSync(lockPath, oldMtime / 1_000, oldMtime / 1_000);
 
   await assert.rejects(
     acquireOpenCodeCleanupLock(
       lockPath,
       acquisitionOptions({
         now: () => oldMtime + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS,
-        retryAttempts: 3,
+        retryAttempts: 2,
       })
     ),
     /busy/i
   );
-
-  assert.deepEqual(fs.readFileSync(lockPath), replacementBytes);
-  assert.deepEqual(fs.readFileSync(displacedPath), originalBytes);
-  assert.deepEqual(quarantineArtifacts(directory), []);
+  assert.deepEqual(fs.readFileSync(lockPath), bytes);
+  assert.equal(fs.existsSync(sidecarPath), false);
 });
 
-test('an acquirer whose provisional file is displaced never returns ownership', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const displacedPath = path.join(directory, 'displaced-provisional.lock');
-  const replacementBytes = structuredOwnerBytes({
+test('a legacy poison pill changing after sidecar acquisition never returns ownership', async (t) => {
+  const { lockPath, sidecarPath } = lockFixture(t);
+  const originalBytes = structuredFileOwner();
+  const replacementBytes = structuredFileOwner({
     hostname: 'remote-host',
     token: 'replacement-owner',
   });
-  const originalOpen = fs.promises.open.bind(fs.promises);
-  let displaced = false;
-  t.mock.method(fs.promises, 'open', async (target, flags, ...rest) => {
-    if (!displaced && target === lockPath && flags === 'r') {
-      displaced = true;
-      fs.renameSync(lockPath, displacedPath);
-      fs.writeFileSync(lockPath, replacementBytes, { mode: 0o600 });
-    }
-    return originalOpen(target, flags, ...rest);
-  });
-
-  await assert.rejects(
-    acquireOpenCodeCleanupLock(lockPath, acquisitionOptions({ retryAttempts: 1 })),
-    /ownership changed/i
-  );
-
-  assert.deepEqual(fs.readFileSync(lockPath), replacementBytes);
-  assert.equal(fs.existsSync(displacedPath), true);
-});
-
-test('release preserves a replacement installed before release', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const displacedPath = path.join(directory, 'released-owner.lock');
-  const replacementBytes = structuredOwnerBytes({
-    hostname: 'replacement-host',
-    token: 'replacement-owner',
-  });
-  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
-
-  fs.renameSync(lockPath, displacedPath);
-  fs.writeFileSync(lockPath, replacementBytes, { mode: 0o600 });
-  await lock.release();
-
-  assert.deepEqual(fs.readFileSync(lockPath), replacementBytes);
-  assert.equal(fs.existsSync(displacedPath), true);
-});
-
-test('release preserves identical owner bytes when the file identity was replaced', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const displacedPath = path.join(directory, 'same-bytes-old-owner.lock');
-  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
-  const ownerBytes = fs.readFileSync(lockPath);
-
-  fs.renameSync(lockPath, displacedPath);
-  fs.writeFileSync(lockPath, ownerBytes, { mode: 0o600 });
-  const replacementStat = fs.statSync(lockPath);
-  await lock.release();
-
-  assert.deepEqual(fs.readFileSync(lockPath), ownerBytes);
-  const afterStat = fs.statSync(lockPath);
-  assert.equal(afterStat.dev, replacementStat.dev);
-  assert.equal(afterStat.ino, replacementStat.ino);
-});
-
-test('release cannot unlink a replacement introduced after its final path check', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const displacedPath = path.join(directory, 'release-race-owner.lock');
-  const replacementBytes = structuredOwnerBytes({
-    hostname: 'replacement-host',
-    token: 'release-race-replacement',
-  });
-  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
-  const originalUnlink = fs.promises.unlink.bind(fs.promises);
+  fs.writeFileSync(lockPath, originalBytes, { mode: 0o600 });
+  const displacedPath = `${lockPath}.displaced`;
+  const originalMkdir = fs.promises.mkdir.bind(fs.promises);
   let injected = false;
-  t.mock.method(fs.promises, 'unlink', async (target) => {
-    if (!injected && target === lockPath) {
+  t.mock.method(fs.promises, 'mkdir', async (target, ...rest) => {
+    const result = await originalMkdir(target, ...rest);
+    if (!injected && target === sidecarPath) {
       injected = true;
       fs.renameSync(lockPath, displacedPath);
       fs.writeFileSync(lockPath, replacementBytes, { mode: 0o600 });
     }
-    return originalUnlink(target);
-  });
-
-  await lock.release();
-
-  assert.equal(injected, false, 'release must unlink only a verified quarantine path');
-  assert.equal(fs.existsSync(lockPath), false);
-  assert.equal(fs.existsSync(displacedPath), false);
-});
-
-test('release remains retryable after a transient quarantine rename failure', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
-  const originalRename = fs.promises.rename.bind(fs.promises);
-  let renameCalls = 0;
-  t.mock.method(fs.promises, 'rename', async (source, destination) => {
-    if (source === lockPath) {
-      renameCalls += 1;
-      if (renameCalls === 1) {
-        throw Object.assign(new Error('transient antivirus lock'), { code: 'EACCES' });
-      }
-    }
-    return originalRename(source, destination);
-  });
-
-  await assert.rejects(lock.release(), /antivirus|EACCES/i);
-  assert.equal(fs.existsSync(lockPath), true);
-  assert.deepEqual(quarantineArtifacts(directory), []);
-  await lock.release();
-  assert.equal(renameCalls, 2);
-  assert.equal(fs.existsSync(lockPath), false);
-  assert.deepEqual(quarantineArtifacts(directory), []);
-});
-
-test('a quarantine mismatch restores a moved replacement without overwriting', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const deadBytes = structuredOwnerBytes();
-  const displacedPath = path.join(directory, 'displaced-dead-owner.lock');
-  const replacementBytes = structuredOwnerBytes({
-    hostname: 'remote-host',
-    token: 'moved-replacement',
-  });
-  fs.writeFileSync(lockPath, deadBytes, { mode: 0o600 });
-  const originalRename = fs.promises.rename.bind(fs.promises);
-  let injected = false;
-  t.mock.method(fs.promises, 'rename', async (source, destination) => {
-    if (!injected && source === lockPath && String(destination).includes('quarantine')) {
-      injected = true;
-      fs.renameSync(lockPath, displacedPath);
-      fs.writeFileSync(lockPath, replacementBytes, { mode: 0o600 });
-    }
-    return originalRename(source, destination);
+    return result;
   });
 
   await assert.rejects(
     acquireOpenCodeCleanupLock(
       lockPath,
-      acquisitionOptions({
-        processLiveness: () => 'dead',
-        retryAttempts: 3,
-      })
+      acquisitionOptions({ processLiveness: () => 'dead', retryAttempts: 1 })
     ),
     /busy|ownership|changed/i
   );
-
   assert.equal(injected, true);
   assert.deepEqual(fs.readFileSync(lockPath), replacementBytes);
-  assert.deepEqual(fs.readFileSync(displacedPath), deadBytes);
-  assert.deepEqual(quarantineArtifacts(directory), []);
+  assert.deepEqual(fs.readFileSync(displacedPath), originalBytes);
+  assert.equal(fs.existsSync(sidecarPath), false);
 });
 
-test('failed non-overwriting restoration preserves the winner and quarantine evidence', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  const deadBytes = structuredOwnerBytes();
-  const displacedPath = path.join(directory, 'displaced-dead-evidence.lock');
-  const movedReplacement = structuredOwnerBytes({
-    hostname: 'moved-host',
-    token: 'moved-replacement',
+test('two contenders recovering one dead directory owner produce exactly one acquired owner', async (t) => {
+  const { lockPath } = lockFixture(t);
+  const abandoned = await acquireOpenCodeCleanupLock(lockPath, {
+    ...acquisitionOptions(),
+    pid: 4321,
+    tokenFactory: () => 'abandoned-owner',
+    retryAttempts: 1,
   });
-  const winnerBytes = structuredOwnerBytes({
-    hostname: 'winner-host',
-    token: 'winner-owner',
-  });
-  fs.writeFileSync(lockPath, deadBytes, { mode: 0o600 });
-  const originalRename = fs.promises.rename.bind(fs.promises);
-  let quarantinePath;
-  t.mock.method(fs.promises, 'rename', async (source, destination) => {
-    if (!quarantinePath && source === lockPath && String(destination).includes('quarantine')) {
-      fs.renameSync(lockPath, displacedPath);
-      fs.writeFileSync(lockPath, movedReplacement, { mode: 0o600 });
-      await originalRename(source, destination);
-      quarantinePath = String(destination);
-      fs.writeFileSync(lockPath, winnerBytes, { mode: 0o600 });
-      return;
-    }
-    return originalRename(source, destination);
-  });
-
-  await assert.rejects(
-    acquireOpenCodeCleanupLock(
-      lockPath,
-      acquisitionOptions({
-        processLiveness: () => 'dead',
-      })
-    ),
-    /restore|quarantine|ownership|changed/i
-  );
-
-  assert.deepEqual(fs.readFileSync(lockPath), winnerBytes);
-  assert.equal(typeof quarantinePath, 'string');
-  assert.deepEqual(fs.readFileSync(quarantinePath), movedReplacement);
-  assert.deepEqual(fs.readFileSync(displacedPath), deadBytes);
-});
-
-test('two contenders recovering one dead owner produce exactly one acquired owner', async (t) => {
-  const { directory, lockPath } = lockFixture(t);
-  fs.writeFileSync(lockPath, structuredOwnerBytes(), { mode: 0o600 });
   const liveness = (pid) => (pid === 4321 ? 'dead' : 'alive');
 
   const results = await Promise.allSettled([
-    acquireOpenCodeCleanupLock(
-      lockPath,
-      acquisitionOptions({
-        pid: 9101,
-        tokenFactory: () => 'contender-one',
-        processLiveness: liveness,
-        retryAttempts: 20,
-        retryDelayMs: 1,
-      })
-    ),
-    acquireOpenCodeCleanupLock(
-      lockPath,
-      acquisitionOptions({
-        pid: 9102,
-        tokenFactory: () => 'contender-two',
-        processLiveness: liveness,
-        retryAttempts: 20,
-        retryDelayMs: 1,
-      })
-    ),
+    acquireOpenCodeCleanupLock(lockPath, {
+      ...acquisitionOptions(),
+      pid: 9101,
+      tokenFactory: () => 'contender-one',
+      processLiveness: liveness,
+      retryAttempts: 20,
+      retryDelayMs: 1,
+    }),
+    acquireOpenCodeCleanupLock(lockPath, {
+      ...acquisitionOptions(),
+      pid: 9102,
+      tokenFactory: () => 'contender-two',
+      processLiveness: liveness,
+      retryAttempts: 20,
+      retryDelayMs: 1,
+    }),
   ]);
 
   const acquired = results
@@ -758,6 +664,43 @@ test('two contenders recovering one dead owner produce exactly one acquired owne
     .map((result) => result.value);
   assert.equal(acquired.length, 1);
   assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
-  assert.deepEqual(quarantineArtifacts(directory), []);
   await acquired[0].release();
+  await abandoned.release();
+});
+
+test('two contenders recovering one dead legacy file produce exactly one sidecar owner', async (t) => {
+  const { lockPath, sidecarPath } = lockFixture(t);
+  const poisonBytes = structuredFileOwner();
+  fs.writeFileSync(lockPath, poisonBytes, { mode: 0o600 });
+  const liveness = (pid) => (pid === 4321 ? 'dead' : 'alive');
+
+  const results = await Promise.allSettled([
+    acquireOpenCodeCleanupLock(lockPath, {
+      ...acquisitionOptions(),
+      pid: 9101,
+      tokenFactory: () => 'contender-one',
+      processLiveness: liveness,
+      retryAttempts: 20,
+      retryDelayMs: 1,
+    }),
+    acquireOpenCodeCleanupLock(lockPath, {
+      ...acquisitionOptions(),
+      pid: 9102,
+      tokenFactory: () => 'contender-two',
+      processLiveness: liveness,
+      retryAttempts: 20,
+      retryDelayMs: 1,
+    }),
+  ]);
+
+  const acquired = results
+    .filter((result) => result.status === 'fulfilled')
+    .map((result) => result.value);
+  assert.equal(acquired.length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+  assert.deepEqual(fs.readFileSync(lockPath), poisonBytes);
+  assert.equal(fs.lstatSync(sidecarPath).isDirectory(), true);
+  await acquired[0].release();
+  assert.equal(fs.existsSync(sidecarPath), false);
+  assert.deepEqual(fs.readFileSync(lockPath), poisonBytes);
 });
