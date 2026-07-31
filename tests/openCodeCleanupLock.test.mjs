@@ -428,6 +428,40 @@ test('release restores its owner marker when root removal fails and remains retr
   assert.equal(fs.existsSync(lockPath), false);
 });
 
+test('release retries an owned empty root when marker restoration also fails', async (t) => {
+  const { lockPath } = lockFixture(t);
+  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
+  const ownerName = directoryOwnerNames(lockPath)[0];
+  const ownerPath = path.join(lockPath, ownerName);
+  const originalRmdir = fs.promises.rmdir.bind(fs.promises);
+  const originalMkdir = fs.promises.mkdir.bind(fs.promises);
+  let rootCalls = 0;
+  let restoreCalls = 0;
+  t.mock.method(fs.promises, 'rmdir', async (target, ...rest) => {
+    if (target === lockPath) {
+      rootCalls += 1;
+      if (rootCalls === 1) {
+        throw Object.assign(new Error('transient root handle'), { code: 'EACCES' });
+      }
+    }
+    return originalRmdir(target, ...rest);
+  });
+  t.mock.method(fs.promises, 'mkdir', async (target, ...rest) => {
+    if (target === ownerPath) {
+      restoreCalls += 1;
+      throw Object.assign(new Error('marker restore blocked'), { code: 'EACCES' });
+    }
+    return originalMkdir(target, ...rest);
+  });
+
+  await assert.rejects(lock.release(), /root handle|EACCES/i);
+  assert.deepEqual(directoryOwnerNames(lockPath), []);
+  assert.equal(restoreCalls, 1);
+  await lock.release();
+  assert.equal(rootCalls, 2);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
 test('non-recursive root removal cannot delete a replacement winner with evidence', async (t) => {
   const { directory, lockPath } = lockFixture(t);
   const displacedPath = path.join(directory, 'displaced-empty-root');
@@ -454,7 +488,7 @@ test('non-recursive root removal cannot delete a replacement winner with evidenc
 test('directory lock source uses only atomic mkdir and non-recursive rmdir mutations', () => {
   assert.match(cleanupLockSource, /fs\.promises\.mkdir\(/);
   assert.match(cleanupLockSource, /fs\.promises\.rmdir\(/);
-  assert.doesNotMatch(cleanupLockSource, /fs\.promises\.(?:rename|unlink|rm)\(/);
+  assert.doesNotMatch(cleanupLockSource, /fs(?:\.promises)?\.(?:rename|unlink|rm)(?:Sync)?\(/);
   assert.doesNotMatch(cleanupLockSource, /quarantine/i);
   assert.match(cleanupLockSource, /\.lstat\([^,\n]+,\s*\{\s*bigint:\s*true\s*\}\)/);
   assert.match(cleanupLockSource, /\bfs\.BigIntStats\b/);
@@ -627,6 +661,31 @@ test('a legacy poison pill changing after sidecar acquisition never returns owne
   assert.equal(injected, true);
   assert.deepEqual(fs.readFileSync(lockPath), replacementBytes);
   assert.deepEqual(fs.readFileSync(displacedPath), originalBytes);
+  assert.equal(fs.existsSync(sidecarPath), false);
+});
+
+test('a legacy owner becoming live during sidecar verification never returns ownership', async (t) => {
+  const { lockPath, sidecarPath } = lockFixture(t);
+  const poisonBytes = structuredFileOwner();
+  fs.writeFileSync(lockPath, poisonBytes, { mode: 0o600 });
+  let probes = 0;
+
+  await assert.rejects(
+    acquireOpenCodeCleanupLock(
+      lockPath,
+      acquisitionOptions({
+        processLiveness(pid) {
+          assert.equal(pid, 4321);
+          probes += 1;
+          return probes === 1 ? 'dead' : 'alive';
+        },
+        retryAttempts: 1,
+      })
+    ),
+    /busy/i
+  );
+  assert.equal(probes, 2);
+  assert.deepEqual(fs.readFileSync(lockPath), poisonBytes);
   assert.equal(fs.existsSync(sidecarPath), false);
 });
 

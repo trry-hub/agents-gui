@@ -535,8 +535,22 @@ function createOwnedDirectoryLock(
         released = true;
         return;
       }
+      if (!sameFileIdentity(current.rootStat, verifiedRoot)) {
+        released = true;
+        return;
+      }
+      if (current.entries.length === 0) {
+        try {
+          await fs.promises.rmdir(rootPath);
+        } catch (error) {
+          if (!hasErrorCode(error, 'ENOENT')) {
+            throw error;
+          }
+        }
+        released = true;
+        return;
+      }
       if (
-        !sameFileIdentity(current.rootStat, verifiedRoot) ||
         current.entries.length !== 1 ||
         current.entries[0] !== markerName ||
         current.owner.kind !== 'structured' ||
