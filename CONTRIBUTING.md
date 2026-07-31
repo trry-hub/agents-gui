@@ -2,11 +2,13 @@
 
 这份文档面向仓库维护者和贡献者。VS Code Marketplace 与扩展详情页展示的用户文档在 [README.md](./README.md)，不要把本地开发、发布密钥或维护者流程写入 Marketplace 用户说明。
 
+工程开发、测试、打包和发布需要 Node.js 22.22.1+。请使用锁文件安装依赖，以确保本地与 CI 使用一致的工具链。
+
 ## 开发
 
 ```bash
 # 安装依赖
-npm install
+npm ci
 
 # 构建扩展
 npm run build

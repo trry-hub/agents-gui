@@ -5,6 +5,7 @@
 .neuralmemory/**
 .prettierignore
 .prettierrc
+.nvmrc
 .playwright-mcp/**
 .superpowers/**
 .worktrees/**

@@ -81,7 +81,10 @@ function escapeRegExp(value) {
 }
 
 test('test script uses cross-platform Node test discovery', () => {
-  assert.equal(manifest.scripts.test, 'npm run build:test && node scripts/run-tests.mjs');
+  assert.equal(
+    manifest.scripts.test,
+    'npm run check:node && npm run build:test && node scripts/run-tests.mjs'
+  );
 });
 
 test('release verification uses the serial Node test runner option', () => {
@@ -316,7 +319,10 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
     manifest.scripts['smoke:extension'],
     'npm run build && node tests/extension-smoke/run.mjs'
   );
-  assert.equal(manifest.scripts['verify:release'], 'node scripts/verify-release.mjs');
+  assert.equal(
+    manifest.scripts['verify:release'],
+    'npm run check:node && node scripts/verify-release.mjs'
+  );
   assert.match(JSON.stringify(manifest.devDependencies), /@vscode\/test-electron/);
   assert.match(extensionSource, /context\.extensionMode !== vscode\.ExtensionMode\.Production/);
   assert.match(extensionSource, /registerCommand\('agents-gui\.internal\.runSmoke'/);

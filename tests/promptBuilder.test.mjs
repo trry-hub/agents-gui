@@ -1813,10 +1813,13 @@ test('manifest exposes title actions and general settings', () => {
   assert.equal(manifest.scripts['package:vsix'], 'npm run package');
   assert.equal(manifest.scripts['package:manual'], 'npm run package');
   assert.equal(manifest.scripts['preview:webview'], 'node scripts/preview-webview.mjs');
-  assert.equal(manifest.scripts['verify:release'], 'node scripts/verify-release.mjs');
-  assert.match(
+  assert.equal(
+    manifest.scripts['verify:release'],
+    'npm run check:node && node scripts/verify-release.mjs'
+  );
+  assert.equal(
     manifest.scripts['publish:manual'],
-    /vsce publish --packagePath agents-gui-\$\{npm_package_version\}\.vsix/
+    'npm run package && npm run publish:vsix -- --packagePath agents-gui-${npm_package_version}.vsix'
   );
   assert.ok(properties['agents-gui.commitMessage.provider']);
   assert.match(html, /id="settingsNavAgents"/);

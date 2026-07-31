@@ -117,13 +117,14 @@ test('release packaging uses an exact local VSCE dependency', () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
 
-  assert.equal(manifest.devDependencies['@vscode/vsce'], '2.32.0');
-  assert.equal(lock.packages[''].devDependencies['@vscode/vsce'], '2.32.0');
-  assert.equal(lock.packages['node_modules/@vscode/vsce'].version, '2.32.0');
-  assert.equal(manifest.scripts.package, 'npm run build && vsce package');
+  assert.equal(manifest.devDependencies['@vscode/vsce'], '3.9.2');
+  assert.equal(lock.packages[''].devDependencies['@vscode/vsce'], '3.9.2');
+  assert.equal(lock.packages['node_modules/@vscode/vsce'].version, '3.9.2');
+  assert.equal(manifest.scripts.package, 'npm run check:node && npm run build && vsce package');
+  assert.equal(manifest.scripts['publish:vsix'], 'npm run check:node && vsce publish');
   assert.equal(
     manifest.scripts['publish:manual'],
-    'npm run package && vsce publish --packagePath agents-gui-${npm_package_version}.vsix'
+    'npm run package && npm run publish:vsix -- --packagePath agents-gui-${npm_package_version}.vsix'
   );
   assert.doesNotMatch(JSON.stringify(manifest.scripts), /\bnpx\b/);
 });

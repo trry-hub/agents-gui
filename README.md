@@ -36,7 +36,6 @@
 ## 使用要求
 
 - **VS Code** 1.85+
-- **Node.js** 18+
 - 至少安装一个受支持的 CLI Agent：
   - [OpenCode](https://github.com/sst/opencode)
   - [Codex CLI](https://github.com/openai/codex)
@@ -44,6 +43,8 @@
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
   - [Goose](https://github.com/block/goose)
   - [Aider](https://github.com/paul-gauthier/aider)
+
+作为扩展用户，无需单独安装 Node.js；Node.js 仅用于工程开发与发布流程。
 
 ---
 
@@ -55,6 +56,12 @@
 4. 在侧边栏顶部选择 Agent，然后输入任务开始使用。
 
 扩展默认使用 **OpenCode**。你可以在设置项 `agents-gui.defaultProvider` 中修改默认 Agent。所选 CLI 是唯一执行目标：扩展不会在失败时自动切换到其他 CLI，也不会启动或连接受管的 OpenCode 后台服务，或施加任务策略/快速通道覆盖层。
+
+---
+
+## 工程开发
+
+开发、测试、打包和发布 Agents GUI 需要 **Node.js 22.22.1+**。切换到受支持的 Node.js 版本后，先运行 `npm ci` 安装锁定的依赖。
 
 ---
 
