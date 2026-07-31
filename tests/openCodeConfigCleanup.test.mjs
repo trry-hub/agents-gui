@@ -23,6 +23,26 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+function createFileSymlink(t, targetPath, linkPath, { absolute = false } = {}) {
+  try {
+    fs.symlinkSync(
+      absolute ? targetPath : path.relative(path.dirname(linkPath), targetPath),
+      linkPath,
+      process.platform === 'win32' ? 'file' : undefined
+    );
+    return true;
+  } catch (error) {
+    if (
+      process.platform === 'win32' &&
+      (error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'UNKNOWN')
+    ) {
+      t.skip(`Windows runner cannot create file symlinks: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
 function migrationArtifacts(dir) {
   return fs
     .readdirSync(dir)
@@ -232,6 +252,237 @@ test('cleanup commits through a same-directory temp while preserving bytes, mode
   assert.deepEqual(migrationArtifacts(dir), []);
 });
 
+test('cleanup preserves a config symlink and migrates its canonical target', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-symlink-'));
+  const configDirectory = path.join(root, 'config');
+  const targetDirectory = path.join(root, 'dotfiles');
+  fs.mkdirSync(configDirectory);
+  fs.mkdirSync(targetDirectory);
+  const configPath = path.join(configDirectory, 'opencode.json');
+  const targetPath = path.join(targetDirectory, 'opencode.json');
+  const original = Buffer.from(
+    `${JSON.stringify(
+      {
+        model: 'agents_gui_mimo/model',
+        provider: {
+          agents_gui_mimo: { __agents_gui_synced: true },
+          user_provider: { name: 'User provider' },
+        },
+      },
+      null,
+      2
+    )}\n`
+  );
+  fs.writeFileSync(targetPath, original);
+  fs.chmodSync(targetPath, 0o640);
+  if (!createFileSymlink(t, targetPath, configPath)) {
+    return;
+  }
+  const canonicalTargetPath = fs.realpathSync(targetPath);
+  const originalLinkTarget = fs.readlinkSync(configPath);
+  const originalLinkStat = fs.lstatSync(configPath, { bigint: true });
+
+  const result = await new OpenCodeConfigCleanupMigration({ configPath }).cleanup();
+
+  const finalLinkStat = fs.lstatSync(configPath, { bigint: true });
+  assert.equal(finalLinkStat.isSymbolicLink(), true);
+  assert.equal(finalLinkStat.dev, originalLinkStat.dev);
+  assert.equal(finalLinkStat.ino, originalLinkStat.ino);
+  assert.equal(fs.readlinkSync(configPath), originalLinkTarget);
+  assert.equal(readJson(targetPath).model, undefined);
+  assert.equal(readJson(targetPath).provider.agents_gui_mimo, undefined);
+  assert.equal(readJson(targetPath).provider.user_provider.name, 'User provider');
+  assert.ok(result.backupPath?.startsWith(`${canonicalTargetPath}.agents-gui-native-cli-bak-`));
+  assert.deepEqual(fs.readFileSync(result.backupPath), original);
+  assert.equal(fs.statSync(targetPath).mode & 0o777, 0o640);
+  assert.equal(fs.statSync(result.backupPath).mode & 0o777, 0o640);
+  assert.deepEqual(migrationArtifacts(configDirectory), []);
+  assert.deepEqual(migrationArtifacts(targetDirectory), []);
+});
+
+test('cleanup fails closed if a config symlink is retargeted to the same inode before commit', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-retarget-'));
+  const configDirectory = path.join(root, 'config');
+  const firstTargetDirectory = path.join(root, 'dotfiles-a');
+  const secondTargetDirectory = path.join(root, 'dotfiles-b');
+  fs.mkdirSync(configDirectory);
+  fs.mkdirSync(firstTargetDirectory);
+  fs.mkdirSync(secondTargetDirectory);
+  const configPath = path.join(configDirectory, 'opencode.json');
+  const firstTargetPath = path.join(firstTargetDirectory, 'opencode.json');
+  const secondTargetPath = path.join(secondTargetDirectory, 'opencode.json');
+  const original = Buffer.from(
+    `${JSON.stringify(
+      {
+        provider: {
+          agents_gui_mimo: { __agents_gui_synced: true },
+        },
+      },
+      null,
+      2
+    )}\n`
+  );
+  fs.writeFileSync(firstTargetPath, original);
+  fs.linkSync(firstTargetPath, secondTargetPath);
+  if (!createFileSymlink(t, firstTargetPath, configPath)) {
+    return;
+  }
+
+  await assert.rejects(
+    new OpenCodeConfigCleanupMigration({
+      configPath,
+      beforeCommit: async () => {
+        fs.unlinkSync(configPath);
+        if (!createFileSymlink(t, secondTargetPath, configPath)) {
+          throw new Error('Unable to retarget test symlink');
+        }
+      },
+    }).cleanup(),
+    /Concurrent OpenCode config modification.*(?:link|target|path)/i
+  );
+
+  assert.equal(fs.lstatSync(configPath).isSymbolicLink(), true);
+  assert.equal(fs.realpathSync(configPath), fs.realpathSync(secondTargetPath));
+  assert.deepEqual(fs.readFileSync(firstTargetPath), original);
+  assert.deepEqual(fs.readFileSync(secondTargetPath), original);
+  assert.deepEqual(migrationArtifacts(configDirectory), []);
+  assert.deepEqual(migrationArtifacts(firstTargetDirectory), []);
+  assert.deepEqual(migrationArtifacts(secondTargetDirectory), []);
+});
+
+test('cleanup detects a same-target config symlink replacement before commit', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-link-aba-'));
+  const configDirectory = path.join(root, 'config');
+  const targetDirectory = path.join(root, 'dotfiles');
+  fs.mkdirSync(configDirectory);
+  fs.mkdirSync(targetDirectory);
+  const configPath = path.join(configDirectory, 'opencode.json');
+  const replacementLinkPath = path.join(configDirectory, 'replacement-link');
+  const targetPath = path.join(targetDirectory, 'opencode.json');
+  const original = Buffer.from(
+    `${JSON.stringify(
+      {
+        provider: {
+          agents_gui_mimo: { __agents_gui_synced: true },
+        },
+      },
+      null,
+      2
+    )}\n`
+  );
+  fs.writeFileSync(targetPath, original);
+  if (!createFileSymlink(t, targetPath, configPath)) {
+    return;
+  }
+  if (!createFileSymlink(t, targetPath, replacementLinkPath, { absolute: true })) {
+    return;
+  }
+  const replacementLinkStat = fs.lstatSync(replacementLinkPath, { bigint: true });
+  assert.notEqual(fs.readlinkSync(replacementLinkPath), fs.readlinkSync(configPath));
+
+  await assert.rejects(
+    new OpenCodeConfigCleanupMigration({
+      configPath,
+      beforeCommit: async () => {
+        try {
+          fs.renameSync(replacementLinkPath, configPath);
+        } catch (error) {
+          if (
+            process.platform !== 'win32' ||
+            (error.code !== 'EEXIST' && error.code !== 'EPERM' && error.code !== 'EACCES')
+          ) {
+            throw error;
+          }
+          fs.unlinkSync(configPath);
+          fs.renameSync(replacementLinkPath, configPath);
+        }
+      },
+    }).cleanup(),
+    /Concurrent OpenCode config modification.*(?:link|target|path)/i
+  );
+
+  const finalLinkStat = fs.lstatSync(configPath, { bigint: true });
+  assert.equal(finalLinkStat.isSymbolicLink(), true);
+  assert.equal(finalLinkStat.ino, replacementLinkStat.ino);
+  assert.deepEqual(fs.readFileSync(targetPath), original);
+  assert.deepEqual(migrationArtifacts(configDirectory), []);
+  assert.deepEqual(migrationArtifacts(targetDirectory), []);
+});
+
+test('dangling config symlinks fail closed and do not record migration success', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-dangling-'));
+  const configPath = path.join(root, 'opencode.json');
+  const missingTargetPath = path.join(root, 'missing-opencode.json');
+  if (!createFileSymlink(t, missingTargetPath, configPath)) {
+    return;
+  }
+  const values = new Map();
+
+  await assert.rejects(
+    runOpenCodeCleanupOnce(
+      {
+        get: (key) => values.get(key),
+        update: async (key, value) => values.set(key, value),
+      },
+      new OpenCodeConfigCleanupMigration({ configPath })
+    ),
+    /dangling|symbolic link.*target.*missing/i
+  );
+
+  assert.equal(values.has(OPENCODE_NATIVE_PASSTHROUGH_CLEANUP_KEY), false);
+  assert.equal(fs.lstatSync(configPath).isSymbolicLink(), true);
+  assert.deepEqual(migrationArtifacts(root), []);
+});
+
+test('cleanup rejects a config symlink changed during canonical target resolution', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-resolve-'));
+  const configPath = path.join(root, 'opencode.json');
+  const firstTargetPath = path.join(root, 'first.json');
+  const secondTargetPath = path.join(root, 'second.json');
+  const original = Buffer.from(
+    `${JSON.stringify(
+      {
+        provider: {
+          agents_gui_mimo: { __agents_gui_synced: true },
+        },
+      },
+      null,
+      2
+    )}\n`
+  );
+  fs.writeFileSync(firstTargetPath, original);
+  fs.writeFileSync(secondTargetPath, original);
+  if (!createFileSymlink(t, firstTargetPath, configPath)) {
+    return;
+  }
+  const originalRealpath = fs.promises.realpath.bind(fs.promises);
+  let requestedPathResolutions = 0;
+  t.mock.method(fs.promises, 'realpath', async (target, ...rest) => {
+    const resolved = await originalRealpath(target, ...rest);
+    if (target === configPath) {
+      requestedPathResolutions += 1;
+      if (requestedPathResolutions === 1) {
+        fs.unlinkSync(configPath);
+        if (!createFileSymlink(t, secondTargetPath, configPath)) {
+          throw new Error('Unable to retarget test symlink');
+        }
+      }
+    }
+    return resolved;
+  });
+
+  await assert.rejects(
+    new OpenCodeConfigCleanupMigration({ configPath }).cleanup(),
+    /Concurrent OpenCode config modification.*(?:link|target|path)/i
+  );
+
+  assert.equal(requestedPathResolutions, 2);
+  assert.equal(fs.realpathSync(configPath), fs.realpathSync(secondTargetPath));
+  assert.deepEqual(fs.readFileSync(firstTargetPath), original);
+  assert.deepEqual(fs.readFileSync(secondTargetPath), original);
+  assert.deepEqual(migrationArtifacts(root), []);
+});
+
 test('cleanup detects an external edit before atomic replacement and never overwrites it', async () => {
   const { dir, configPath } = fixture({
     provider: {
@@ -320,6 +571,63 @@ test('concurrent cleanup calls serialize and create exactly one backup', async (
   assert.equal(results.filter((result) => result.changed).length, 1);
   assert.equal(fs.readdirSync(dir).filter((name) => name.includes('native-cli-bak')).length, 1);
   assert.deepEqual(migrationArtifacts(dir), []);
+});
+
+test('config aliases share one canonical cleanup lock and create one backup', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-aliases-'));
+  const firstConfigDirectory = path.join(root, 'config-a');
+  const secondConfigDirectory = path.join(root, 'config-b');
+  const targetDirectory = path.join(root, 'dotfiles');
+  fs.mkdirSync(firstConfigDirectory);
+  fs.mkdirSync(secondConfigDirectory);
+  fs.mkdirSync(targetDirectory);
+  const firstConfigPath = path.join(firstConfigDirectory, 'opencode.json');
+  const secondConfigPath = path.join(secondConfigDirectory, 'opencode.json');
+  const targetPath = path.join(targetDirectory, 'opencode.json');
+  fs.writeFileSync(
+    targetPath,
+    `${JSON.stringify(
+      {
+        model: 'agents_gui_mimo/model',
+        provider: {
+          agents_gui_mimo: { __agents_gui_synced: true },
+        },
+      },
+      null,
+      2
+    )}\n`
+  );
+  if (!createFileSymlink(t, targetPath, firstConfigPath)) {
+    return;
+  }
+  if (!createFileSymlink(t, targetPath, secondConfigPath)) {
+    return;
+  }
+  const now = () => new Date('2026-07-30T00:00:00.000Z');
+
+  const results = await Promise.all(
+    [firstConfigPath, secondConfigPath].map((configPath) =>
+      new OpenCodeConfigCleanupMigration({
+        configPath,
+        now,
+        lockRetryDelayMs: 1,
+        lockRetryAttempts: 2_000,
+      }).cleanup()
+    )
+  );
+
+  assert.equal(results.filter((result) => result.changed).length, 1);
+  assert.equal(fs.lstatSync(firstConfigPath).isSymbolicLink(), true);
+  assert.equal(fs.lstatSync(secondConfigPath).isSymbolicLink(), true);
+  assert.equal(readJson(targetPath).model, undefined);
+  assert.equal(readJson(targetPath).provider.agents_gui_mimo, undefined);
+  assert.equal(
+    fs.readdirSync(targetDirectory).filter((name) => name.includes('native-cli-bak')).length,
+    1
+  );
+  assert.deepEqual(migrationArtifacts(firstConfigDirectory), []);
+  assert.deepEqual(migrationArtifacts(secondConfigDirectory), []);
+  assert.deepEqual(migrationArtifacts(targetDirectory), []);
 });
 
 test('cleanup recovers a dead directory owner and leaves no lock artifacts', async () => {

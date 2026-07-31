@@ -59,12 +59,17 @@ export class OpenCodeConfigCleanupMigration {
   }
 
   async cleanup(): Promise<OpenCodeCleanupResult> {
-    const initial = await this.readConfigSnapshot();
+    const target = await this.resolveConfigTarget();
+    if (!target) {
+      return unchangedCleanupResult();
+    }
+
+    const initial = await this.readConfigSnapshot(target.resolvedPath);
     if (!initial || !this.planCleanup(initial.bytes)) {
       return unchangedCleanupResult();
     }
 
-    const lockPath = `${this.configPath}${LOCK_SUFFIX}`;
+    const lockPath = `${target.resolvedPath}${LOCK_SUFFIX}`;
     const lock = await acquireOpenCodeCleanupLock(lockPath, {
       retryAttempts: this.lockRetryAttempts,
       retryDelayMs: this.lockRetryDelayMs,
@@ -72,7 +77,8 @@ export class OpenCodeConfigCleanupMigration {
     });
     let tempPath: string | undefined;
     try {
-      const original = await this.readConfigSnapshot();
+      await this.assertConfigTargetUnchanged(target);
+      const original = await this.readConfigSnapshot(target.resolvedPath);
       if (!original) {
         throw this.concurrentModificationError('was removed while cleanup waited for its lock');
       }
@@ -82,14 +88,20 @@ export class OpenCodeConfigCleanupMigration {
         return unchangedCleanupResult();
       }
 
-      const backupPath = await this.writeExclusiveBackup(original);
-      await this.syncParentDirectory();
-      tempPath = await this.writeExclusiveTemp(plan.nextBytes, original.stat.mode);
+      const backupPath = await this.writeExclusiveBackup(target.resolvedPath, original);
+      await this.syncParentDirectory(target.resolvedPath);
+      tempPath = await this.writeExclusiveTemp(
+        target.resolvedPath,
+        plan.nextBytes,
+        original.stat.mode
+      );
       await this.beforeCommit?.();
-      await this.assertConfigUnchanged(original);
-      await fs.promises.rename(tempPath, this.configPath);
+      await this.assertConfigTargetUnchanged(target);
+      await this.assertConfigUnchanged(target.resolvedPath, original);
+      await fs.promises.rename(tempPath, target.resolvedPath);
       tempPath = undefined;
-      await this.syncParentDirectory();
+      await this.syncParentDirectory(target.resolvedPath);
+      await this.assertConfigTargetUnchanged(target);
 
       return {
         changed: true,
@@ -108,10 +120,72 @@ export class OpenCodeConfigCleanupMigration {
     }
   }
 
-  private async readConfigSnapshot(): Promise<ConfigSnapshot | undefined> {
+  private async resolveConfigTarget(): Promise<ResolvedConfigTarget | undefined> {
+    const before = await readConfigPathEntry(this.configPath);
+    if (!before) {
+      const danglingAncestor = await findDanglingLinkAncestor(this.configPath);
+      if (danglingAncestor) {
+        throw this.danglingConfigLinkError(danglingAncestor);
+      }
+      return undefined;
+    }
+
+    let resolvedBefore: string;
+    try {
+      resolvedBefore = await fs.promises.realpath(this.configPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw this.danglingConfigLinkError(this.configPath);
+      }
+      throw error;
+    }
+
+    const after = await readConfigPathEntry(this.configPath);
+    if (!after) {
+      throw this.concurrentModificationError('path changed while its target was being resolved');
+    }
+
+    let resolvedAfter: string;
+    try {
+      resolvedAfter = await fs.promises.realpath(this.configPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw this.concurrentModificationError(
+          'link target disappeared while it was being resolved'
+        );
+      }
+      throw error;
+    }
+
+    if (!sameConfigPathEntry(before, after) || resolvedBefore !== resolvedAfter) {
+      throw this.concurrentModificationError('link or target path changed while it was resolved');
+    }
+
+    return {
+      resolvedPath: resolvedAfter,
+      requestedEntry: after,
+    };
+  }
+
+  private async assertConfigTargetUnchanged(target: ResolvedConfigTarget): Promise<void> {
+    const current = await this.resolveConfigTarget();
+    if (!current) {
+      throw this.concurrentModificationError('path was removed before replacement');
+    }
+    const linkKindChanged =
+      current.requestedEntry.stat.isSymbolicLink() !== target.requestedEntry.stat.isSymbolicLink();
+    const linkIdentityChanged =
+      target.requestedEntry.stat.isSymbolicLink() &&
+      !sameConfigPathEntry(current.requestedEntry, target.requestedEntry);
+    if (current.resolvedPath !== target.resolvedPath || linkKindChanged || linkIdentityChanged) {
+      throw this.concurrentModificationError('link or target path changed before replacement');
+    }
+  }
+
+  private async readConfigSnapshot(configPath: string): Promise<ConfigSnapshot | undefined> {
     let handle;
     try {
-      handle = await fs.promises.open(this.configPath, 'r');
+      handle = await fs.promises.open(configPath, 'r');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return undefined;
@@ -120,11 +194,23 @@ export class OpenCodeConfigCleanupMigration {
     }
 
     try {
-      const statBefore = await handle.stat();
+      const statBefore = await handle.stat({ bigint: true });
       const bytes = await handle.readFile();
-      const statAfter = await handle.stat();
+      const statAfter = await handle.stat({ bigint: true });
       if (!sameConfigStat(statBefore, statAfter)) {
         throw this.concurrentModificationError('changed while it was being read');
+      }
+      let pathStat: fs.BigIntStats;
+      try {
+        pathStat = await fs.promises.lstat(configPath, { bigint: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw this.concurrentModificationError('target path changed while it was being read');
+        }
+        throw error;
+      }
+      if (!sameConfigStat(statAfter, pathStat)) {
+        throw this.concurrentModificationError('target path changed while it was being read');
       }
       return { bytes, stat: statAfter };
     } finally {
@@ -169,9 +255,12 @@ export class OpenCodeConfigCleanupMigration {
     };
   }
 
-  private async writeExclusiveBackup(original: ConfigSnapshot): Promise<string> {
+  private async writeExclusiveBackup(
+    configPath: string,
+    original: ConfigSnapshot
+  ): Promise<string> {
     const stamp = this.now().toISOString().replace(/[:.]/g, '-');
-    const basePath = `${this.configPath}.agents-gui-native-cli-bak-${stamp}`;
+    const basePath = `${configPath}.agents-gui-native-cli-bak-${stamp}`;
     for (let attempt = 0; attempt < MAX_BACKUP_COLLISION_ATTEMPTS; attempt += 1) {
       const backupPath = attempt === 0 ? basePath : `${basePath}-${attempt}`;
       const handle = await openExclusiveOrUndefined(backupPath, original.stat.mode);
@@ -180,7 +269,7 @@ export class OpenCodeConfigCleanupMigration {
       }
       try {
         await handle.writeFile(original.bytes);
-        await handle.chmod(original.stat.mode & 0o7777);
+        await handle.chmod(Number(original.stat.mode & 0o7777n));
         await handle.sync();
         return backupPath;
       } catch (error) {
@@ -195,9 +284,13 @@ export class OpenCodeConfigCleanupMigration {
     throw new Error(`Unable to create a collision-free OpenCode config backup: ${basePath}`);
   }
 
-  private async writeExclusiveTemp(bytes: Buffer, mode: number): Promise<string> {
-    const directory = path.dirname(this.configPath);
-    const basename = path.basename(this.configPath);
+  private async writeExclusiveTemp(
+    configPath: string,
+    bytes: Buffer,
+    mode: bigint
+  ): Promise<string> {
+    const directory = path.dirname(configPath);
+    const basename = path.basename(configPath);
     const nonce = `${process.pid}-${Date.now().toString(36)}`;
     for (let attempt = 0; attempt < MAX_TEMP_COLLISION_ATTEMPTS; attempt += 1) {
       const tempPath = path.join(directory, `${basename}${TEMP_MARKER}${nonce}-${attempt}`);
@@ -207,7 +300,7 @@ export class OpenCodeConfigCleanupMigration {
       }
       try {
         await handle.writeFile(bytes);
-        await handle.chmod(mode & 0o7777);
+        await handle.chmod(Number(mode & 0o7777n));
         await handle.sync();
         await handle.close();
         return tempPath;
@@ -221,10 +314,10 @@ export class OpenCodeConfigCleanupMigration {
     throw new Error(`Unable to create an OpenCode config migration temp file: ${directory}`);
   }
 
-  private async assertConfigUnchanged(original: ConfigSnapshot): Promise<void> {
+  private async assertConfigUnchanged(configPath: string, original: ConfigSnapshot): Promise<void> {
     let current: ConfigSnapshot | undefined;
     try {
-      current = await this.readConfigSnapshot();
+      current = await this.readConfigSnapshot(configPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         throw this.concurrentModificationError('was removed before replacement');
@@ -247,8 +340,15 @@ export class OpenCodeConfigCleanupMigration {
     );
   }
 
-  private async syncParentDirectory(): Promise<void> {
-    await syncOpenCodeConfigDirectory(path.dirname(this.configPath));
+  private danglingConfigLinkError(linkPath: string): Error {
+    return new Error(
+      `OpenCode config path contains a dangling symbolic link or junction: ${linkPath}. ` +
+        'Restore or remove the broken link before reloading Agents GUI.'
+    );
+  }
+
+  private async syncParentDirectory(configPath: string): Promise<void> {
+    await syncOpenCodeConfigDirectory(path.dirname(configPath));
   }
 }
 
@@ -336,7 +436,17 @@ function isUnsupportedWindowsDirectorySyncError(
 
 interface ConfigSnapshot {
   bytes: Buffer;
-  stat: fs.Stats;
+  stat: fs.BigIntStats;
+}
+
+interface ConfigPathEntry {
+  stat: fs.BigIntStats;
+  linkTarget?: string;
+}
+
+interface ResolvedConfigTarget {
+  resolvedPath: string;
+  requestedEntry: ConfigPathEntry;
 }
 
 interface CleanupPlan {
@@ -349,20 +459,78 @@ function unchangedCleanupResult(): OpenCodeCleanupResult {
   return { changed: false, removedProviderKeys: [], removedTopLevelModel: false };
 }
 
-function sameConfigStat(left: fs.Stats, right: fs.Stats): boolean {
+async function readConfigPathEntry(filePath: string): Promise<ConfigPathEntry | undefined> {
+  let stat: fs.BigIntStats;
+  try {
+    stat = await fs.promises.lstat(filePath, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  }
+
+  let linkTarget: string | undefined;
+  if (stat.isSymbolicLink()) {
+    try {
+      linkTarget = await fs.promises.readlink(filePath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EINVAL') {
+        throw new Error(
+          `OpenCode config path changed while symbolic link metadata was being read: ${filePath}`
+        );
+      }
+      throw error;
+    }
+  }
+  return { stat, linkTarget };
+}
+
+async function findDanglingLinkAncestor(filePath: string): Promise<string | undefined> {
+  let candidate = path.resolve(filePath);
+  while (true) {
+    const entry = await readConfigPathEntry(candidate);
+    if (entry) {
+      if (!entry.stat.isSymbolicLink()) {
+        return undefined;
+      }
+      try {
+        await fs.promises.realpath(candidate);
+        return undefined;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return candidate;
+        }
+        throw error;
+      }
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) {
+      return undefined;
+    }
+    candidate = parent;
+  }
+}
+
+function sameConfigPathEntry(left: ConfigPathEntry, right: ConfigPathEntry): boolean {
+  return left.linkTarget === right.linkTarget && sameConfigStat(left.stat, right.stat);
+}
+
+function sameConfigStat(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
   return (
     left.dev === right.dev &&
     left.ino === right.ino &&
     left.size === right.size &&
     left.mode === right.mode &&
-    left.mtimeMs === right.mtimeMs &&
-    left.ctimeMs === right.ctimeMs
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
   );
 }
 
-async function openExclusiveOrUndefined(filePath: string, mode: number) {
+async function openExclusiveOrUndefined(filePath: string, mode: bigint) {
   try {
-    return await fs.promises.open(filePath, 'wx', mode & 0o7777);
+    return await fs.promises.open(filePath, 'wx', Number(mode & 0o7777n));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       return undefined;
