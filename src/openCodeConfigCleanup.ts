@@ -65,7 +65,12 @@ export class OpenCodeConfigCleanupMigration {
     }
 
     const initial = await this.readConfigSnapshot(target.resolvedPath);
-    if (!initial || !this.planCleanup(initial.bytes)) {
+    if (!initial) {
+      throw this.concurrentModificationError('target was removed after it was resolved');
+    }
+    if (!this.planCleanup(initial.bytes)) {
+      await this.assertConfigTargetUnchanged(target);
+      await this.assertConfigUnchanged(target.resolvedPath, initial);
       return unchangedCleanupResult();
     }
 
@@ -85,6 +90,8 @@ export class OpenCodeConfigCleanupMigration {
 
       const plan = this.planCleanup(original.bytes);
       if (!plan) {
+        await this.assertConfigTargetUnchanged(target);
+        await this.assertConfigUnchanged(target.resolvedPath, original);
         return unchangedCleanupResult();
       }
 
@@ -101,7 +108,7 @@ export class OpenCodeConfigCleanupMigration {
       await fs.promises.rename(tempPath, target.resolvedPath);
       tempPath = undefined;
       await this.syncParentDirectory(target.resolvedPath);
-      await this.assertConfigTargetUnchanged(target);
+      await this.assertCommittedConfigTargetUnchanged(target);
 
       return {
         changed: true,
@@ -330,6 +337,18 @@ export class OpenCodeConfigCleanupMigration {
       !sameConfigStat(current.stat, original.stat)
     ) {
       throw this.concurrentModificationError('changed while cleanup was preparing a replacement');
+    }
+  }
+
+  private async assertCommittedConfigTargetUnchanged(target: ResolvedConfigTarget): Promise<void> {
+    try {
+      await this.assertConfigTargetUnchanged(target);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `OpenCode cleanup replacement was written to ${target.resolvedPath}, but final link or ` +
+          `target path verification failed for ${this.configPath}: ${detail}`
+      );
     }
   }
 
