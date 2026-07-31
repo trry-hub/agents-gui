@@ -24,6 +24,10 @@ const openCodePathsSource = readFileSync(
   new URL('../src/openCodePaths.ts', import.meta.url),
   'utf8'
 );
+const openCodeConfigCleanupSource = readFileSync(
+  new URL('../src/openCodeConfigCleanup.ts', import.meta.url),
+  'utf8'
+);
 const extensionSmokeHarnessSource = readFileSync(
   new URL('../src/extensionSmokeHarness.ts', import.meta.url),
   'utf8'
@@ -173,10 +177,7 @@ test('context summary protocol is correlated and host invalidations replace unso
     2,
     'sendContextSummary should only be declared and serve refreshContext'
   );
-  assert.match(
-    sidebarSource,
-    /command: 'contextSummary',\s*requestId,\s*cliId,\s*summary,/
-  );
+  assert.match(sidebarSource, /command: 'contextSummary',\s*requestId,\s*cliId,\s*summary,/);
   assert.match(
     sendContextSummarySource,
     /const profile =\s*this\.profilesById\.get\(cliId\) \?\?\s*getCliProfile\(cliId\)/s
@@ -260,7 +261,6 @@ test('extension host depends on agent runtime and typed webview protocol ports',
   assert.match(architectureDoc, /src\/webviewHtmlRenderer\.ts/);
 });
 
-
 test('architecture documents native CLI passthrough instead of a policy overlay', () => {
   assert.match(
     extensionSource,
@@ -313,7 +313,6 @@ test('attachment persistence stays behind a dedicated store', () => {
   assert.doesNotMatch(sidebarSource, /MAX_IMAGE_ATTACHMENT_BYTES/);
 });
 
-
 test('extension smoke script covers command entrypoints and harnessed runtime flows', () => {
   assert.equal(
     manifest.scripts['smoke:extension'],
@@ -350,14 +349,10 @@ test('extension smoke script covers command entrypoints and harnessed runtime fl
   assert.match(releaseVerifySource, /'diff', '--cached', '--check'/);
 });
 
-
 test('CLI discovery keeps command resolution and observational probes behind its adapter', () => {
   assert.match(cliSource, /import \{ CliDiscovery \} from '\.\/cliDiscovery';/);
   assert.match(cliSource, /private readonly cliDiscovery: CliManagerDiscovery/);
-  assert.match(
-    cliSource,
-    /this\.cliDiscovery\.getProfilesWithStatus\(\s*CLI_PROFILES\.filter\(/s
-  );
+  assert.match(cliSource, /this\.cliDiscovery\.getProfilesWithStatus\(\s*CLI_PROFILES\.filter\(/s);
   assert.doesNotMatch(cliSource, /expandProfileEnv/);
   assert.doesNotMatch(cliSource, /import \* as fs from 'fs';/);
   assert.doesNotMatch(cliSource, /import \* as os from 'os';/);
@@ -405,13 +400,13 @@ test('activation runs local OpenCode cleanup without API runtime injection', () 
   assert.match(extensionSource, /const disabledCliIds = await runOpenCodeCleanupActivationGate/);
   assert.match(extensionSource, /new CliManager\(\{ disabledCliIds \}\)/);
   assert.match(extensionSource, /error\.openCodeCleanupFailed/);
-  assert.doesNotMatch(
-    extensionSource,
-    /Failed to clean legacy OpenCode provider configuration/
-  );
+  assert.doesNotMatch(extensionSource, /Failed to clean legacy OpenCode provider configuration/);
   assert.match(cliSource, /disabledCliIds\?: ReadonlySet<string>/);
   assert.match(cliSource, /if \(this\.disabledCliIds\.has\(profileId\)\) return false;/);
-  assert.match(cliSource, /CLI_PROFILES\.filter\(\(profile\) => !this\.disabledCliIds\.has\(profile\.id\)\)/);
+  assert.match(
+    cliSource,
+    /CLI_PROFILES\.filter\(\(profile\) => !this\.disabledCliIds\.has\(profile\.id\)\)/
+  );
   assert.doesNotMatch(
     extensionSource,
     /resolveApiProviderRuntime|readApiProviderSettings|readOpenCodeConfig/
@@ -421,6 +416,20 @@ test('activation runs local OpenCode cleanup without API runtime injection', () 
     /OpenCodeConfigSync|sendApiProviderSettings|saveApiProviderSettings/
   );
   assert.doesNotMatch(syncedStateSource, /openCodeNativePassthroughCleanup/);
+});
+
+test('OpenCode cleanup delegates ownership to the dedicated recoverable lock module', () => {
+  assert.match(
+    openCodeConfigCleanupSource,
+    /import\s*\{[\s\S]*\bacquireOpenCodeCleanupLock\b[\s\S]*\}\s*from '\.\/openCodeCleanupLock';/
+  );
+  assert.match(openCodeConfigCleanupSource, /\bOpenCodeCleanupLockOptions\b/);
+  assert.match(
+    openCodeConfigCleanupSource,
+    /acquireOpenCodeCleanupLock\(\s*lockPath,\s*\{[\s\S]*retryAttempts:\s*this\.lockRetryAttempts,[\s\S]*retryDelayMs:\s*this\.lockRetryDelayMs,[\s\S]*\.\.\.this\.lockOptions,/s
+  );
+  assert.doesNotMatch(openCodeConfigCleanupSource, /private\s+async\s+acquireLock\s*\(/);
+  assert.doesNotMatch(openCodeConfigCleanupSource, /handle\.writeFile\(`\$\{process\.pid\}\\n`/);
 });
 
 test('SCM text generation launches only the selected native CLI without policy injection', () => {

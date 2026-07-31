@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { acquireOpenCodeCleanupLock, type OpenCodeCleanupLockOptions } from './openCodeCleanupLock';
 import { resolveOpenCodePaths, type OpenCodePathOptions } from './openCodePaths';
 
 const SYNC_MARKER = '__agents_gui_synced';
@@ -19,6 +20,7 @@ export interface OpenCodeConfigCleanupOptions extends OpenCodePathOptions {
   beforeCommit?: () => void | Promise<void>;
   lockRetryAttempts?: number;
   lockRetryDelayMs?: number;
+  lockOptions?: OpenCodeCleanupLockOptions;
 }
 
 export type OpenCodeCleanupResult = {
@@ -39,6 +41,7 @@ export class OpenCodeConfigCleanupMigration {
   private readonly beforeCommit?: () => void | Promise<void>;
   private readonly lockRetryAttempts: number;
   private readonly lockRetryDelayMs: number;
+  private readonly lockOptions?: OpenCodeCleanupLockOptions;
 
   constructor(options: OpenCodeConfigCleanupOptions = {}) {
     this.configPath = options.configPath ?? resolveOpenCodePaths(options).configPath;
@@ -52,6 +55,7 @@ export class OpenCodeConfigCleanupMigration {
       options.lockRetryDelayMs,
       DEFAULT_LOCK_RETRY_DELAY_MS
     );
+    this.lockOptions = options.lockOptions;
   }
 
   async cleanup(): Promise<OpenCodeCleanupResult> {
@@ -61,7 +65,11 @@ export class OpenCodeConfigCleanupMigration {
     }
 
     const lockPath = `${this.configPath}${LOCK_SUFFIX}`;
-    const lockHandle = await this.acquireLock(lockPath);
+    const lock = await acquireOpenCodeCleanupLock(lockPath, {
+      retryAttempts: this.lockRetryAttempts,
+      retryDelayMs: this.lockRetryDelayMs,
+      ...this.lockOptions,
+    });
     let tempPath: string | undefined;
     try {
       const original = await this.readConfigSnapshot();
@@ -93,37 +101,8 @@ export class OpenCodeConfigCleanupMigration {
       if (tempPath) {
         await unlinkIfPresent(tempPath);
       }
-      await releaseLock(lockHandle, lockPath);
+      await lock.release();
     }
-  }
-
-  private async acquireLock(lockPath: string) {
-    for (let attempt = 1; attempt <= this.lockRetryAttempts; attempt += 1) {
-      try {
-        const handle = await fs.promises.open(lockPath, 'wx', 0o600);
-        try {
-          await handle.writeFile(`${process.pid}\n`, 'utf8');
-          await handle.sync();
-          return handle;
-        } catch (error) {
-          await handle.close().catch(() => undefined);
-          await unlinkIfPresent(lockPath);
-          throw error;
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-          throw error;
-        }
-        if (attempt === this.lockRetryAttempts) {
-          throw new Error(
-            `OpenCode config cleanup lock is still busy after ${this.lockRetryAttempts} attempts: ${lockPath}`
-          );
-        }
-        await delay(this.lockRetryDelayMs);
-      }
-    }
-
-    throw new Error(`Unable to acquire OpenCode config cleanup lock: ${lockPath}`);
   }
 
   private async readConfigSnapshot(): Promise<ConfigSnapshot | undefined> {
@@ -389,14 +368,6 @@ async function openExclusiveOrUndefined(filePath: string, mode: number) {
   }
 }
 
-async function releaseLock(
-  handle: Awaited<ReturnType<typeof fs.promises.open>>,
-  lockPath: string
-): Promise<void> {
-  await handle.close().catch(() => undefined);
-  await unlinkIfPresent(lockPath);
-}
-
 async function unlinkIfPresent(filePath: string): Promise<void> {
   try {
     await fs.promises.unlink(filePath);
@@ -405,10 +376,6 @@ async function unlinkIfPresent(filePath: string): Promise<void> {
       throw error;
     }
   }
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {

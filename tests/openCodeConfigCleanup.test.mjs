@@ -10,6 +10,7 @@ import {
   runOpenCodeCleanupOnce,
   syncOpenCodeConfigDirectory,
 } from '../.test-dist/openCodeConfigCleanup.js';
+import { acquireOpenCodeCleanupLock } from '../.test-dist/openCodeCleanupLock.js';
 
 function fixture(config) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-native-cleanup-'));
@@ -25,7 +26,29 @@ function readJson(file) {
 function migrationArtifacts(dir) {
   return fs
     .readdirSync(dir)
-    .filter((name) => name.includes('native-cli-tmp') || name.endsWith('native-cli.lock'));
+    .filter((name) => name.includes('native-cli-tmp') || name.includes('native-cli.lock'));
+}
+
+function cleanupLockOptions(processLiveness, overrides = {}) {
+  return {
+    pid: 9001,
+    hostname: 'cleanup-test-host',
+    tokenFactory: () => 'recovered-cleanup-owner',
+    now: () => 1_000_000,
+    processLiveness,
+    retryAttempts: 1,
+    retryDelayMs: 0,
+    ...overrides,
+  };
+}
+
+function structuredLockOwner({
+  pid = 4321,
+  hostname = 'cleanup-test-host',
+  token = 'abandoned-owner',
+  createdAt = 1_000,
+} = {}) {
+  return `${JSON.stringify({ version: 1, pid, hostname, token, createdAt })}\n`;
 }
 
 test('cleanup removes only exactly tagged providers and their selected model', async () => {
@@ -165,7 +188,11 @@ test('runOpenCodeCleanupOnce records success locally and retries failures', asyn
     update: async (key, value) => failingValues.set(key, value),
   };
   await assert.rejects(
-    runOpenCodeCleanupOnce(failingState, { cleanup: async () => { throw new Error('backup failed'); } }),
+    runOpenCodeCleanupOnce(failingState, {
+      cleanup: async () => {
+        throw new Error('backup failed');
+      },
+    }),
     /backup failed/
   );
   assert.equal(failingValues.has(OPENCODE_NATIVE_PASSTHROUGH_CLEANUP_KEY), false);
@@ -182,8 +209,7 @@ test('cleanup commits through a same-directory temp while preserving bytes, mode
   fs.chmodSync(configPath, 0o640);
   const original = fs.readFileSync(configPath);
   const now = () => new Date('2026-07-30T00:00:00.000Z');
-  const collidingBackup =
-    `${configPath}.agents-gui-native-cli-bak-2026-07-30T00-00-00-000Z`;
+  const collidingBackup = `${configPath}.agents-gui-native-cli-bak-2026-07-30T00-00-00-000Z`;
   fs.writeFileSync(collidingBackup, 'do not overwrite this backup');
   let inspectedBeforeCommit = false;
 
@@ -193,10 +219,7 @@ test('cleanup commits through a same-directory temp while preserving bytes, mode
     beforeCommit: async () => {
       inspectedBeforeCommit = true;
       assert.deepEqual(fs.readFileSync(configPath), original);
-      assert.equal(
-        fs.readdirSync(dir).filter((name) => name.includes('native-cli-tmp')).length,
-        1
-      );
+      assert.equal(fs.readdirSync(dir).filter((name) => name.includes('native-cli-tmp')).length, 1);
     },
   }).cleanup();
 
@@ -258,26 +281,124 @@ test('concurrent cleanup calls serialize and create exactly one backup', async (
   assert.deepEqual(migrationArtifacts(dir), []);
 });
 
-test('cleanup fails with an actionable error when its same-directory lock stays busy', async () => {
+test('cleanup recovers a dead directory owner and leaves no lock artifacts', async () => {
   const { dir, configPath } = fixture({
+    model: 'agents_gui_mimo/model',
     provider: {
       agents_gui_mimo: { __agents_gui_synced: true },
+      marker_string: { __agents_gui_synced: 'true' },
+      user_provider: { name: 'User provider' },
     },
   });
+  fs.chmodSync(configPath, 0o640);
   const lockPath = `${configPath}.agents-gui-native-cli.lock`;
-  fs.writeFileSync(lockPath, 'another migration owns this lock');
+  const abandoned = await acquireOpenCodeCleanupLock(lockPath, {
+    ...cleanupLockOptions(() => 'alive'),
+    pid: 4321,
+    tokenFactory: () => 'abandoned-directory-owner',
+  });
 
-  await assert.rejects(
-    new OpenCodeConfigCleanupMigration({
+  try {
+    const result = await new OpenCodeConfigCleanupMigration({
       configPath,
-      lockRetryDelayMs: 1,
-      lockRetryAttempts: 2,
-    }).cleanup(),
-    /OpenCode config cleanup lock.*busy|timed out.*OpenCode config/i
-  );
+      lockOptions: cleanupLockOptions((pid) => {
+        assert.equal(pid, 4321);
+        return 'dead';
+      }),
+    }).cleanup();
+    const config = readJson(configPath);
 
-  assert.equal(readJson(configPath).provider.agents_gui_mimo.__agents_gui_synced, true);
-  assert.deepEqual(migrationArtifacts(dir), [path.basename(lockPath)]);
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.removedProviderKeys, ['agents_gui_mimo']);
+    assert.equal(result.removedTopLevelModel, true);
+    assert.ok(result.backupPath);
+    assert.equal(config.model, undefined);
+    assert.equal(config.provider.agents_gui_mimo, undefined);
+    assert.equal(config.provider.marker_string.__agents_gui_synced, 'true');
+    assert.equal(config.provider.user_provider.name, 'User provider');
+    assert.equal(fs.readdirSync(dir).filter((entry) => entry.includes('native-cli-bak')).length, 1);
+    assert.equal(fs.statSync(configPath).mode & 0o777, 0o640);
+    assert.equal(fs.statSync(result.backupPath).mode & 0o777, 0o640);
+    assert.deepEqual(migrationArtifacts(dir), []);
+  } finally {
+    await abandoned.release();
+  }
+});
+
+test('cleanup fences dead legacy files as immutable poison pills and removes their v2 sidecars', async () => {
+  for (const [name, owner] of [
+    ['pid-only', '4321\n'],
+    ['structured', structuredLockOwner()],
+  ]) {
+    const { dir, configPath } = fixture({
+      model: 'agents_gui_mimo/model',
+      provider: {
+        agents_gui_mimo: { __agents_gui_synced: true },
+        marker_string: { __agents_gui_synced: 'true' },
+        user_provider: { name: 'User provider' },
+      },
+    });
+    fs.chmodSync(configPath, 0o640);
+    const lockPath = `${configPath}.agents-gui-native-cli.lock`;
+    fs.writeFileSync(lockPath, owner, { mode: 0o600 });
+    const poisonBytes = fs.readFileSync(lockPath);
+    const poisonStat = fs.lstatSync(lockPath, { bigint: true });
+
+    const result = await new OpenCodeConfigCleanupMigration({
+      configPath,
+      lockOptions: cleanupLockOptions((pid) => {
+        assert.equal(pid, 4321);
+        return 'dead';
+      }),
+    }).cleanup();
+    const config = readJson(configPath);
+    const poisonAfter = fs.lstatSync(lockPath, { bigint: true });
+
+    assert.equal(result.changed, true, `${name} poison should be fenced`);
+    assert.deepEqual(result.removedProviderKeys, ['agents_gui_mimo']);
+    assert.equal(result.removedTopLevelModel, true);
+    assert.ok(result.backupPath);
+    assert.equal(config.model, undefined);
+    assert.equal(config.provider.agents_gui_mimo, undefined);
+    assert.equal(config.provider.marker_string.__agents_gui_synced, 'true');
+    assert.equal(config.provider.user_provider.name, 'User provider');
+    assert.equal(fs.readdirSync(dir).filter((entry) => entry.includes('native-cli-bak')).length, 1);
+    assert.equal(fs.statSync(configPath).mode & 0o777, 0o640);
+    assert.equal(fs.statSync(result.backupPath).mode & 0o777, 0o640);
+    assert.deepEqual(fs.readFileSync(lockPath), poisonBytes);
+    assert.equal(poisonAfter.dev, poisonStat.dev);
+    assert.equal(poisonAfter.ino, poisonStat.ino);
+    assert.deepEqual(migrationArtifacts(dir), [path.basename(lockPath)]);
+    assert.equal(fs.existsSync(`${lockPath}.v2`), false);
+  }
+});
+
+test('cleanup fails with an actionable error when its same-directory lock stays busy', async () => {
+  for (const [name, processLiveness] of [
+    ['live', () => 'alive'],
+    ['unknown', () => 'unknown'],
+  ]) {
+    const { dir, configPath } = fixture({
+      provider: {
+        agents_gui_mimo: { __agents_gui_synced: true },
+      },
+    });
+    const lockPath = `${configPath}.agents-gui-native-cli.lock`;
+    fs.writeFileSync(lockPath, structuredLockOwner(), { mode: 0o600 });
+
+    await assert.rejects(
+      new OpenCodeConfigCleanupMigration({
+        configPath,
+        lockOptions: cleanupLockOptions(processLiveness),
+      }).cleanup(),
+      /OpenCode config cleanup lock.*busy|timed out.*OpenCode config/i,
+      `${name} owners must fail closed`
+    );
+
+    assert.equal(readJson(configPath).provider.agents_gui_mimo.__agents_gui_synced, true);
+    assert.equal(fs.readdirSync(dir).filter((entry) => entry.includes('native-cli-bak')).length, 0);
+    assert.deepEqual(migrationArtifacts(dir), [path.basename(lockPath)]);
+  }
 });
 
 test('activation gate disables only OpenCode for the window when cleanup fails', async () => {
@@ -321,6 +442,76 @@ test('activation gate disables only OpenCode for the window when cleanup fails',
     }
   );
   assert.deepEqual([...successful], []);
+});
+
+test('activation keeps OpenCode enabled after dead-lock recovery and isolates live or unknown owners', async () => {
+  {
+    const { configPath } = fixture({
+      provider: { agents_gui_mimo: { __agents_gui_synced: true } },
+    });
+    const lockPath = `${configPath}.agents-gui-native-cli.lock`;
+    const abandoned = await acquireOpenCodeCleanupLock(lockPath, {
+      ...cleanupLockOptions(() => 'alive'),
+      pid: 4321,
+      tokenFactory: () => 'abandoned-activation-owner',
+    });
+    const values = new Map();
+    try {
+      const disabled = await runOpenCodeCleanupActivationGate(
+        {
+          get: (key) => values.get(key),
+          update: async (key, value) => values.set(key, value),
+        },
+        new OpenCodeConfigCleanupMigration({
+          configPath,
+          lockOptions: cleanupLockOptions(() => 'dead'),
+        }),
+        async () => {
+          throw new Error('dead-lock recovery must not report an activation failure');
+        }
+      );
+
+      assert.deepEqual([...disabled], []);
+      assert.equal(values.get(OPENCODE_NATIVE_PASSTHROUGH_CLEANUP_KEY), true);
+      assert.equal(readJson(configPath).provider.agents_gui_mimo, undefined);
+    } finally {
+      await abandoned.release();
+    }
+  }
+
+  for (const [name, processLiveness] of [
+    ['live', () => 'alive'],
+    ['unknown', () => 'unknown'],
+  ]) {
+    const { configPath } = fixture({
+      provider: { agents_gui_mimo: { __agents_gui_synced: true } },
+    });
+    const lockPath = `${configPath}.agents-gui-native-cli.lock`;
+    fs.writeFileSync(lockPath, structuredLockOwner(), { mode: 0o600 });
+    const reported = [];
+    const disabled = await runOpenCodeCleanupActivationGate(
+      {
+        get() {
+          return undefined;
+        },
+        async update() {
+          throw new Error('failed cleanup must not be recorded');
+        },
+      },
+      new OpenCodeConfigCleanupMigration({
+        configPath,
+        lockOptions: cleanupLockOptions(processLiveness),
+      }),
+      async (error) => reported.push(error)
+    );
+
+    assert.deepEqual([...disabled], ['opencode'], `${name} owner disables only OpenCode`);
+    assert.equal(disabled.has('codex'), false);
+    assert.equal(disabled.has('claude'), false);
+    assert.equal(reported.length, 1);
+    assert.match(reported[0].message, /lock.*busy/i);
+    assert.equal(readJson(configPath).provider.agents_gui_mimo.__agents_gui_synced, true);
+  }
 });
 
 test('directory fsync tolerates only unsupported Windows directory-handle errors', async () => {
