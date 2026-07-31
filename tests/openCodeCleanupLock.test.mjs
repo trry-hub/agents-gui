@@ -11,6 +11,11 @@ import {
   probeProcessLiveness,
 } from '../.test-dist/openCodeCleanupLock.js';
 
+const cleanupLockSource = fs.readFileSync(
+  new URL('../src/openCodeCleanupLock.ts', import.meta.url),
+  'utf8'
+);
+
 function lockFixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-gui-cleanup-lock-'));
   const lockPath = path.join(directory, 'opencode.json.agents-gui-native-cli.lock');
@@ -259,13 +264,89 @@ test('a same-host structured dead owner is quarantined and replaced', async (t) 
   try {
     assert.deepEqual(observedPids, [4321]);
     assert.equal(JSON.parse(fs.readFileSync(lockPath, 'utf8')).token, 'new-owner');
-    assert.equal(path.dirname(quarantinePath), directory);
+    assert.equal(path.dirname(path.dirname(quarantinePath)), directory);
+    assert.equal(path.basename(path.dirname(quarantinePath)).includes('quarantine'), true);
     assert.equal(path.basename(quarantinePath).includes('existing-owner'), false);
     assert.equal(path.basename(quarantinePath).includes('test-host'), false);
     assert.deepEqual(quarantineArtifacts(directory), []);
   } finally {
     await lock.release();
   }
+});
+
+test('quarantine allocation uses an atomic private directory rather than a racy sibling target', async (t) => {
+  const { directory, lockPath } = lockFixture(t);
+  fs.writeFileSync(lockPath, structuredOwnerBytes(), { mode: 0o600 });
+  const collisionBytes = Buffer.from('must-not-be-overwritten');
+  const originalLstat = fs.promises.lstat.bind(fs.promises);
+  let siblingCollisionInjected = false;
+
+  t.mock.method(fs.promises, 'lstat', async (target, ...rest) => {
+    const targetPath = String(target);
+    if (
+      !siblingCollisionInjected &&
+      path.dirname(targetPath) === directory &&
+      path.basename(targetPath).includes('quarantine')
+    ) {
+      siblingCollisionInjected = true;
+      fs.writeFileSync(targetPath, collisionBytes, { mode: 0o600 });
+      throw Object.assign(new Error('simulated stale ENOENT result'), { code: 'ENOENT' });
+    }
+    return originalLstat(target, ...rest);
+  });
+
+  const lock = await acquireOpenCodeCleanupLock(
+    lockPath,
+    acquisitionOptions({ processLiveness: () => 'dead' })
+  );
+  try {
+    assert.equal(
+      siblingCollisionInjected,
+      false,
+      'allocation must not perform lstat-then-rename against a shared sibling path'
+    );
+  } finally {
+    await lock.release();
+  }
+});
+
+test('verified quarantine cleanup cannot unlink a path entry replaced after verification', async (t) => {
+  const { lockPath } = lockFixture(t);
+  fs.writeFileSync(lockPath, structuredOwnerBytes(), { mode: 0o600 });
+  const replacementBytes = Buffer.from('replacement quarantine evidence');
+  const originalUnlink = fs.promises.unlink.bind(fs.promises);
+  let quarantineUnlinkInjected = false;
+
+  t.mock.method(fs.promises, 'unlink', async (target) => {
+    const targetPath = String(target);
+    if (!quarantineUnlinkInjected && targetPath.includes('quarantine')) {
+      quarantineUnlinkInjected = true;
+      const parked = `${targetPath}.verified-owner`;
+      fs.renameSync(targetPath, parked);
+      fs.writeFileSync(targetPath, replacementBytes, { mode: 0o600 });
+    }
+    return originalUnlink(target);
+  });
+
+  const lock = await acquireOpenCodeCleanupLock(
+    lockPath,
+    acquisitionOptions({ processLiveness: () => 'dead' })
+  );
+  try {
+    assert.equal(
+      quarantineUnlinkInjected,
+      false,
+      'verified quarantine entries must be removed through their private namespace'
+    );
+  } finally {
+    await lock.release();
+  }
+});
+
+test('lock identity uses bigint file metadata for acquisition and release decisions', () => {
+  assert.match(cleanupLockSource, /\.stat\(\{\s*bigint:\s*true\s*\}\)/);
+  assert.match(cleanupLockSource, /\.lstat\([^,\n]+,\s*\{\s*bigint:\s*true\s*\}\)/);
+  assert.match(cleanupLockSource, /\bfs\.BigIntStats\b/);
 });
 
 test('same-host unknown structured and legacy owners are never removed', async (t) => {
@@ -343,8 +424,7 @@ test('fresh empty and malformed locks remain protected before the exact grace bo
         lockPath,
         acquisitionOptions({
           tokenFactory: () => `${name}-contender`,
-          now: () =>
-            Math.floor(beforeStat.mtimeMs) + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS - 1,
+          now: () => Math.floor(beforeStat.mtimeMs) + OPEN_CODE_CLEANUP_MALFORMED_GRACE_MS - 1,
           retryAttempts: 2,
         })
       ),
@@ -539,6 +619,30 @@ test('release cannot unlink a replacement introduced after its final path check'
   assert.equal(injected, false, 'release must unlink only a verified quarantine path');
   assert.equal(fs.existsSync(lockPath), false);
   assert.equal(fs.existsSync(displacedPath), false);
+});
+
+test('release remains retryable after a transient quarantine rename failure', async (t) => {
+  const { directory, lockPath } = lockFixture(t);
+  const lock = await acquireOpenCodeCleanupLock(lockPath, acquisitionOptions());
+  const originalRename = fs.promises.rename.bind(fs.promises);
+  let renameCalls = 0;
+  t.mock.method(fs.promises, 'rename', async (source, destination) => {
+    if (source === lockPath) {
+      renameCalls += 1;
+      if (renameCalls === 1) {
+        throw Object.assign(new Error('transient antivirus lock'), { code: 'EACCES' });
+      }
+    }
+    return originalRename(source, destination);
+  });
+
+  await assert.rejects(lock.release(), /antivirus|EACCES/i);
+  assert.equal(fs.existsSync(lockPath), true);
+  assert.deepEqual(quarantineArtifacts(directory), []);
+  await lock.release();
+  assert.equal(renameCalls, 2);
+  assert.equal(fs.existsSync(lockPath), false);
+  assert.deepEqual(quarantineArtifacts(directory), []);
 });
 
 test('a quarantine mismatch restores a moved replacement without overwriting', async (t) => {

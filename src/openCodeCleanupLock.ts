@@ -30,7 +30,6 @@ const MAX_HOSTNAME_LENGTH = 255;
 const MAX_TOKEN_LENGTH = 256;
 const DEFAULT_RETRY_ATTEMPTS = 80;
 const DEFAULT_RETRY_DELAY_MS = 25;
-const MAX_QUARANTINE_COLLISION_ATTEMPTS = 100;
 
 interface StructuredLockOwner {
   readonly kind: 'structured';
@@ -53,9 +52,15 @@ type LockOwner = StructuredLockOwner | LegacyLockOwner | MalformedLockOwner;
 
 interface LockSnapshot {
   readonly bytes: Buffer;
-  readonly stat: fs.Stats;
+  readonly stat: fs.BigIntStats;
   readonly owner: LockOwner;
   readonly oversized: boolean;
+}
+
+interface QuarantineLocation {
+  readonly directory: string;
+  readonly entryPath: string;
+  readonly directoryStat: fs.BigIntStats;
 }
 
 interface NormalizedLockOptions {
@@ -198,9 +203,9 @@ async function tryCreateOwner(
   ownerBytes: Buffer
 ): Promise<LockSnapshot> {
   const handle = await fs.promises.open(lockPath, 'wx', 0o600);
-  let provisionalStat: fs.Stats;
+  let provisionalStat: fs.BigIntStats;
   try {
-    provisionalStat = await handle.stat();
+    provisionalStat = await handle.stat({ bigint: true });
   } catch (error) {
     await handle.close().catch(() => undefined);
     throw error;
@@ -232,7 +237,10 @@ async function tryCreateOwner(
   return verified;
 }
 
-async function discardProvisionalOwner(lockPath: string, provisionalStat: fs.Stats): Promise<void> {
+async function discardProvisionalOwner(
+  lockPath: string,
+  provisionalStat: fs.BigIntStats
+): Promise<void> {
   const snapshot = await readLockSnapshot(lockPath).catch(() => undefined);
   if (!snapshot || !sameFileIdentity(snapshot.stat, provisionalStat)) {
     return;
@@ -267,7 +275,7 @@ async function recoverExistingOwner(
   }
 
   const currentTime = readSafeTime(options.now);
-  if (currentTime - first.stat.mtimeMs < options.malformedGraceMs) {
+  if (BigInt(currentTime) - first.stat.mtimeMs < BigInt(options.malformedGraceMs)) {
     return false;
   }
 
@@ -339,7 +347,7 @@ async function readLockSnapshot(lockPath: string): Promise<LockSnapshot | undefi
 
   let snapshot: LockSnapshot | undefined;
   try {
-    const statBefore = await handle.stat();
+    const statBefore = await handle.stat({ bigint: true });
     if (!statBefore.isFile()) {
       return undefined;
     }
@@ -354,12 +362,13 @@ async function readLockSnapshot(lockPath: string): Promise<LockSnapshot | undefi
       bytesRead += result.bytesRead;
     }
 
-    const statAfter = await handle.stat();
+    const statAfter = await handle.stat({ bigint: true });
     if (!sameSnapshotStat(statBefore, statAfter)) {
       return undefined;
     }
     const bytes = buffer.subarray(0, bytesRead);
-    const oversized = statAfter.size > MAX_LOCK_RECORD_BYTES || bytesRead > MAX_LOCK_RECORD_BYTES;
+    const oversized =
+      statAfter.size > BigInt(MAX_LOCK_RECORD_BYTES) || bytesRead > MAX_LOCK_RECORD_BYTES;
     snapshot = {
       bytes,
       stat: statAfter,
@@ -373,9 +382,9 @@ async function readLockSnapshot(lockPath: string): Promise<LockSnapshot | undefi
   if (!snapshot) {
     return undefined;
   }
-  let pathStat: fs.Stats;
+  let pathStat: fs.BigIntStats;
   try {
-    pathStat = await fs.promises.lstat(lockPath);
+    pathStat = await fs.promises.lstat(lockPath, { bigint: true });
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) {
       return undefined;
@@ -398,67 +407,71 @@ async function retireExpectedPath(
     return 'changed';
   }
 
-  const quarantinePath = await nextQuarantinePath(lockPath, now);
+  const quarantine = await createPrivateQuarantine(lockPath, now);
   try {
-    await fs.promises.rename(lockPath, quarantinePath);
+    await fs.promises.rename(lockPath, quarantine.entryPath);
   } catch (error) {
+    await removeEmptyPrivateQuarantine(quarantine);
     if (hasErrorCode(error, 'ENOENT')) {
       return 'changed';
     }
     throw error;
   }
 
-  const moved = await readLockSnapshot(quarantinePath);
+  const moved = await readLockSnapshot(quarantine.entryPath);
   if (moved && sameMovedSnapshot(moved, expected)) {
-    await unlinkIfPresent(quarantinePath);
+    await removePrivateQuarantine(quarantine, moved, lockPath);
     return 'retired';
   }
 
-  await restoreQuarantineWithoutOverwrite(quarantinePath, lockPath, moved);
+  await restoreQuarantineWithoutOverwrite(quarantine, lockPath, moved);
   return 'changed';
 }
 
-async function nextQuarantinePath(lockPath: string, now: () => number): Promise<string> {
+async function createPrivateQuarantine(
+  lockPath: string,
+  now: () => number
+): Promise<QuarantineLocation> {
   const directory = path.dirname(lockPath);
   const basename = path.basename(lockPath);
   const timestamp = readSafeTime(now);
-
-  for (let attempt = 0; attempt < MAX_QUARANTINE_COLLISION_ATTEMPTS; attempt += 1) {
-    const nonce = randomUUID().replace(/[^a-zA-Z0-9-]/g, '');
-    const candidate = path.join(
-      directory,
-      `${basename}.quarantine-${process.pid}-${timestamp}-${nonce}-${attempt}`
-    );
-    try {
-      await fs.promises.lstat(candidate);
-    } catch (error) {
-      if (hasErrorCode(error, 'ENOENT')) {
-        return candidate;
-      }
-      throw error;
+  const quarantineDirectory = await fs.promises.mkdtemp(
+    path.join(directory, `${basename}.quarantine-${process.pid}-${timestamp}-`)
+  );
+  try {
+    await fs.promises.chmod(quarantineDirectory, 0o700);
+    const directoryStat = await fs.promises.stat(quarantineDirectory, { bigint: true });
+    if (!directoryStat.isDirectory()) {
+      throw new Error(`OpenCode cleanup lock quarantine is not a directory: ${lockPath}`);
     }
+    return {
+      directory: quarantineDirectory,
+      entryPath: path.join(quarantineDirectory, 'owner.lock'),
+      directoryStat,
+    };
+  } catch (error) {
+    await fs.promises.rmdir(quarantineDirectory).catch(() => undefined);
+    throw error;
   }
-
-  throw new Error(`Unable to allocate an OpenCode cleanup lock quarantine path: ${lockPath}`);
 }
 
 async function restoreQuarantineWithoutOverwrite(
-  quarantinePath: string,
+  quarantine: QuarantineLocation,
   lockPath: string,
   moved: LockSnapshot | undefined
 ): Promise<void> {
   if (!moved || moved.oversized) {
-    throw retainedEvidenceError(lockPath, quarantinePath);
+    throw retainedEvidenceError(lockPath, quarantine.entryPath);
   }
 
   try {
-    await fs.promises.link(quarantinePath, lockPath);
+    await fs.promises.link(quarantine.entryPath, lockPath);
   } catch (error) {
-    throw retainedEvidenceError(lockPath, quarantinePath, error);
+    throw retainedEvidenceError(lockPath, quarantine.entryPath, error);
   }
 
   const [quarantineNow, restoredNow] = await Promise.all([
-    readLockSnapshot(quarantinePath),
+    readLockSnapshot(quarantine.entryPath),
     readLockSnapshot(lockPath),
   ]);
   if (
@@ -468,13 +481,62 @@ async function restoreQuarantineWithoutOverwrite(
     !sameMovedSnapshot(restoredNow, moved) ||
     !sameFileIdentity(quarantineNow.stat, restoredNow.stat)
   ) {
-    throw retainedEvidenceError(lockPath, quarantinePath);
+    throw retainedEvidenceError(lockPath, quarantine.entryPath);
+  }
+
+  await removePrivateQuarantine(quarantine, moved, lockPath);
+}
+
+async function removeEmptyPrivateQuarantine(quarantine: QuarantineLocation): Promise<void> {
+  const current = await fs.promises.stat(quarantine.directory, { bigint: true }).catch((error) => {
+    if (hasErrorCode(error, 'ENOENT')) {
+      return undefined;
+    }
+    throw error;
+  });
+  if (!current) {
+    return;
+  }
+  if (!current.isDirectory() || !sameFileIdentity(current, quarantine.directoryStat)) {
+    throw new Error(`OpenCode cleanup lock quarantine identity changed: ${quarantine.directory}`);
+  }
+
+  const entries = await fs.promises.readdir(quarantine.directory);
+  if (entries.length !== 0) {
+    throw new Error(
+      `OpenCode cleanup lock quarantine is unexpectedly non-empty: ${quarantine.directory}`
+    );
+  }
+  await fs.promises.rmdir(quarantine.directory);
+}
+
+async function removePrivateQuarantine(
+  quarantine: QuarantineLocation,
+  expectedEntry: LockSnapshot,
+  lockPath: string
+): Promise<void> {
+  const [directoryStat, entry, entries] = await Promise.all([
+    fs.promises.stat(quarantine.directory, { bigint: true }),
+    readLockSnapshot(quarantine.entryPath),
+    fs.promises.readdir(quarantine.directory),
+  ]).catch((error) => {
+    throw retainedEvidenceError(lockPath, quarantine.entryPath, error);
+  });
+  if (
+    !directoryStat.isDirectory() ||
+    !sameFileIdentity(directoryStat, quarantine.directoryStat) ||
+    entries.length !== 1 ||
+    entries[0] !== path.basename(quarantine.entryPath) ||
+    !entry ||
+    !sameMovedSnapshot(entry, expectedEntry)
+  ) {
+    throw retainedEvidenceError(lockPath, quarantine.entryPath);
   }
 
   try {
-    await fs.promises.unlink(quarantinePath);
+    await fs.promises.rm(quarantine.directory, { recursive: true, force: false });
   } catch (error) {
-    throw retainedEvidenceError(lockPath, quarantinePath, error);
+    throw retainedEvidenceError(lockPath, quarantine.entryPath, error);
   }
 }
 
@@ -500,7 +562,6 @@ function createOwnedLock(
       if (released) {
         return;
       }
-      released = true;
 
       const current = await readLockSnapshot(lockPath);
       if (
@@ -510,9 +571,11 @@ function createOwnedLock(
         current.owner.token !== token ||
         !sameStrictSnapshot(current, verified)
       ) {
+        released = true;
         return;
       }
-      await retireExpectedPath(lockPath, current, now);
+      const retired = await retireExpectedPath(lockPath, current, now);
+      released = retired === 'retired' || retired === 'changed';
     },
   };
 }
@@ -548,11 +611,11 @@ function sameMovedSnapshot(left: LockSnapshot, right: LockSnapshot): boolean {
   );
 }
 
-function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+function sameFileIdentity(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-function sameSnapshotStat(left: fs.Stats, right: fs.Stats): boolean {
+function sameSnapshotStat(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
   return (
     sameFileIdentity(left, right) &&
     left.size === right.size &&
@@ -567,16 +630,6 @@ function busyLockError(lockPath: string, attempts: number): Error {
   return new Error(
     `OpenCode config cleanup lock is still busy after ${attempts} attempts: ${lockPath}`
   );
-}
-
-async function unlinkIfPresent(filePath: string): Promise<void> {
-  try {
-    await fs.promises.unlink(filePath);
-  } catch (error) {
-    if (!hasErrorCode(error, 'ENOENT')) {
-      throw error;
-    }
-  }
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
