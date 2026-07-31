@@ -98,10 +98,13 @@ export class OpenCodeConfigCleanupMigration {
         backupPath,
       };
     } finally {
-      if (tempPath) {
-        await unlinkIfPresent(tempPath);
+      try {
+        if (tempPath) {
+          await unlinkIfPresent(tempPath);
+        }
+      } finally {
+        await lock.release();
       }
-      await lock.release();
     }
   }
 

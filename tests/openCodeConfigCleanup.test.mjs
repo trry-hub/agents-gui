@@ -256,6 +256,47 @@ test('cleanup detects an external edit before atomic replacement and never overw
   assert.deepEqual(migrationArtifacts(dir), []);
 });
 
+test('cleanup releases its directory lock when Windows blocks temporary-file removal', async (t) => {
+  const { dir, configPath } = fixture({
+    provider: {
+      agents_gui_mimo: { __agents_gui_synced: true },
+    },
+  });
+  const lockPath = `${configPath}.agents-gui-native-cli.lock`;
+  const originalUnlink = fs.promises.unlink.bind(fs.promises);
+  let tempCleanupAttempts = 0;
+  t.mock.method(fs.promises, 'unlink', async (target, ...rest) => {
+    if (String(target).includes('.agents-gui-native-cli-tmp-')) {
+      tempCleanupAttempts += 1;
+      throw Object.assign(new Error('temporary cleanup blocked by antivirus'), {
+        code: 'EACCES',
+      });
+    }
+    return originalUnlink(target, ...rest);
+  });
+
+  await assert.rejects(
+    new OpenCodeConfigCleanupMigration({
+      configPath,
+      beforeCommit: async () => {
+        throw new Error('stop before replacement');
+      },
+    }).cleanup(),
+    (error) => {
+      assert.equal(error.code, 'EACCES');
+      return true;
+    }
+  );
+
+  assert.equal(tempCleanupAttempts, 1);
+  assert.equal(fs.existsSync(lockPath), false);
+  assert.equal(fs.existsSync(`${lockPath}.v2`), false);
+  assert.equal(
+    migrationArtifacts(dir).filter((entry) => entry.includes('native-cli.lock')).length,
+    0
+  );
+});
+
 test('concurrent cleanup calls serialize and create exactly one backup', async () => {
   const { dir, configPath } = fixture({
     model: 'agents_gui_mimo/model',
